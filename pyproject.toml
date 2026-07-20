@@ -26,5 +26,8 @@ build-backend = "hatchling.build"
 [tool.hatch.build.targets.wheel]
 packages = ["src/drskill"]
 
+[tool.uv]
+dev-dependencies = ["pytest>=8"]
+
 [tool.pytest.ini_options]
 testpaths = ["tests"]
