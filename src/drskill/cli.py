@@ -153,17 +153,14 @@ def ack(
             exact = [f for f in active if f.check_id == check_id and set(f.contributor_names) == wanted]
             superset = [f for f in active if f.check_id == check_id and wanted <= set(f.contributor_names)]
             matches = exact or superset
+            if len(matches) > 1:
+                console.print(f"[red]Ambiguous:[/red] {len(matches)} findings match; name all involved skills")
+                raise typer.Exit(1)
         else:
-            matches = [f for f in active if f.check_id == check_id and not f.contributor_names]
+            # a bare check id acks the whole class of findings
+            matches = [f for f in active if f.check_id == check_id]
         if not matches:
             console.print(f"[red]No active finding matches[/red] {escape(check_id)} {escape(' '.join(skills))}")
-            raise typer.Exit(1)
-        if len(matches) > 1:
-            if wanted:
-                console.print(f"[red]Ambiguous:[/red] {len(matches)} findings match; name all involved skills")
-            else:
-                candidates = "; ".join(escape(m.message.splitlines()[0]) for m in matches)
-                console.print(f"[red]Ambiguous:[/red] {len(matches)} findings match: {candidates}")
             raise typer.Exit(1)
         targets = matches
     elif refs and all(re.fullmatch(r"[0-9a-f]{4,64}", r) for r in refs):

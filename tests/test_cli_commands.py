@@ -206,3 +206,13 @@ def test_ack_unknown_id_errors(tmp_path):
     r = invoke(tmp_path, "ack", "beef")
     assert r.exit_code == 1
     assert "No active finding" in r.output
+
+
+def test_bare_check_id_acks_whole_class(tmp_path):
+    proj = tmp_path / "proj"
+    for n in ["one", "two", "three"]:
+        _mk(proj, n)
+    r = invoke(tmp_path, "ack", "missing-activation")
+    assert r.exit_code == 0
+    assert r.output.count("missing-activation") >= 3
+    assert invoke(tmp_path, "scan", "--ci").exit_code == 0
