@@ -52,3 +52,21 @@ def test_drift_and_missing(tmp_path):
     assert "drifted" in messages and "modified outside" in messages
     assert "ghost" in messages and "not found" in messages
     assert "pinned" not in messages
+
+
+def test_all_mismatch_collapses_to_single_unverifiable_warning(tmp_path):
+    proj, home = tmp_path / "p", tmp_path / "h"
+    home.mkdir()
+    write(proj, "a")
+    write(proj, "b")
+    lock = {
+        "skills": {
+            "a": {"hash": "sha256-totally-wrong-a"},
+            "b": {"hash": "sha256-totally-wrong-b"},
+        }
+    }
+    (proj / "skills-lock.json").write_text(json.dumps(lock))
+    _world, findings = run_scan(proj, home)
+    drift = [f for f in findings if f.check_id == "lockfile-drift"]
+    assert len(drift) == 1
+    assert "cannot reproduce" in drift[0].message

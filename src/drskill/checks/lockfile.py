@@ -66,6 +66,8 @@ def lockfile_drift(world: World, config: Config) -> list[Finding]:
         return []
     by_name = {c.name: c for c in world.contributors.values()}
     out = []
+    matches: list[str] = []
+    mismatches: list[tuple[str, object]] = []
     for name, entry in sorted(world.lockfile.items()):
         expected = _entry_hash(entry)
         c = by_name.get(name)
@@ -84,7 +86,32 @@ def lockfile_drift(world: World, config: Config) -> list[Finding]:
         if expected is None:
             continue
         skill_dir = Path(c.id).parent
-        if compute_tree_hash(skill_dir) != expected:
+        if compute_tree_hash(skill_dir) == expected:
+            matches.append(name)
+        else:
+            mismatches.append((name, c))
+
+    # Self-calibration: if every hashed entry mismatches (and at least one
+    # matched, verifying the algorithm), attribute each mismatch by name. If
+    # NONE match, we can't tell drift from an algorithm mismatch against this
+    # lockfile's producer — collapse to a single "unverifiable" warning
+    # instead of crying wolf on every skill.
+    if mismatches and not matches:
+        out.append(
+            make_finding(
+                "lockfile-drift", "warning", [],
+                "skills-lock.json hashes use an algorithm drskill cannot "
+                "reproduce; hash-drift detection is disabled for this "
+                "lockfile (missing-skill detection still active)",
+                harnesses=sorted(world.harnesses),
+                extra_key="unverifiable",
+                fix_commands=[
+                    "npx skills sync  # reinstall to a known-good state if you suspect drift"
+                ],
+            )
+        )
+    else:
+        for name, c in mismatches:
             out.append(
                 make_finding(
                     "lockfile-drift", "warning", [c],
