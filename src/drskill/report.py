@@ -32,6 +32,8 @@ def _print_finding(world: World, f: Finding, console: Console) -> None:
     if f.contributor_names:
         names = " ".join(shlex.quote(n) for n in f.contributor_names)
         console.print(f"      or:  drskill ack {escape(f.check_id)} {escape(names)}")
+    else:
+        console.print(f"      or:  drskill ack {escape(f.check_id)}")
 
 
 def render(

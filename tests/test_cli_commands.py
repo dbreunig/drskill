@@ -51,6 +51,27 @@ def test_ack_silences_until_content_changes(tmp_path):
     assert invoke(tmp_path, "scan", "--ci").exit_code == 2
 
 
+def test_ack_contributorless_lockfile_finding(tmp_path):
+    import json
+
+    proj = tmp_path / "proj"
+    # distinct bodies so the pair doesn't also trip near-duplicate, which
+    # would keep --ci non-zero for a reason unrelated to this ack
+    write(proj, "a", "Handles alpha things.", "alpha body content here")
+    write(proj, "b", "Handles beta things.", "totally different beta stuff")
+    lock = {
+        "skills": {
+            "a": {"hash": "sha256-totally-wrong-a"},
+            "b": {"hash": "sha256-totally-wrong-b"},
+        }
+    }
+    (proj / "skills-lock.json").write_text(json.dumps(lock))
+    assert invoke(tmp_path, "scan", "--ci").exit_code == 2
+    r = invoke(tmp_path, "ack", "lockfile-drift")
+    assert r.exit_code == 0
+    assert invoke(tmp_path, "scan", "--ci").exit_code == 0
+
+
 def test_ack_no_match_errors(tmp_path):
     proj = tmp_path / "proj"
     write(proj, "solo", "Fine.", "body")

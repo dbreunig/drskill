@@ -68,6 +68,18 @@ def test_to_json_stable():
     assert list(data[0].keys()) == sorted(data[0].keys())
 
 
+def test_ack_hint_for_contributorless_finding_has_no_trailing_names():
+    f = Finding(
+        check_id="lockfile-drift", severity="warning",
+        contributors=[], contributor_names=[],
+        harnesses=["claude-code"], message="'ghost' is in skills-lock.json but not found",
+        fingerprint="sha256:g",
+    )
+    text = render_to_text(world_with(), [f], [])
+    line = next(l for l in text.splitlines() if "drskill ack" in l)
+    assert line.strip() == "or:  drskill ack lockfile-drift"
+
+
 def test_ack_hint_quotes_adversarial_contributor_name():
     f = Finding(
         check_id="near-duplicate", severity="warning",

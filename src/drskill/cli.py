@@ -72,7 +72,9 @@ def scan(
 @app.command()
 def ack(
     check_id: str = typer.Argument(...),
-    skills: list[str] = typer.Argument(...),
+    skills: list[str] = typer.Argument(
+        None, help="skills to acknowledge for; omit for contributor-less findings"
+    ),
     note: str | None = typer.Option(None, "--note"),
     root: Path = typer.Option(Path("."), "--root", hidden=True),
     global_mode: bool = typer.Option(False, "--global"),
@@ -83,15 +85,22 @@ def ack(
     config = _load_config_or_exit(path)
     world, findings = run_scan(root, home, global_mode, config)
     active, _ = ledger.filter_findings(findings, config)
-    wanted = set(skills)
-    exact = [f for f in active if f.check_id == check_id and set(f.contributor_names) == wanted]
-    superset = [f for f in active if f.check_id == check_id and wanted <= set(f.contributor_names)]
-    matches = exact or superset
+    wanted = set(skills or [])
+    if wanted:
+        exact = [f for f in active if f.check_id == check_id and set(f.contributor_names) == wanted]
+        superset = [f for f in active if f.check_id == check_id and wanted <= set(f.contributor_names)]
+        matches = exact or superset
+    else:
+        matches = [f for f in active if f.check_id == check_id and not f.contributor_names]
     if not matches:
-        console.print(f"[red]No active finding matches[/red] {escape(check_id)} {escape(' '.join(skills))}")
+        console.print(f"[red]No active finding matches[/red] {escape(check_id)} {escape(' '.join(skills or []))}")
         raise typer.Exit(1)
     if len(matches) > 1:
-        console.print(f"[red]Ambiguous:[/red] {len(matches)} findings match; name all involved skills")
+        if wanted:
+            console.print(f"[red]Ambiguous:[/red] {len(matches)} findings match; name all involved skills")
+        else:
+            candidates = "; ".join(escape(m.message) for m in matches)
+            console.print(f"[red]Ambiguous:[/red] {len(matches)} findings match: {candidates}")
         raise typer.Exit(1)
     f = matches[0]
     ledger.append_ack(
@@ -99,7 +108,10 @@ def ack(
         Ack(check=check_id, skills=sorted(f.contributor_names),
             fingerprint=f.fingerprint, note=note, date=dt.date.today()),
     )
-    console.print(f"Acknowledged [bold]{escape(check_id)}[/bold] for {escape(', '.join(f.contributor_names))} → {escape(str(path))}")
+    if f.contributor_names:
+        console.print(f"Acknowledged [bold]{escape(check_id)}[/bold] for {escape(', '.join(f.contributor_names))} → {escape(str(path))}")
+    else:
+        console.print(f"Acknowledged [bold]{escape(check_id)}[/bold] → {escape(str(path))}")
 
 
 @app.command("list")
