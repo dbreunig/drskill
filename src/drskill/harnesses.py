@@ -16,7 +16,10 @@ class HarnessDef(BaseModel):
     detect: list[str] = Field(default_factory=list)
     project_paths: list[str] = Field(default_factory=list)
     global_paths: list[str] = Field(default_factory=list)
-    search_order: Literal["project-first", "global-first"] = "project-first"
+    # "none": the harness keeps every same-name copy visible (codex does
+    # this); discovery enumerates in project-first order for determinism and
+    # resolution skips shadow marking entirely.
+    search_order: Literal["project-first", "global-first", "none"] = "project-first"
     recursive: bool = True
     root_md_paths: list[str] = Field(default_factory=list)
 

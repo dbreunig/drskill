@@ -149,6 +149,8 @@ def build_world(
 
 def _mark_shadows(world: World) -> None:
     for hid in world.harnesses:
+        if world.harnesses[hid].search_order == "none":
+            continue  # this harness keeps every same-name copy visible
         first_by_name: dict[str, Contributor] = {}
         for c, d in world.harness_loads(hid):
             prior = first_by_name.get(c.name)

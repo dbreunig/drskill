@@ -176,3 +176,20 @@ def test_gh_provenance_beats_linked(tmp_path):
     world = world_for("pi", proj, home)
     c = next(iter(world.contributors.values()))
     assert c.source.kind == "gh-skill"
+
+
+def test_search_order_none_never_shadows(tmp_path):
+    from drskill.harnesses import HarnessDef
+
+    proj, home = tmp_path / "proj", tmp_path / "home"
+    write_skill(proj / "dir-a", "tool", body="version a")
+    write_skill(proj / "dir-b", "tool", body="version b")
+    h = HarnessDef(
+        id="nonesuch", display_name="Nonesuch", search_order="none",
+        project_paths=["dir-a", "dir-b"], recursive=True,
+    )
+    from drskill.discovery import discover
+
+    instances, broken = discover(h, proj, home)
+    world = build_world(instances, {h.id: h}, broken)
+    assert all(d.shadowed_by is None for c, d in world.harness_loads("nonesuch"))
