@@ -63,3 +63,17 @@ def test_to_json_stable():
     assert data[0]["check_id"] == "double-load"
     assert data[0]["fingerprint"] == "sha256:f"
     assert list(data[0].keys()) == sorted(data[0].keys())
+
+
+def test_render_escapes_rich_markup_in_dynamic_text():
+    f = Finding(
+        check_id="spec-name-mismatch", severity="error",
+        contributors=["/a"], contributor_names=["[red]sneaky[/red]"],
+        harnesses=["claude-code"], message="name '[/weird]' does not match folder",
+        fix_commands=["rename '[bold]x[/bold]'"],
+        fingerprint="sha256:f",
+    )
+    text = render_to_text(world_with(), [f], [])
+    assert "[/weird]" in text
+    assert "[red]sneaky[/red]" in text
+    assert "[bold]x[/bold]" in text

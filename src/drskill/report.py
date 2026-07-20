@@ -3,6 +3,7 @@ from __future__ import annotations
 import json
 
 from rich.console import Console
+from rich.markup import escape
 
 from drskill.models import Finding
 from drskill.resolution import World
@@ -22,14 +23,14 @@ def _print_finding(world: World, f: Finding, console: Console) -> None:
         for hid in f.harnesses
     ):
         tags = " [dim](best effort)[/dim]"
-    console.print(f"  [[bold]{f.check_id}[/bold]] {f.message}{tags}")
+    console.print(f"  [[bold]{escape(f.check_id)}[/bold]] {escape(f.message)}{tags}")
     if f.harnesses:
-        console.print(f"      harnesses: {', '.join(f.harnesses)}")
+        console.print(f"      harnesses: {escape(', '.join(f.harnesses))}")
     for cmd in f.fix_commands:
-        console.print(f"      fix: {cmd}")
+        console.print(f"      fix: {escape(cmd)}")
     if f.contributor_names:
         names = " ".join(f.contributor_names)
-        console.print(f"      or:  drskill ack {f.check_id} {names}")
+        console.print(f"      or:  drskill ack {escape(f.check_id)} {escape(names)}")
 
 
 def render(
