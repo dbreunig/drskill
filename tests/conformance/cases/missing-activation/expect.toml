@@ -1,0 +1,7 @@
+[[expect]]
+check = "missing-activation"
+skills = ["formatter"]
+
+[[forbid]]
+check = "generic-description"
+skills = ["formatter"]

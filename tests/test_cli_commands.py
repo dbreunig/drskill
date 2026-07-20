@@ -33,8 +33,8 @@ def invoke(tmp_path, *args):
 
 def test_ack_silences_until_content_changes(tmp_path):
     proj = tmp_path / "proj"
-    write(proj, "a-writer", "Writes reports.", NEAR_DUP_BODY)
-    write(proj, "b-writer", "Writes updates.", NEAR_DUP_BODY)
+    write(proj, "a-writer", "Use when the user asks for a written report.", NEAR_DUP_BODY)
+    write(proj, "b-writer", "Use when the user asks for a written update.", NEAR_DUP_BODY)
     # repeated-sentence bodies dedupe into few shingles; pin a threshold the
     # pair clears so the test exercises ack mechanics, not tuning
     (proj / "drskill.toml").write_text("[thresholds]\nnear_duplicate = 0.5\n")
@@ -57,8 +57,8 @@ def test_ack_contributorless_lockfile_finding(tmp_path):
     proj = tmp_path / "proj"
     # distinct bodies so the pair doesn't also trip near-duplicate, which
     # would keep --ci non-zero for a reason unrelated to this ack
-    write(proj, "a", "Handles alpha things.", "alpha body content here")
-    write(proj, "b", "Handles beta things.", "totally different beta stuff")
+    write(proj, "a", "Use when the user works with alpha widgets.", "alpha body content here")
+    write(proj, "b", "Use when the user works with beta widgets.", "totally different beta stuff")
     lock = {
         "skills": {
             "a": {"hash": "sha256-totally-wrong-a"},

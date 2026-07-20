@@ -22,6 +22,8 @@ body_tokens_warn = 20000    # per-skill body ceiling (approximate tokens)
 
 [thresholds]
 near_duplicate = 0.85       # Jaccard similarity that counts as a near duplicate
+description_overlap = 0.6   # cosine similarity that clusters descriptions
+generic_min_distinct_tokens = 2  # fewer distinctive words than this is too vague
 """
 
 app = typer.Typer(add_completion=False, help="brew doctor for your agent's skill loadout")

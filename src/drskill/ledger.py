@@ -24,6 +24,8 @@ class Budget(BaseModel):
 
 class Thresholds(BaseModel):
     near_duplicate: float = 0.85
+    description_overlap: float = 0.6
+    generic_min_distinct_tokens: int = 2
 
 
 class Ack(BaseModel):

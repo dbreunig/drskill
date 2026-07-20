@@ -35,7 +35,7 @@ def scan(tmp_path, *args):
 
 def test_clean_exits_zero(tmp_path):
     proj = tmp_path / "proj"
-    write(proj, "clean", "---\nname: clean\ndescription: fine\n---\nb\n")
+    write(proj, "clean", "---\nname: clean\ndescription: Use when the user asks to reformat code.\n---\nb\n")
     r = scan(tmp_path)
     assert r.exit_code == 0
     assert "No findings" in r.output
@@ -108,7 +108,7 @@ def test_unreadable_skill_does_not_crash_scan_and_is_reported(tmp_path):
 
 def test_scan_detailed_appends_tables(tmp_path):
     proj = tmp_path / "proj"
-    write(proj, "clean", "---\nname: clean\ndescription: fine\n---\nb\n")
+    write(proj, "clean", "---\nname: clean\ndescription: Use when the user asks to reformat code.\n---\nb\n")
     r = scan(tmp_path, "--detailed")
     assert r.exit_code == 0
     assert "No findings" in r.output and "clean" in r.output and "Claude Code" in r.output
@@ -117,7 +117,7 @@ def test_scan_detailed_appends_tables(tmp_path):
 def test_scan_json_wins_over_detailed(tmp_path):
     import json
     proj = tmp_path / "proj"
-    write(proj, "clean", "---\nname: clean\ndescription: fine\n---\nb\n")
+    write(proj, "clean", "---\nname: clean\ndescription: Use when the user asks to reformat code.\n---\nb\n")
     r = scan(tmp_path, "--detailed", "--json")
     json.loads(r.output)
 
@@ -145,7 +145,7 @@ def test_scan_scoped_harness_drops_cross_harness_findings(tmp_path):
 
 def test_scan_valid_but_undetected_harness_notes_and_passes(tmp_path):
     proj = tmp_path / "proj"
-    write(proj, "clean", "---\nname: clean\ndescription: fine\n---\nb\n")
+    write(proj, "clean", "---\nname: clean\ndescription: Use when the user asks to reformat code.\n---\nb\n")
     r = scan(tmp_path, "--harness", "qwen-code")
     assert r.exit_code == 0
     assert "not detected" in r.output
@@ -153,7 +153,7 @@ def test_scan_valid_but_undetected_harness_notes_and_passes(tmp_path):
 
 def test_scan_detailed_scoped_shows_harness_table_not_footer(tmp_path):
     proj = tmp_path / "proj"
-    write(proj, "clean", "---\nname: clean\ndescription: fine\n---\nb\n")
+    write(proj, "clean", "---\nname: clean\ndescription: Use when the user asks to reformat code.\n---\nb\n")
     r = scan(tmp_path, "--harness", "qwen-code", "--detailed")
     assert r.exit_code == 0
     assert "Qwen Code" in r.output

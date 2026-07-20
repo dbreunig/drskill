@@ -36,7 +36,7 @@ def test_spec_checks(tmp_path):
     write(proj, "longdesc", f"---\nname: longdesc\ndescription: {'x' * 1100}\n---\nb\n")
     write(proj, "badyaml", "---\n: bad: [yaml\n---\nb\n")
     write(proj, "angle", "---\nname: angle\ndescription: use <this> tool\n---\nb\n")
-    write(proj, "clean", "---\nname: clean\ndescription: fine\n---\nb\n")
+    write(proj, "clean", "---\nname: clean\ndescription: Use when the user asks to reformat prose.\n---\nb\n")
     findings = run_all(world_from(proj, home), Config())
     got = by_check(findings)
     assert [f.contributor_names for f in got["spec-name-mismatch"]] == [["other-name"]]
