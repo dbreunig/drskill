@@ -55,12 +55,29 @@ _IMPERATIVE_DROP = frozenset(
 )
 
 
-def _imperative_phrases(c: Contributor) -> dict[str, list[tuple[str, str]]]:
-    out: dict[str, list[tuple[str, str]]] = {"always": [], "never": []}
+_SNIPPET_MAX = 100
+
+
+def _snippet(body: str, start: int, end: int) -> str:
+    line_start = body.rfind("\n", 0, start) + 1
+    line_end = body.find("\n", end)
+    if line_end == -1:
+        line_end = len(body)
+    line = body[line_start:line_end].strip()
+    if len(line) > _SNIPPET_MAX:
+        line = line[: _SNIPPET_MAX - 1].rstrip() + "…"
+    return line
+
+
+def _imperative_phrases(c: Contributor) -> dict[str, dict[tuple[str, str], str]]:
+    """kind -> {verb+object bigram: snippet of the first line saying it}."""
+    out: dict[str, dict[tuple[str, str], str]] = {"always": {}, "never": {}}
     for m in _IMPERATIVE.finditer(c.body):
         toks = [t for t in text.tokenize(m.group(2)) if t not in _IMPERATIVE_DROP]
         if len(toks) >= 2:
-            out[m.group(1).lower()].append((toks[0], toks[1]))
+            out[m.group(1).lower()].setdefault(
+                (toks[0], toks[1]), _snippet(c.body, m.start(), m.end())
+            )
     return out
 
 
@@ -77,13 +94,18 @@ def opposing_imperatives(world: World, config: Config) -> list[Finding]:
                 if phrase in seen:
                     continue
                 seen.add(phrase)
+                lines = [
+                    f"'{a.name}' and '{b.name}' give opposite orders about "
+                    f"'{phrase}':",
+                    f'        {a.name}: "{phrases[a.id][kind_a][pair]}"',
+                    f'        {b.name}: "{phrases[b.id][kind_b][pair]}"',
+                    "        (exact-match check; paraphrased contradictions are"
+                    " not detected)",
+                ]
                 out.append(
                     make_finding(
                         "opposing-imperatives", "warning", [a, b],
-                        f"'{a.name}' and '{b.name}' give opposite orders about "
-                        f"'{phrase}' (always vs never); an agent loading both gets "
-                        "contradictory instructions (low-recall check: paraphrased "
-                        "contradictions are not detected)",
+                        "\n".join(lines),
                         fix_commands=[
                             "Align the two instructions, or scope each to its own condition"
                         ],

@@ -188,3 +188,27 @@ def test_overlap_excludes_same_name_pairs(tmp_path):
     findings = run_all(world, Config())
     assert by_check(findings, "description-overlap") == []
     assert by_check(findings, "diverged-copies")
+
+
+def test_opposing_imperatives_quotes_both_snippets(tmp_path):
+    proj, home = tmp_path / "p", tmp_path / "h"
+    write(proj, "tabs", "Use when formatting code with tabs.",
+          body="Intro line.\nAlways use tabs for indentation, no exceptions.\nMore text.")
+    write(proj, "spaces", "Use when formatting code with spaces.",
+          body="Never use tabs anywhere in the file, even in Makefiles.")
+    findings = run_all(world_from(proj, home), Config())
+    hit = by_check(findings, "opposing-imperatives")[0]
+    assert 'tabs: "Always use tabs for indentation, no exceptions."' in hit.message
+    assert 'spaces: "Never use tabs anywhere in the file, even in Makefiles."' in hit.message
+
+
+def test_opposing_imperative_snippets_truncate_long_lines(tmp_path):
+    proj, home = tmp_path / "p", tmp_path / "h"
+    long_tail = "with a very long explanation " * 10
+    write(proj, "a", "Use when doing a.", body=f"Always use tabs {long_tail}")
+    write(proj, "b", "Use when doing b.", body="Never use tabs.")
+    findings = run_all(world_from(proj, home), Config())
+    hit = by_check(findings, "opposing-imperatives")[0]
+    snippet_line = next(ln for ln in hit.message.splitlines() if ln.strip().startswith('a: '))
+    assert len(snippet_line) < 140
+    assert "…" in snippet_line
