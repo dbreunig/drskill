@@ -33,15 +33,19 @@ def name_shadow(world: World, config: Config) -> list[Finding]:
 def double_load(world: World, config: Config) -> list[Finding]:
     out = []
     for hid in world.harnesses:
-        by_hash: dict[str, list] = {}
+        # Key by content hash, then by contributor id, so that a single
+        # contributor reached twice through the same real path (e.g. one
+        # search directory symlinked into another) collapses to one entry
+        # instead of looking like two distinct copies.
+        by_hash: dict[str, dict[str, tuple]] = {}
         for c, d in world.harness_loads(hid):
             if d.shadowed_by is None:
-                by_hash.setdefault(c.content_hash, []).append((c, d))
+                by_hash.setdefault(c.content_hash, {}).setdefault(c.id, (c, d))
         for loads in by_hash.values():
             if len(loads) < 2:
                 continue
-            contributors = list({c.id: c for c, _ in loads}.values())
-            paths = ", ".join(str(d.path) for _, d in loads)
+            contributors = [c for c, _ in loads.values()]
+            paths = ", ".join(str(d.path) for _, d in loads.values())
             display = world.harnesses[hid].display_name
             out.append(
                 make_finding(

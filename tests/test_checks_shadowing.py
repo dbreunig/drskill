@@ -40,19 +40,35 @@ def test_name_shadow(tmp_path):
     assert "project" in shadows[0].message  # names the winner's scope
 
 
-def test_double_load_copy_plus_symlink(tmp_path):
+def test_double_load_two_real_copies(tmp_path):
     proj, home = tmp_path / "p", tmp_path / "h"
-    # the gh-skill x npx-skills interaction: a copy in .claude/skills and a
-    # symlink in .agents/skills, both read by pi
-    canonical = write(proj, ".agents/skills", "pdf-tools")
-    d = proj / ".pi" / "skills"
-    d.mkdir(parents=True)
-    os.symlink(canonical, d / "pdf-tools-link")
+    # the gh-skill x npx-skills interaction: two independently materialized
+    # copies with identical content, both read by pi from different search
+    # directories -- two distinct real paths, not one file reached twice.
+    content = "---\nname: pdf-tools\ndescription: d\n---\nbody\n"
+    for rel in [".agents/skills/pdf-tools", ".pi/skills/pdf-tools"]:
+        d = proj / rel
+        d.mkdir(parents=True)
+        (d / "SKILL.md").write_text(content)
     findings = run_all(world_from(proj, home, ("pi",)), Config())
     dl = find(findings, "double-load")
     assert len(dl) == 1
     assert dl[0].severity == "error"
     assert dl[0].harnesses == ["pi"]
+
+
+def test_no_double_load_when_symlink_resolves_to_same_real_path(tmp_path):
+    proj, home = tmp_path / "p", tmp_path / "h"
+    # one search directory symlinked into another within the same harness's
+    # own search paths (e.g. ~/.pi/agent/skills/x -> ~/.agents/skills/x):
+    # both instances resolve to the same real file, so this is one
+    # contributor with two deployments, not a double-load.
+    canonical = write(proj, ".agents/skills", "pdf-tools")
+    d = proj / ".pi" / "skills"
+    d.mkdir(parents=True)
+    os.symlink(canonical, d / "pdf-tools")
+    findings = run_all(world_from(proj, home, ("pi",)), Config())
+    assert find(findings, "double-load") == []
 
 
 def test_no_double_load_when_shadowed(tmp_path):

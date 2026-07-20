@@ -47,6 +47,19 @@ def test_spec_checks(tmp_path):
     assert clean_ids == []
 
 
+def test_folded_scalar_description_is_not_angle_brackets(tmp_path):
+    # YAML's folded block scalar indicator ">-" is raw-text punctuation, not
+    # a value containing an angle bracket; a multi-line description written
+    # this way must not trip frontmatter-angle-brackets.
+    proj, home = tmp_path / "p", tmp_path / "h"
+    write(
+        proj, "folded",
+        "---\nname: folded\ndescription: >-\n  Line one.\n  Line two.\n---\nb\n",
+    )
+    findings = run_all(world_from(proj, home), Config())
+    assert [f for f in findings if f.check_id == "frontmatter-angle-brackets"] == []
+
+
 def test_errors_sort_before_warnings(tmp_path):
     proj, home = tmp_path / "p", tmp_path / "h"
     write(proj, "angle", "---\nname: angle\ndescription: <x>\n---\nb\n")

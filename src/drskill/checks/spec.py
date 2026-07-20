@@ -74,6 +74,21 @@ def spec_description_too_long(world: World, config: Config) -> list[Finding]:
     ]
 
 
+def _has_angle_bracket(value: object) -> bool:
+    """Look for '<' or '>' in parsed frontmatter values, not the raw YAML
+    text. Raw text also contains YAML's own syntax characters (e.g. the
+    folded block scalar indicator in 'description: >-'), which are not
+    frontmatter values and would false-positive on ordinary multi-line
+    descriptions."""
+    if isinstance(value, str):
+        return "<" in value or ">" in value
+    if isinstance(value, dict):
+        return any(_has_angle_bracket(v) for v in value.values())
+    if isinstance(value, list):
+        return any(_has_angle_bracket(v) for v in value)
+    return False
+
+
 @check("frontmatter-angle-brackets")
 def frontmatter_angle_brackets(world: World, config: Config) -> list[Finding]:
     return [
@@ -83,5 +98,5 @@ def frontmatter_angle_brackets(world: World, config: Config) -> list[Finding]:
             fix_commands=[f"Remove '<' and '>' from the frontmatter of {c.id}"],
         )
         for c in _skill_md_contributors(world)
-        if c.frontmatter_valid and ("<" in c.frontmatter_text or ">" in c.frontmatter_text)
+        if c.frontmatter_valid and _has_angle_bracket(c.frontmatter)
     ]
