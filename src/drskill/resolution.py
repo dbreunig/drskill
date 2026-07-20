@@ -43,6 +43,15 @@ def normalize_content(text: str) -> str:
     return canonical_fm + "\n---\n" + body
 
 
+def _in_agents_store(path: Path) -> bool:
+    """Layout heuristic: the realpath lives under a `.agents/skills` canonical
+    store, which is how installers like `npx skills` materialize skills. It is
+    evidence of installer management, not a claim about which installer."""
+    return any(
+        p.name == "skills" and p.parent.name == ".agents" for p in [path, *path.parents]
+    )
+
+
 def content_hash(text: str) -> str:
     digest = hashlib.sha256(normalize_content(text).encode()).hexdigest()
     return "sha256:" + digest
@@ -104,6 +113,8 @@ def build_world(
             provenance = Provenance()
             if fm and GH_PROVENANCE_KEYS & fm.keys():
                 provenance = Provenance(kind="gh-skill", source=fm.get("source"))
+            elif _in_agents_store(real):
+                provenance = Provenance(kind="linked")
             c = Contributor(
                 id=cid,
                 name=name,

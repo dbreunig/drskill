@@ -107,3 +107,19 @@ def test_all_mismatch_collapses_to_single_unverifiable_warning(tmp_path):
     drift = [f for f in findings if f.check_id == "lockfile-drift"]
     assert len(drift) == 1
     assert "cannot reproduce" in drift[0].message
+
+
+def test_lockfile_entry_beats_linked(tmp_path):
+    import json as _json
+    proj, home = tmp_path / "p", tmp_path / "h"
+    home.mkdir()
+    d = proj / ".agents" / "skills" / "pinned"
+    d.mkdir(parents=True)
+    (d / "SKILL.md").write_text("---\nname: pinned\ndescription: d\n---\nbody\n")
+    (proj / ".pi").mkdir()
+    (proj / "skills-lock.json").write_text(
+        _json.dumps({"skills": {"pinned": {"hash": compute_tree_hash(d)}}})
+    )
+    world, _ = run_scan(proj, home)
+    c = next(c for c in world.contributors.values() if c.name == "pinned")
+    assert c.source.kind == "skills-lock"

@@ -26,7 +26,7 @@ class Deployment(BaseModel):
 
 
 class Provenance(BaseModel):
-    kind: Literal["skills-lock", "gh-skill", "unmanaged"] = "unmanaged"
+    kind: Literal["skills-lock", "gh-skill", "linked", "unmanaged"] = "unmanaged"
     source: str | None = None
 
 

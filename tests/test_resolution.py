@@ -138,3 +138,41 @@ def test_token_costs_populated(tmp_path):
     c = next(iter(world.contributors.values()))
     assert c.token_cost.catalog_tokens > 0
     assert c.token_cost.body_tokens > c.token_cost.catalog_tokens
+
+
+def test_linked_provenance_for_store_symlink(tmp_path):
+    proj, home = tmp_path / "proj", tmp_path / "home"
+    canonical = write_skill(proj / ".agents" / "skills", "store-skill")
+    d = proj / ".claude" / "skills"
+    d.mkdir(parents=True)
+    os.symlink(canonical, d / "store-skill")
+    world = world_for("claude-code", proj, home)
+    c = next(iter(world.contributors.values()))
+    assert c.source.kind == "linked"
+
+
+def test_linked_provenance_for_direct_store_residence(tmp_path):
+    proj, home = tmp_path / "proj", tmp_path / "home"
+    write_skill(proj / ".agents" / "skills", "store-skill")
+    (proj / ".pi").mkdir()
+    world = world_for("pi", proj, home)
+    c = next(iter(world.contributors.values()))
+    assert c.source.kind == "linked"
+
+
+def test_plain_directory_stays_unmanaged(tmp_path):
+    proj, home = tmp_path / "proj", tmp_path / "home"
+    write_skill(proj / ".claude" / "skills", "hand-dropped")
+    world = world_for("claude-code", proj, home)
+    c = next(iter(world.contributors.values()))
+    assert c.source.kind == "unmanaged"
+
+
+def test_gh_provenance_beats_linked(tmp_path):
+    proj, home = tmp_path / "proj", tmp_path / "home"
+    write_skill(proj / ".agents" / "skills", "managed",
+                extra_fm="source: octo/repo\nref: main\ntree_sha: abc\n")
+    (proj / ".pi").mkdir()
+    world = world_for("pi", proj, home)
+    c = next(iter(world.contributors.values()))
+    assert c.source.kind == "gh-skill"
