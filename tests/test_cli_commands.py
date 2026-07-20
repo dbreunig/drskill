@@ -80,3 +80,13 @@ def test_init(tmp_path):
     assert data["thresholds"]["near_duplicate"] == 0.85
     assert "#" in (proj / "drskill.toml").read_text()  # keeps comments
     assert invoke(tmp_path, "init").exit_code == 1  # refuses overwrite
+
+
+def test_list_survives_markup_in_skill_names(tmp_path):
+    proj = tmp_path / "proj"
+    write(proj, "sneaky", "d", "body")
+    f = proj / ".claude" / "skills" / "sneaky" / "SKILL.md"
+    f.write_text("---\nname: '[/bold]sneaky'\ndescription: d\n---\nbody\n")
+    r = invoke(tmp_path, "list", "--tokens")
+    assert r.exit_code == 0
+    assert r.exception is None

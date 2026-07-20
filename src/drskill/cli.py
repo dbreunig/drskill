@@ -6,6 +6,7 @@ from pathlib import Path
 
 import typer
 from rich.console import Console
+from rich.markup import escape
 from rich.table import Table
 
 from drskill import ledger, report
@@ -79,7 +80,7 @@ def ack(
     superset = [f for f in active if f.check_id == check_id and wanted <= set(f.contributor_names)]
     matches = exact or superset
     if not matches:
-        console.print(f"[red]No active finding matches[/red] {check_id} {' '.join(skills)}")
+        console.print(f"[red]No active finding matches[/red] {escape(check_id)} {escape(' '.join(skills))}")
         raise typer.Exit(1)
     if len(matches) > 1:
         console.print(f"[red]Ambiguous:[/red] {len(matches)} findings match; name all involved skills")
@@ -90,7 +91,7 @@ def ack(
         Ack(check=check_id, skills=sorted(f.contributor_names),
             fingerprint=f.fingerprint, note=note, date=dt.date.today()),
     )
-    console.print(f"Acknowledged [bold]{check_id}[/bold] for {', '.join(f.contributor_names)} → {path}")
+    console.print(f"Acknowledged [bold]{escape(check_id)}[/bold] for {escape(', '.join(f.contributor_names))} → {escape(str(path))}")
 
 
 @app.command("list")
@@ -106,7 +107,7 @@ def list_cmd(
     for hid, hdef in sorted(world.harnesses.items()):
         if harness and hid != harness:
             continue
-        title = hdef.display_name + ("" if hdef.verified else " (best effort)")
+        title = escape(hdef.display_name) + ("" if hdef.verified else " (best effort)")
         table = Table(title=title)
         table.add_column("skill")
         table.add_column("scope")
@@ -122,13 +123,13 @@ def list_cmd(
                 notes.append("shadowed")
             if d.via_symlink:
                 notes.append("symlink")
-            row = [c.name, d.scope, c.source.kind]
+            row = [escape(c.name), escape(d.scope), escape(c.source.kind)]
             if tokens:
                 row += [str(c.token_cost.catalog_tokens), str(c.token_cost.body_tokens)]
                 if d.shadowed_by is None:
                     cat_total += c.token_cost.catalog_tokens
                     body_total += c.token_cost.body_tokens
-            row.append(", ".join(notes))
+            row.append(escape(", ".join(notes)))
             table.add_row(*row)
         if tokens:
             table.add_row("total (effective)", "", "", str(cat_total), str(body_total), "",
