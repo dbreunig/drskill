@@ -59,7 +59,9 @@ def run_all(world: World, config: Config) -> list[Finding]:
     for f in findings:
         if f.fingerprint in merged:
             prior = merged[f.fingerprint]
-            prior.harnesses = sorted(set(prior.harnesses) | set(f.harnesses))
+            merged[f.fingerprint] = prior.model_copy(
+                update={"harnesses": sorted(set(prior.harnesses) | set(f.harnesses))}
+            )
         else:
             merged[f.fingerprint] = f
     return sorted(

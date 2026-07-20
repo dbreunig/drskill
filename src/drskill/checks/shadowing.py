@@ -21,6 +21,7 @@ def name_shadow(world: World, config: Config) -> list[Finding]:
                     f"two skills named '{c.name}': the {wdep.scope} copy at "
                     f"{wdep.path} wins by search order and shadows {d.path}",
                     harnesses=[hid],
+                    extra_key=winner.id,
                     fix_commands=[
                         f"Remove or rename the shadowed copy: {d.path}",
                     ],
