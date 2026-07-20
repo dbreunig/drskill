@@ -25,4 +25,6 @@ def count(text: str) -> int:
         except Exception:
             _unavailable = True
             return _fallback_count(text)
-    return len(_encoder.encode(text))
+    # disallowed_special=() treats special-token text (e.g. a literal
+    # "<|endoftext|>" inside a skill body) as ordinary text instead of raising.
+    return len(_encoder.encode(text, disallowed_special=()))

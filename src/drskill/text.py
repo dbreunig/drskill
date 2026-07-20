@@ -18,23 +18,22 @@ STOPWORDS: frozenset[str] = frozenset(
     use uses used using user users skill skills ask asks asked asking""".split()
 )
 
-# Matched against the raw lowercased description BEFORE stopword removal.
+# Substring patterns matched against the raw lowercased description.
+# Corpus tuning 2026-07-20: single words that signal a condition (when,
+# whenever, trigger*, invoke*) are matched as whole tokens instead, so a
+# mid-sentence "when building new UI" counts (found in anthropics/skills
+# frontend-design, previously a false positive).
 ACTIVATION_PATTERNS: tuple[str, ...] = (
-    "use when",
-    "use this when",
-    "use this skill when",
-    "use whenever",
-    "when the user",
-    "when you",
-    "when a ",
-    "when working",
-    "trigger",
-    "invoke",
     "for questions about",
     "if the user",
+    "if you",
     "before ",
     "after ",
     "during ",
+)
+
+_ACTIVATION_TOKENS: frozenset[str] = frozenset(
+    {"when", "whenever", "trigger", "triggers", "triggered", "invoke", "invokes", "invoked"}
 )
 
 GENERIC_VOCAB: frozenset[str] = frozenset(
@@ -100,4 +99,6 @@ def shared_phrases(texts: list[str], max_n: int = 3) -> list[str]:
 
 def has_activation(text: str) -> bool:
     lowered = text.lower()
-    return any(p in lowered for p in ACTIVATION_PATTERNS)
+    if any(p in lowered for p in ACTIVATION_PATTERNS):
+        return True
+    return not _ACTIVATION_TOKENS.isdisjoint(tokenize(lowered))

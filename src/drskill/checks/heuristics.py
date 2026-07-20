@@ -39,13 +39,26 @@ def missing_activation(world: World, config: Config) -> list[Finding]:
 
 _IMPERATIVE = re.compile(r"\b(always|never)\s+((?:\w+[ \t]){0,3}\w+)", re.IGNORECASE)
 
+# Unlike text.STOPWORDS, verbs stay: "use tabs" needs "use". Only glue words
+# and location/degree adverbs are dropped.
+# Corpus tuning 2026-07-20: set-intersection matching fired 119 times and
+# set-containment 248 times on the hermes corpus (179 skills), almost all
+# single shared verbs. The shipped rule is strict verb+object bigram
+# equality: the first two non-glue tokens after always/never must match
+# exactly. Very low recall, near-zero noise.
+_IMPERATIVE_DROP = frozenset(
+    """a an the and or for in on at to of with from by anywhere everywhere
+    nowhere here there always never all any this that these those it its
+    your you""".split()
+)
 
-def _imperative_phrases(c: Contributor) -> dict[str, list[set[str]]]:
-    out: dict[str, list[set[str]]] = {"always": [], "never": []}
+
+def _imperative_phrases(c: Contributor) -> dict[str, list[tuple[str, str]]]:
+    out: dict[str, list[tuple[str, str]]] = {"always": [], "never": []}
     for m in _IMPERATIVE.finditer(c.body):
-        norm = {t for t in text.tokenize(m.group(2)) if t not in text.STOPWORDS}
-        if norm:
-            out[m.group(1).lower()].append(norm)
+        toks = [t for t in text.tokenize(m.group(2)) if t not in _IMPERATIVE_DROP]
+        if len(toks) >= 2:
+            out[m.group(1).lower()].append((toks[0], toks[1]))
     return out
 
 
@@ -57,28 +70,24 @@ def opposing_imperatives(world: World, config: Config) -> list[Finding]:
     for a, b in combinations(cs, 2):
         seen: set[str] = set()
         for kind_a, kind_b in (("always", "never"), ("never", "always")):
-            for sa in phrases[a.id][kind_a]:
-                for sb in phrases[b.id][kind_b]:
-                    common = sa & sb
-                    if not common:
-                        continue
-                    phrase = " ".join(sorted(common))
-                    if phrase in seen:
-                        continue
-                    seen.add(phrase)
-                    out.append(
-                        make_finding(
-                            "opposing-imperatives", "warning", [a, b],
-                            f"'{a.name}' and '{b.name}' give opposite orders about "
-                            f"'{phrase}' (always vs never); an agent loading both gets "
-                            "contradictory instructions (low-recall check: paraphrased "
-                            "contradictions are not detected)",
-                            fix_commands=[
-                                "Align the two instructions, or scope each to its own condition"
-                            ],
-                            extra_key=phrase,
-                        )
+            for pair in sorted(set(phrases[a.id][kind_a]) & set(phrases[b.id][kind_b])):
+                phrase = " ".join(pair)
+                if phrase in seen:
+                    continue
+                seen.add(phrase)
+                out.append(
+                    make_finding(
+                        "opposing-imperatives", "warning", [a, b],
+                        f"'{a.name}' and '{b.name}' give opposite orders about "
+                        f"'{phrase}' (always vs never); an agent loading both gets "
+                        "contradictory instructions (low-recall check: paraphrased "
+                        "contradictions are not detected)",
+                        fix_commands=[
+                            "Align the two instructions, or scope each to its own condition"
+                        ],
+                        extra_key=phrase,
                     )
+                )
     return out
 
 

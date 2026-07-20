@@ -23,3 +23,8 @@ def test_cli_module_does_not_import_tiktoken_eagerly():
     import drskill.tokens  # noqa: F401
 
     assert "tiktoken" not in sys.modules
+
+
+def test_count_survives_special_token_text():
+    n = tokens.count("prefix <|endoftext|> suffix")
+    assert isinstance(n, int) and n > 0

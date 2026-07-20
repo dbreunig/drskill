@@ -1,0 +1,20 @@
+# Real-world descriptions frozen from public corpora (see LICENSE-NOTE.md).
+# webapp-testing and grok state what they do but never when: true positives.
+# frontend-design states "when building new UI" mid-sentence: must stay quiet
+# (was a false positive before the token-based activation lexicon).
+
+[[expect]]
+check = "missing-activation"
+skills = ["webapp-testing"]
+
+[[expect]]
+check = "missing-activation"
+skills = ["grok"]
+
+[[forbid]]
+check = "missing-activation"
+skills = ["frontend-design"]
+
+[[forbid]]
+check = "generic-description"
+skills = ["webapp-testing", "frontend-design", "grok"]
