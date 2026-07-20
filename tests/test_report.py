@@ -1,0 +1,65 @@
+import json
+
+from rich.console import Console
+
+from drskill.harnesses import HarnessDef
+from drskill.models import Finding, TokenCost
+from drskill.report import render, to_json
+from drskill.resolution import World
+from tests.test_models import make_contributor
+
+
+def sample_finding(check="double-load", severity="error", harnesses=("claude-code",)):
+    return Finding(
+        check_id=check, severity=severity,
+        contributors=["/a"], contributor_names=["pdf-tools"],
+        harnesses=list(harnesses), message=f"{check} happened",
+        fix_commands=["npx skills remove pdf-tools"],
+        fingerprint="sha256:f",
+    )
+
+
+def world_with(verified=True):
+    return World(
+        contributors={"/a": make_contributor(id="/a", name="pdf-tools")},
+        harnesses={
+            "claude-code": HarnessDef(
+                id="claude-code", display_name="Claude Code", verified=verified
+            )
+        },
+    )
+
+
+def render_to_text(world, active, acked):
+    console = Console(record=True, width=100, force_terminal=False)
+    render(world, active, acked, console)
+    return console.export_text()
+
+
+def test_render_sections_and_ack_line():
+    err = sample_finding()
+    warn = sample_finding(check="near-duplicate", severity="warning")
+    text = render_to_text(world_with(), [err, warn], [sample_finding(check="name-shadow", severity="warning")])
+    assert "ERRORS" in text and "WARNINGS" in text
+    assert "drskill ack double-load pdf-tools" in text
+    assert "npx skills remove pdf-tools" in text
+    assert "1 error" in text and "2 warnings" not in text  # 1 active warning
+    assert "1 acknowledged" in text
+    assert "token counts are approximate" in text
+
+
+def test_best_effort_label_for_unverified():
+    text = render_to_text(world_with(verified=False), [sample_finding()], [])
+    assert "best effort" in text
+
+
+def test_clean_report():
+    text = render_to_text(world_with(), [], [])
+    assert "No findings" in text
+
+
+def test_to_json_stable():
+    data = json.loads(to_json([sample_finding()]))
+    assert data[0]["check_id"] == "double-load"
+    assert data[0]["fingerprint"] == "sha256:f"
+    assert list(data[0].keys()) == sorted(data[0].keys())
