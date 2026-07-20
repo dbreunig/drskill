@@ -66,3 +66,9 @@ def test_global_mode_ignores_project(tmp_path):
     (home / ".claude" / "skills").mkdir(parents=True)
     r = scan(tmp_path, "--global")
     assert r.exit_code == 0
+
+
+def test_bare_invocation_shows_usage_not_traceback(tmp_path):
+    r = runner.invoke(app, [], env=env_for(tmp_path))
+    assert r.exit_code == 2
+    assert "Traceback" not in r.output

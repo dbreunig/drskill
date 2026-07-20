@@ -1,7 +1,6 @@
 from __future__ import annotations
 
 import os
-import sys
 from pathlib import Path
 
 import typer
@@ -19,12 +18,9 @@ def _home() -> Path:
     return Path(env) if env else Path.home()
 
 
-@app.callback(invoke_without_command=True)
-def main(ctx: typer.Context) -> None:
-    """brew doctor for your agent's skill loadout"""
-    if ctx.invoked_subcommand is None:
-        if not ctx.protected_args:
-            raise typer.Exit(code=0)
+@app.callback()
+def main() -> None:
+    pass
 
 
 @app.command()
