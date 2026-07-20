@@ -1,0 +1,3 @@
+[budget]
+catalog_tokens_max = 5
+body_tokens_warn = 10

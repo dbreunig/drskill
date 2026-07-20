@@ -1,0 +1,7 @@
+[[expect]]
+check = "budget-catalog-tokens"
+skills = ["chatty"]
+
+[[expect]]
+check = "budget-body-tokens"
+skills = ["chatty"]
