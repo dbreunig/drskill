@@ -91,6 +91,11 @@ def _facet_unverified(world: World, f: Finding, hid: str) -> bool:
     return not hdef.paths_verified
 
 
+def short_id(f: Finding) -> str:
+    """First four hex chars of the fingerprint: the finding's ack handle."""
+    return f.fingerprint.split(":", 1)[1][:4]
+
+
 def _print_finding(world: World, f: Finding, console: Console) -> bool:
     marked = False
     console.print(f"  [[bold]{escape(f.check_id)}[/bold]] {escape(f.message)}")
@@ -105,11 +110,13 @@ def _print_finding(world: World, f: Finding, console: Console) -> bool:
         console.print(f"      harnesses: {escape(', '.join(labels))}")
     for cmd in f.fix_commands:
         console.print(f"      fix: {escape(cmd)}")
+    sid = short_id(f)
     if f.contributor_names:
         names = " ".join(shlex.quote(n) for n in f.contributor_names)
-        console.print(f"      or:  drskill ack {escape(f.check_id)} {escape(names)}")
+        long_form = f"{f.check_id} {names}"
     else:
-        console.print(f"      or:  drskill ack {escape(f.check_id)}")
+        long_form = f.check_id
+    console.print(f"      or:  drskill ack {escape(sid)}   # {escape(long_form)}")
     console.print()
     return marked
 

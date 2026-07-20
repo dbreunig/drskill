@@ -136,3 +136,73 @@ def test_list_scoped_undetected_harness_shows_empty_table(tmp_path):
     assert r.exit_code == 0
     assert "Qwen Code" in r.output
     assert "not detected" in r.output
+
+
+# activation-less AND mutually non-overlapping, so only missing-activation fires
+NOISY = {
+    "one": "Formats source code files.",
+    "two": "Renders vector diagrams cleanly.",
+    "three": "Optimizes database index layouts.",
+}
+
+
+def _mk(proj, name):
+    write(proj, name, NOISY[name], f"body of {name}")
+
+
+def _short_ids(output):
+    import re
+    return re.findall(r"drskill ack ([0-9a-f]{4})", output)
+
+
+def test_ack_by_short_id(tmp_path):
+    proj = tmp_path / "proj"
+    _mk(proj, "one")
+    r = invoke(tmp_path, "scan")
+    sid = _short_ids(r.output)[0]
+    r2 = invoke(tmp_path, "ack", sid, "--note", "seen")
+    assert r2.exit_code == 0 and "missing-activation" in r2.output
+    assert invoke(tmp_path, "scan", "--ci").exit_code == 0
+
+
+def test_ack_several_short_ids(tmp_path):
+    proj = tmp_path / "proj"
+    _mk(proj, "one")
+    _mk(proj, "two")
+    r = invoke(tmp_path, "scan")
+    sids = sorted(set(_short_ids(r.output)))
+    assert len(sids) == 2
+    r2 = invoke(tmp_path, "ack", *sids)
+    assert r2.exit_code == 0
+    assert invoke(tmp_path, "scan", "--ci").exit_code == 0
+
+
+def test_ack_check_all(tmp_path):
+    proj = tmp_path / "proj"
+    for n in ["one", "two", "three"]:
+        _mk(proj, n)
+    r = invoke(tmp_path, "ack", "missing-activation", "--all")
+    assert r.exit_code == 0
+    assert r.output.count("missing-activation") >= 3
+    assert invoke(tmp_path, "scan", "--ci").exit_code == 0
+
+
+def test_ack_all_everything(tmp_path):
+    proj = tmp_path / "proj"
+    _mk(proj, "one")
+    write(proj, "vague", "Helps with various tasks.", "b")
+    r = invoke(tmp_path, "ack", "--all", "--note", "baseline")
+    assert r.exit_code == 0
+    assert invoke(tmp_path, "scan", "--ci").exit_code == 0
+    import tomllib
+    data = tomllib.loads((proj / "drskill.toml").read_text())
+    assert all(a.get("note") == "baseline" for a in data["ack"])
+    assert len(data["ack"]) >= 3  # missing-activation x2 + generic + overlap...
+
+
+def test_ack_unknown_id_errors(tmp_path):
+    proj = tmp_path / "proj"
+    _mk(proj, "one")
+    r = invoke(tmp_path, "ack", "beef")
+    assert r.exit_code == 1
+    assert "No active finding" in r.output

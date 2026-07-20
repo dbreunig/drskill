@@ -18,7 +18,7 @@ def sample_finding(check="double-load", severity="error", harnesses=("claude-cod
         contributors=["/a"], contributor_names=["pdf-tools"],
         harnesses=list(harnesses), message=f"{check} happened",
         fix_commands=["npx skills remove pdf-tools"],
-        fingerprint="sha256:f",
+        fingerprint="sha256:f0f1f2f3f4",
     )
 
 
@@ -46,7 +46,9 @@ def test_render_sections_and_ack_line():
     warn = sample_finding(check="near-duplicate", severity="warning")
     text = render_to_text(world_with(), [err, warn], [sample_finding(check="name-shadow", severity="warning")])
     assert "ERRORS" in text and "WARNINGS" in text
-    assert "drskill ack double-load pdf-tools" in text
+    assert "# double-load pdf-tools" in text  # long form rides as a comment
+    import re
+    assert re.search(r"drskill ack [0-9a-f]{4}", text)
     assert "npx skills remove pdf-tools" in text
     assert "1 error" in text and "2 warnings" not in text  # 1 active warning
     assert "1 acknowledged" in text
@@ -88,7 +90,7 @@ def test_clean_report():
 def test_to_json_stable():
     data = json.loads(to_json([sample_finding()]))
     assert data[0]["check_id"] == "double-load"
-    assert data[0]["fingerprint"] == "sha256:f"
+    assert data[0]["fingerprint"] == "sha256:f0f1f2f3f4"
     assert list(data[0].keys()) == sorted(data[0].keys())
 
 
@@ -101,7 +103,8 @@ def test_ack_hint_for_contributorless_finding_has_no_trailing_names():
     )
     text = render_to_text(world_with(), [f], [])
     line = next(l for l in text.splitlines() if "drskill ack" in l)
-    assert line.strip() == "or:  drskill ack lockfile-drift"
+    assert line.strip().startswith("or:  drskill ack ")
+    assert line.strip().endswith("# lockfile-drift")
 
 
 def test_ack_hint_quotes_adversarial_contributor_name():

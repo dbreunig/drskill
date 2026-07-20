@@ -32,7 +32,7 @@ def missing_activation(world: World, config: Config) -> list[Finding]:
             fix_commands=[
                 f"Start the description in {c.id} with a condition, e.g. 'Use when ...'"
             ],
-            fingerprint_texts=[c.routing_text],
+            fingerprint_texts=[f"{c.name}\n{c.routing_text}"],
         )
         for c in _skill_md(world)
         if c.routing_text.strip() and not text.has_activation(c.routing_text)
@@ -112,7 +112,7 @@ def opposing_imperatives(world: World, config: Config) -> list[Finding]:
                             "Align the two instructions, or scope each to its own condition"
                         ],
                         extra_key=phrase,
-                        fingerprint_texts=[a.body, b.body],
+                        fingerprint_texts=[f"{a.name}\n{a.body}", f"{b.name}\n{b.body}"],
                     )
                 )
     return out
@@ -198,7 +198,7 @@ def description_overlap(world: World, config: Config) -> list[Finding]:
                 fix_commands=[
                     "Give each description an exclusive 'use when' condition the others lack"
                 ],
-                fingerprint_texts=[m.routing_text for m in members],
+                fingerprint_texts=[f"{m.name}\n{m.routing_text}" for m in members],
             )
         )
     return out
@@ -222,7 +222,7 @@ def generic_description(world: World, config: Config) -> list[Finding]:
                     fix_commands=[
                         f"Name the concrete inputs, outputs, or domain in {c.id}"
                     ],
-                    fingerprint_texts=[c.routing_text],
+                    fingerprint_texts=[f"{c.name}\n{c.routing_text}"],
                 )
             )
     return out

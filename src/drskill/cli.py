@@ -111,47 +111,91 @@ def scan(
 
 @app.command()
 def ack(
-    check_id: str = typer.Argument(...),
-    skills: list[str] = typer.Argument(
-        None, help="skills to acknowledge for; omit for contributor-less findings"
+    refs: list[str] = typer.Argument(
+        None,
+        help="finding ids from the report, or a check id followed by skill names",
+    ),
+    ack_all: bool = typer.Option(
+        False, "--all",
+        help="ack every active finding, or every finding of the named check",
     ),
     note: str | None = typer.Option(None, "--note"),
     root: Path = typer.Option(Path("."), "--root", hidden=True),
     global_mode: bool = typer.Option(False, "--global"),
 ) -> None:
-    """Acknowledge a finding so it stays silent until the skills change."""
+    """Acknowledge findings so they stay silent until the content changes."""
+    import re
+
     home = _home()
     path = ledger.ledger_path(root, home, global_mode)
     config = _load_config_or_exit(path)
-    world, findings = run_scan(root, home, global_mode, config)
+    _world, findings = run_scan(root, home, global_mode, config)
     active, _ = ledger.filter_findings(findings, config)
-    wanted = set(skills or [])
-    if wanted:
-        exact = [f for f in active if f.check_id == check_id and set(f.contributor_names) == wanted]
-        superset = [f for f in active if f.check_id == check_id and wanted <= set(f.contributor_names)]
-        matches = exact or superset
-    else:
-        matches = [f for f in active if f.check_id == check_id and not f.contributor_names]
-    if not matches:
-        console.print(f"[red]No active finding matches[/red] {escape(check_id)} {escape(' '.join(skills or []))}")
-        raise typer.Exit(1)
-    if len(matches) > 1:
-        if wanted:
-            console.print(f"[red]Ambiguous:[/red] {len(matches)} findings match; name all involved skills")
+    from drskill.checks import REGISTRY
+
+    refs = refs or []
+    targets: list = []
+    if ack_all:
+        if not refs:
+            targets = list(active)
+        elif len(refs) == 1 and refs[0] in REGISTRY:
+            targets = [f for f in active if f.check_id == refs[0]]
         else:
-            candidates = "; ".join(escape(m.message) for m in matches)
-            console.print(f"[red]Ambiguous:[/red] {len(matches)} findings match: {candidates}")
-        raise typer.Exit(1)
-    f = matches[0]
-    ledger.append_ack(
-        path,
-        Ack(check=check_id, skills=sorted(f.contributor_names),
-            fingerprint=f.fingerprint, note=note, date=dt.date.today()),
-    )
-    if f.contributor_names:
-        console.print(f"Acknowledged [bold]{escape(check_id)}[/bold] for {escape(', '.join(f.contributor_names))} → {escape(str(path))}")
+            console.print("[red]--all takes no arguments, or exactly one check id[/red]")
+            raise typer.Exit(1)
+        if not targets:
+            console.print("[red]No active finding matches[/red]")
+            raise typer.Exit(1)
+    elif refs and refs[0] in REGISTRY:
+        check_id, skills = refs[0], refs[1:]
+        wanted = set(skills)
+        if wanted:
+            exact = [f for f in active if f.check_id == check_id and set(f.contributor_names) == wanted]
+            superset = [f for f in active if f.check_id == check_id and wanted <= set(f.contributor_names)]
+            matches = exact or superset
+        else:
+            matches = [f for f in active if f.check_id == check_id and not f.contributor_names]
+        if not matches:
+            console.print(f"[red]No active finding matches[/red] {escape(check_id)} {escape(' '.join(skills))}")
+            raise typer.Exit(1)
+        if len(matches) > 1:
+            if wanted:
+                console.print(f"[red]Ambiguous:[/red] {len(matches)} findings match; name all involved skills")
+            else:
+                candidates = "; ".join(escape(m.message.splitlines()[0]) for m in matches)
+                console.print(f"[red]Ambiguous:[/red] {len(matches)} findings match: {candidates}")
+            raise typer.Exit(1)
+        targets = matches
+    elif refs and all(re.fullmatch(r"[0-9a-f]{4,64}", r) for r in refs):
+        for ref in refs:
+            hits = [f for f in active if f.fingerprint.split(":", 1)[1].startswith(ref)]
+            if not hits:
+                console.print(f"[red]No active finding matches[/red] id {escape(ref)}")
+                raise typer.Exit(1)
+            if len(hits) > 1:
+                console.print(
+                    f"[red]Ambiguous id[/red] {escape(ref)}: matches "
+                    f"{len(hits)} findings; use more characters"
+                )
+                raise typer.Exit(1)
+            if hits[0] not in targets:
+                targets.append(hits[0])
     else:
-        console.print(f"Acknowledged [bold]{escape(check_id)}[/bold] → {escape(str(path))}")
+        console.print(
+            "[red]Nothing to ack:[/red] pass finding ids from the report, "
+            "a check id with skill names, or --all"
+        )
+        raise typer.Exit(1)
+
+    for f in targets:
+        ledger.append_ack(
+            path,
+            Ack(check=f.check_id, skills=sorted(f.contributor_names),
+                fingerprint=f.fingerprint, note=note, date=dt.date.today()),
+        )
+        label = f"{f.check_id} " + ", ".join(f.contributor_names) if f.contributor_names else f.check_id
+        console.print(f"Acknowledged [bold]{escape(label)}[/bold]")
+    console.print(f"{len(targets)} finding{'s' if len(targets) != 1 else ''} → {escape(str(path))}")
 
 
 @app.command("list")
