@@ -1,0 +1,7 @@
+[[expect]]
+check = "diverged-copies"
+skills = ["geo"]
+
+[[forbid]]
+check = "description-overlap"
+skills = ["geo"]

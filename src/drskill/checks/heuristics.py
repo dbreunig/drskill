@@ -125,7 +125,11 @@ def description_overlap(world: World, config: Config) -> list[Finding]:
         return x
 
     for a, b in combinations(cs, 2):
-        if _is_duplicate_pair(a, b, config.thresholds.near_duplicate, sigs):
+        # Same-name pairs are diverged-copies territory; duplicate pairs are
+        # exact/near-duplicate territory. Both collapse to one representative.
+        if a.name == b.name or _is_duplicate_pair(
+            a, b, config.thresholds.near_duplicate, sigs
+        ):
             rep_parent[rep_find(a.id)] = rep_find(b.id)
     by_id = {c.id: c for c in cs}
     reps = [by_id[cid] for cid in sorted({rep_find(c.id) for c in cs})]
@@ -157,20 +161,9 @@ def description_overlap(world: World, config: Config) -> list[Finding]:
             claim = f" all claim {quoted}"
         else:
             claim = " have near-identical descriptions"
-        name_counts: dict[str, int] = {}
-        for m in members:
-            name_counts[m.name] = name_counts.get(m.name, 0) + 1
-
-        def _label(m: Contributor) -> str:
-            if name_counts[m.name] == 1:
-                return m.name
-            # Same name twice (diverged copies): disambiguate with the full
-            # directory that contains the skill. A fixed number of parent
-            # hops mislabels nested skills and same-layout project/user
-            # copies (found in review).
-            return f"{m.name} ({Path(m.id).parent.parent})"
-
-        names = ", ".join(_label(m) for m in members)
+        # Same-name members collapse to one representative above, so names
+        # inside a cluster are unique and need no path disambiguation.
+        names = ", ".join(m.name for m in members)
         out.append(
             make_finding(
                 "description-overlap", "warning", members,

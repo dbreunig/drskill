@@ -136,3 +136,55 @@ def test_name_shadow_fix_command_quotes_adversarial_name(tmp_path):
     assert len(shadows) == 1
     cmd = shadows[0].fix_commands[0]
     assert PAYLOAD in shlex.split(cmd)[-1]
+
+
+def _write_named(root, rel, name, body):
+    d = root / rel / name
+    d.mkdir(parents=True)
+    (d / "SKILL.md").write_text(f"---\nname: {name}\ndescription: d\n---\n{body}\n")
+
+
+def test_diverged_copies_fires_across_harnesses(tmp_path):
+    proj, home = tmp_path / "p", tmp_path / "h"
+    _write_named(proj, ".claude/skills", "geo", "new body with extra sections\n" * 3)
+    _write_named(proj, ".pi/skills", "geo", "old body\n")
+    findings = run_all(world_from(proj, home, ("claude-code", "pi")), Config())
+    hits = find(findings, "diverged-copies")
+    assert len(hits) == 1
+    msg = hits[0].message
+    assert "geo" in msg and "newest:" in msg and "older:" in msg
+    assert "descriptions identical" in msg
+    assert ".claude" in msg and ".pi" in msg
+    assert hits[0].severity == "warning"
+
+
+def test_diverged_copies_skips_coloaded_same_name(tmp_path):
+    proj, home = tmp_path / "p", tmp_path / "h"
+    # same harness loads both (project + user scope): name-shadow territory
+    _write_named(proj, ".claude/skills", "tool", "project version")
+    _write_named(home, ".claude/skills", "tool", "user version")
+    findings = run_all(world_from(proj, home), Config())
+    assert find(findings, "diverged-copies") == []
+    assert find(findings, "name-shadow")
+
+
+def test_diverged_copies_skips_identical_content(tmp_path):
+    proj, home = tmp_path / "p", tmp_path / "h"
+    _write_named(proj, ".claude/skills", "same", "identical body")
+    _write_named(proj, ".pi/skills", "same", "identical body")
+    findings = run_all(world_from(proj, home, ("claude-code", "pi")), Config())
+    assert find(findings, "diverged-copies") == []
+
+
+def test_diverged_copies_tie_labels_and_diff_fix(tmp_path):
+    import os
+    proj, home = tmp_path / "p", tmp_path / "h"
+    _write_named(proj, ".claude/skills", "geo", "body one")
+    _write_named(proj, ".pi/skills", "geo", "body two")
+    ts = 1750000000
+    for rel in [".claude/skills/geo/SKILL.md", ".pi/skills/geo/SKILL.md"]:
+        os.utime(proj / rel, (ts, ts))
+    findings = run_all(world_from(proj, home, ("claude-code", "pi")), Config())
+    hit = find(findings, "diverged-copies")[0]
+    assert "newest:" not in hit.message and "copy:" in hit.message
+    assert any(cmd.startswith("diff ") for cmd in hit.fix_commands)

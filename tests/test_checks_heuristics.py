@@ -125,26 +125,6 @@ def test_opposing_near_miss_stays_quiet(tmp_path):
     assert by_check(findings, "opposing-imperatives") == []
 
 
-def test_overlap_disambiguates_colliding_names(tmp_path):
-    proj, home = tmp_path / "p", tmp_path / "h"
-    write(proj, "docs", PILE_A, body="x" * 40)  # .claude/skills/docs
-    d = proj / ".pi" / "skills" / "docs"
-    d.mkdir(parents=True)
-    (d / "SKILL.md").write_text(f"---\nname: docs\ndescription: {PILE_B}\n---\n{'y' * 40}\n")
-    hs = [h for h in load_harnesses() if h.id in ("claude-code", "pi")]
-    instances, broken = [], []
-    for h in hs:
-        i, b = discover(h, proj, home)
-        instances += i
-        broken += b
-    world = build_world(instances, {h.id: h for h in hs}, broken)
-    findings = run_all(world, Config())
-    hits = by_check(findings, "description-overlap")
-    assert len(hits) == 1
-    assert "/.claude/skills)" in hits[0].message
-    assert "/.pi/skills)" in hits[0].message
-
-
 def test_overlap_bridge_cannot_reunite_duplicate_pair(tmp_path):
     proj, home = tmp_path / "p", tmp_path / "h"
     shared_body = "Collect the metrics and summarize each work stream carefully. " * 10
@@ -190,3 +170,21 @@ def test_activation_matches_derived_forms():
 
     assert has_activation("Supports triggering deployments from CI.")
     assert has_activation("Handy for invoking build pipelines.")
+
+
+def test_overlap_excludes_same_name_pairs(tmp_path):
+    proj, home = tmp_path / "p", tmp_path / "h"
+    write(proj, "docs", PILE_A, body="x" * 40)
+    d = proj / ".pi" / "skills" / "docs"
+    d.mkdir(parents=True)
+    (d / "SKILL.md").write_text(f"---\nname: docs\ndescription: {PILE_A}X\n---\n{'y' * 40}\n")
+    hs = [h for h in load_harnesses() if h.id in ("claude-code", "pi")]
+    instances, broken = [], []
+    for h in hs:
+        i, b = discover(h, proj, home)
+        instances += i
+        broken += b
+    world = build_world(instances, {h.id: h for h in hs}, broken)
+    findings = run_all(world, Config())
+    assert by_check(findings, "description-overlap") == []
+    assert by_check(findings, "diverged-copies")
