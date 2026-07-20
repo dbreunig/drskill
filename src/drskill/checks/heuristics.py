@@ -98,7 +98,9 @@ def opposing_imperatives(world: World, config: Config) -> list[Finding]:
                     f"'{a.name}' and '{b.name}' give opposite orders about "
                     f"'{phrase}':",
                     f'        {a.name}: "{phrases[a.id][kind_a][pair]}"',
+                    f"            {a.id}",
                     f'        {b.name}: "{phrases[b.id][kind_b][pair]}"',
+                    f"            {b.id}",
                     "        (exact-match check; paraphrased contradictions are"
                     " not detected)",
                 ]
@@ -186,11 +188,13 @@ def description_overlap(world: World, config: Config) -> list[Finding]:
         # Same-name members collapse to one representative above, so names
         # inside a cluster are unique and need no path disambiguation.
         names = ", ".join(m.name for m in members)
+        member_lines = "".join(f"\n        {m.name}: {m.id}" for m in members)
         out.append(
             make_finding(
                 "description-overlap", "warning", members,
                 f"{len(members)} skills ({names}){claim}; "
-                "none states an exclusive condition, so routing between them is a coin flip",
+                "none states an exclusive condition, so routing between them "
+                f"is a coin flip{member_lines}",
                 fix_commands=[
                     "Give each description an exclusive 'use when' condition the others lack"
                 ],

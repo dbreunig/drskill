@@ -212,3 +212,23 @@ def test_opposing_imperative_snippets_truncate_long_lines(tmp_path):
     snippet_line = next(ln for ln in hit.message.splitlines() if ln.strip().startswith('a: '))
     assert len(snippet_line) < 140
     assert "…" in snippet_line
+
+
+def test_opposing_imperatives_lists_paths(tmp_path):
+    proj, home = tmp_path / "p", tmp_path / "h"
+    write(proj, "tabs", "Use when formatting with tabs.", body="Always use tabs here now.")
+    write(proj, "spaces", "Use when formatting with spaces.", body="Never use tabs at all.")
+    findings = run_all(world_from(proj, home), Config())
+    hit = by_check(findings, "opposing-imperatives")[0]
+    assert str(proj / ".claude/skills/tabs/SKILL.md") in hit.message
+    assert str(proj / ".claude/skills/spaces/SKILL.md") in hit.message
+
+
+def test_overlap_cluster_lists_paths(tmp_path):
+    proj, home = tmp_path / "p", tmp_path / "h"
+    write(proj, "doc-a", PILE_A, body="a" * 40)
+    write(proj, "doc-b", PILE_B, body="b" * 40)
+    findings = run_all(world_from(proj, home), Config())
+    hit = by_check(findings, "description-overlap")[0]
+    assert str(proj / ".claude/skills/doc-a/SKILL.md") in hit.message
+    assert str(proj / ".claude/skills/doc-b/SKILL.md") in hit.message
