@@ -5,6 +5,7 @@ import shlex
 
 from rich.console import Console
 from rich.markup import escape
+from rich.table import Table
 
 from drskill.models import Finding
 from drskill.resolution import World
@@ -15,6 +16,59 @@ def to_json(findings: list[Finding]) -> str:
         dict(sorted(f.model_dump(mode="json").items())) for f in findings
     ]
     return json.dumps(rows, indent=2)
+
+
+def render_harness_tables(
+    world: World,
+    console: Console,
+    *,
+    tokens: bool = False,
+    harness: str | None = None,
+    show_all: bool = False,
+) -> None:
+    hidden: list[str] = []
+    for hid, hdef in sorted(world.harnesses.items()):
+        if harness and hid != harness:
+            continue
+        if not show_all and harness is None and not world.effective(hid):
+            hidden.append(hid)
+            continue
+        title = escape(hdef.display_name) + ("" if hdef.verified else " (best effort)")
+        table = Table(title=title)
+        table.add_column("skill")
+        table.add_column("scope")
+        table.add_column("source")
+        if tokens:
+            table.add_column("catalog", justify="right")
+            table.add_column("body", justify="right")
+        table.add_column("notes")
+        cat_total = body_total = 0
+        for c, d in world.harness_loads(hid):
+            notes = []
+            if d.shadowed_by:
+                notes.append("shadowed")
+            if d.via_symlink:
+                notes.append("symlink")
+            row = [escape(c.name), escape(d.scope), escape(c.source.kind)]
+            if tokens:
+                row += [str(c.token_cost.catalog_tokens), str(c.token_cost.body_tokens)]
+                if d.shadowed_by is None:
+                    cat_total += c.token_cost.catalog_tokens
+                    body_total += c.token_cost.body_tokens
+            row.append(escape(", ".join(notes)))
+            table.add_row(*row)
+        if tokens:
+            table.add_row("total (effective)", "", "", str(cat_total), str(body_total), "",
+                          style="bold")
+        console.print(table)
+    if hidden:
+        plural = "es" if len(hidden) != 1 else ""
+        console.print(
+            f"[dim]{len(hidden)} more harness{plural} detected with no skills "
+            f"({escape(', '.join(sorted(hidden)))}); show with --all[/dim]"
+        )
+    if tokens:
+        console.print("[dim]token counts are approximate[/dim]")
 
 
 def _print_finding(world: World, f: Finding, console: Console) -> None:

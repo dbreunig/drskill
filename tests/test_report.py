@@ -105,3 +105,52 @@ def test_render_escapes_rich_markup_in_dynamic_text():
     assert "[/weird]" in text
     assert "[red]sneaky[/red]" in text
     assert "[bold]x[/bold]" in text
+
+
+def world_two_harnesses():
+    from drskill.models import Deployment
+
+    c = make_contributor(id="/a", name="alpha")
+    c.deployments.append(
+        Deployment(
+            harness="claude-code", path="/a", scope="project",
+            via_symlink=False, order=0,
+        )
+    )
+    return World(
+        contributors={"/a": c},
+        harnesses={
+            "claude-code": HarnessDef(
+                id="claude-code", display_name="Claude Code", verified=True
+            ),
+            "qwen-code": HarnessDef(
+                id="qwen-code", display_name="Qwen Code", verified=False
+            ),
+        },
+    )
+
+
+def tables_to_text(world, **kwargs):
+    from drskill.report import render_harness_tables
+
+    console = Console(record=True, width=120, force_terminal=False)
+    render_harness_tables(world, console, **kwargs)
+    return console.export_text()
+
+
+def test_empty_harness_hidden_by_default():
+    text = tables_to_text(world_two_harnesses())
+    assert "Claude Code" in text and "alpha" in text
+    assert "Qwen Code" not in text
+    assert "1 more harness detected with no skills (qwen-code); show with --all" in text
+
+
+def test_show_all_includes_empty():
+    text = tables_to_text(world_two_harnesses(), show_all=True)
+    assert "Qwen Code" in text
+    assert "show with --all" not in text
+
+
+def test_harness_filter_suppresses_closing_line():
+    text = tables_to_text(world_two_harnesses(), harness="claude-code")
+    assert "Claude Code" in text and "show with --all" not in text

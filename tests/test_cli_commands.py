@@ -111,3 +111,19 @@ def test_list_survives_markup_in_skill_names(tmp_path):
     r = invoke(tmp_path, "list", "--tokens")
     assert r.exit_code == 0
     assert r.exception is None
+
+
+def test_list_unknown_harness_errors(tmp_path):
+    r = invoke(tmp_path, "list", "--harness", "bogus")
+    assert r.exit_code == 1
+    assert "unknown harness" in r.output and "claude-code" in r.output
+
+
+def test_list_all_shows_empty_harnesses(tmp_path):
+    proj = tmp_path / "proj"
+    write(proj, "alpha", "First.", "body")
+    (proj / ".pi").mkdir()
+    r = invoke(tmp_path, "list")
+    assert "Pi" not in r.output
+    r_all = invoke(tmp_path, "list", "--all")
+    assert "Pi" in r_all.output

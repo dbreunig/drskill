@@ -7,7 +7,6 @@ from pathlib import Path
 import typer
 from rich.console import Console
 from rich.markup import escape
-from rich.table import Table
 
 from drskill import ledger, report
 from drskill.ledger import Ack
@@ -32,6 +31,20 @@ console = Console()
 def _home() -> Path:
     env = os.environ.get("DRSKILL_HOME")
     return Path(env) if env else Path.home()
+
+
+def _validate_harness(harness: str | None) -> None:
+    if harness is None:
+        return
+    from drskill.harnesses import load_harnesses
+
+    ids = sorted(h.id for h in load_harnesses())
+    if harness not in ids:
+        console.print(
+            f"[red]error:[/red] unknown harness {escape(harness)}; "
+            f"valid ids: {escape(', '.join(ids))}"
+        )
+        raise typer.Exit(1)
 
 
 def _load_config_or_exit(path: Path) -> ledger.Config:
@@ -118,46 +131,18 @@ def ack(
 def list_cmd(
     tokens: bool = typer.Option(False, "--tokens"),
     harness: str | None = typer.Option(None, "--harness"),
+    show_all: bool = typer.Option(False, "--all", help="include harnesses with no skills"),
     root: Path = typer.Option(Path("."), "--root", hidden=True),
     global_mode: bool = typer.Option(False, "--global"),
 ) -> None:
     """Show each harness's effective skill set."""
+    _validate_harness(harness)
     home = _home()
     config = _load_config_or_exit(ledger.ledger_path(root, home, global_mode))
     world, _findings = run_scan(root, home, global_mode, config)
-    for hid, hdef in sorted(world.harnesses.items()):
-        if harness and hid != harness:
-            continue
-        title = escape(hdef.display_name) + ("" if hdef.verified else " (best effort)")
-        table = Table(title=title)
-        table.add_column("skill")
-        table.add_column("scope")
-        table.add_column("source")
-        if tokens:
-            table.add_column("catalog", justify="right")
-            table.add_column("body", justify="right")
-        table.add_column("notes")
-        cat_total = body_total = 0
-        for c, d in world.harness_loads(hid):
-            notes = []
-            if d.shadowed_by:
-                notes.append("shadowed")
-            if d.via_symlink:
-                notes.append("symlink")
-            row = [escape(c.name), escape(d.scope), escape(c.source.kind)]
-            if tokens:
-                row += [str(c.token_cost.catalog_tokens), str(c.token_cost.body_tokens)]
-                if d.shadowed_by is None:
-                    cat_total += c.token_cost.catalog_tokens
-                    body_total += c.token_cost.body_tokens
-            row.append(escape(", ".join(notes)))
-            table.add_row(*row)
-        if tokens:
-            table.add_row("total (effective)", "", "", str(cat_total), str(body_total), "",
-                          style="bold")
-        console.print(table)
-    if tokens:
-        console.print("[dim]token counts are approximate[/dim]")
+    report.render_harness_tables(
+        world, console, tokens=tokens, harness=harness, show_all=show_all
+    )
 
 
 @app.command()
