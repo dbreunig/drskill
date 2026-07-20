@@ -149,3 +149,12 @@ def test_scan_valid_but_undetected_harness_notes_and_passes(tmp_path):
     r = scan(tmp_path, "--harness", "qwen-code")
     assert r.exit_code == 0
     assert "not detected" in r.output
+
+
+def test_scan_detailed_scoped_shows_harness_table_not_footer(tmp_path):
+    proj = tmp_path / "proj"
+    write(proj, "clean", "---\nname: clean\ndescription: fine\n---\nb\n")
+    r = scan(tmp_path, "--harness", "qwen-code", "--detailed")
+    assert r.exit_code == 0
+    assert "Qwen Code" in r.output
+    assert "show with --all" not in r.output

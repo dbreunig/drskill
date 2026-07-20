@@ -47,6 +47,21 @@ def _validate_harness(harness: str | None) -> None:
         raise typer.Exit(1)
 
 
+def _warn_if_undetected(
+    harness: str | None, root: Path, home: Path, global_mode: bool
+) -> None:
+    if harness is None:
+        return
+    from drskill.harnesses import detect_harnesses
+
+    detected = {h.id for h in detect_harnesses(root, home, global_mode)}
+    if harness not in detected:
+        console.print(
+            f"[dim]note: harness {escape(harness)} is not detected on this "
+            "machine; scanning its search paths anyway[/dim]"
+        )
+
+
 def _load_config_or_exit(path: Path) -> ledger.Config:
     try:
         return ledger.load_config(path)
@@ -79,20 +94,12 @@ def scan(
     if as_json:
         print(report.to_json(active))
     else:
-        if harness is not None:
-            from drskill.harnesses import detect_harnesses
-
-            detected = {h.id for h in detect_harnesses(root, home, global_mode)}
-            if harness not in detected:
-                console.print(
-                    f"[dim]note: harness {escape(harness)} is not detected on this "
-                    "machine; scanning its search paths anyway[/dim]"
-                )
+        _warn_if_undetected(harness, root, home, global_mode)
         report.render(world, active, acked, console)
         if detailed:
             console.print()
             report.render_harness_tables(
-                world, console, tokens=False, harness=None, show_all=show_all
+                world, console, tokens=False, harness=harness, show_all=show_all
             )
     if any(f.severity == "error" for f in active):
         raise typer.Exit(1)
@@ -157,7 +164,8 @@ def list_cmd(
     _validate_harness(harness)
     home = _home()
     config = _load_config_or_exit(ledger.ledger_path(root, home, global_mode))
-    world, _findings = run_scan(root, home, global_mode, config)
+    world, _findings = run_scan(root, home, global_mode, config, harness=harness)
+    _warn_if_undetected(harness, root, home, global_mode)
     report.render_harness_tables(
         world, console, tokens=tokens, harness=harness, show_all=show_all
     )

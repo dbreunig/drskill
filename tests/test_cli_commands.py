@@ -127,3 +127,12 @@ def test_list_all_shows_empty_harnesses(tmp_path):
     assert "Pi" not in r.output
     r_all = invoke(tmp_path, "list", "--all")
     assert "Pi" in r_all.output
+
+
+def test_list_scoped_undetected_harness_shows_empty_table(tmp_path):
+    proj = tmp_path / "proj"
+    write(proj, "alpha", "First.", "body")
+    r = invoke(tmp_path, "list", "--harness", "qwen-code")
+    assert r.exit_code == 0
+    assert "Qwen Code" in r.output
+    assert "not detected" in r.output
