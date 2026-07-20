@@ -59,3 +59,44 @@ def test_generic_threshold_tunable(tmp_path):
     cfg.thresholds.generic_min_distinct_tokens = 5
     findings = run_all(world_from(proj, home), cfg)
     assert by_check(findings, "generic-description")
+
+
+PILE_A = "Use when the user asks to write project documentation pages."
+PILE_B = "Use when the user asks to write project documentation summaries."
+PILE_C = "Use when the user asks to write project documentation chapters."
+
+
+def test_overlap_cluster_fires_with_shared_phrases(tmp_path):
+    proj, home = tmp_path / "p", tmp_path / "h"
+    write(proj, "doc-a", PILE_A, body="a" * 40)
+    write(proj, "doc-b", PILE_B, body="b" * 40)
+    write(proj, "doc-c", PILE_C, body="c" * 40)
+    write(proj, "git-helper", "Use when the user asks to rebase with git.", body="g" * 40)
+    findings = run_all(world_from(proj, home), Config())
+    hits = by_check(findings, "description-overlap")
+    assert len(hits) == 1
+    assert set(hits[0].contributor_names) == {"doc-a", "doc-b", "doc-c"}
+    assert "write project documentation" in hits[0].message
+    assert "git-helper" not in hits[0].contributor_names
+
+
+def test_overlap_excludes_duplicate_pairs(tmp_path):
+    proj, home = tmp_path / "p", tmp_path / "h"
+    shared_body = "Collect the metrics and summarize each work stream carefully. " * 10
+    write(proj, "dup-a", PILE_A, body=shared_body)
+    write(proj, "dup-b", PILE_B, body=shared_body + "extra.")
+    cfg = Config()
+    cfg.thresholds.near_duplicate = 0.5  # make the pair a near-duplicate
+    findings = run_all(world_from(proj, home), cfg)
+    assert by_check(findings, "near-duplicate")
+    assert by_check(findings, "description-overlap") == []
+
+
+def test_overlap_threshold_tunable(tmp_path):
+    proj, home = tmp_path / "p", tmp_path / "h"
+    write(proj, "doc-a", PILE_A, body="a" * 40)
+    write(proj, "doc-b", PILE_B, body="b" * 40)
+    cfg = Config()
+    cfg.thresholds.description_overlap = 0.999
+    findings = run_all(world_from(proj, home), cfg)
+    assert by_check(findings, "description-overlap") == []

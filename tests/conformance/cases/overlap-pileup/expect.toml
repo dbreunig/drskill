@@ -1,0 +1,3 @@
+[[expect]]
+check = "description-overlap"
+skills = ["doc-pages", "doc-summaries", "doc-chapters"]
