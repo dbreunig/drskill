@@ -1,0 +1,28 @@
+# Harness definition table.
+# verified = true means these rules were confirmed against the harness's own
+# docs or source. Unverified entries are best effort and labeled so in reports.
+
+[[harness]]
+id = "claude-code"
+display_name = "Claude Code"
+verified = true
+detect = [".claude", "~/.claude"]
+project_paths = [".claude/skills"]
+global_paths = ["~/.claude/skills"]
+search_order = "project-first"
+recursive = true
+root_md_paths = []
+
+# Verified against pi docs (packages/coding-agent/docs/skills.md):
+# global paths load first and first-found wins; bare .md files count as
+# skills only in the two pi-native directories.
+[[harness]]
+id = "pi"
+display_name = "Pi"
+verified = true
+detect = [".pi", "~/.pi"]
+project_paths = [".pi/skills", ".agents/skills"]
+global_paths = ["~/.pi/agent/skills", "~/.agents/skills"]
+search_order = "global-first"
+recursive = true
+root_md_paths = [".pi/skills", "~/.pi/agent/skills"]
