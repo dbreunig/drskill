@@ -1,12 +1,14 @@
 # Harness definition table.
-# verified = true means these rules were confirmed against the harness's own
-# docs or source. Unverified entries are best effort and labeled so in reports.
+# paths_verified means the directories and recursion rules were confirmed
+# against the harness's own docs or source; precedence_verified means the
+# name-collision behavior was too. Unverified facets are labeled in reports.
 #
 # The entries below marked "vendored" are seeded from the agent -> directory
 # mapping in vercel-labs/skills (MIT license), src/agents.ts, upstream commit
 # 777599e1159e401b11ce4c8a57c20f09a8f1596e (cloned and inspected 2026-07-19).
 # They are best-effort convenience data, not independently confirmed against
-# each harness's own docs or source, and stay verified = false. detect markers
+# each harness's own docs or source, and stay unverified on both facets.
+# detect markers
 # are a best-effort simplification of that file's detectInstalled() checks
 # (drskill's detect schema only supports OR'd existence markers, not the
 # compound / cwd+package.json conditions some upstream entries use). Global
@@ -16,7 +18,8 @@
 [[harness]]
 id = "claude-code"
 display_name = "Claude Code"
-verified = true
+paths_verified = true
+precedence_verified = true
 detect = [".claude", "~/.claude"]
 project_paths = [".claude/skills"]
 global_paths = ["~/.claude/skills"]
@@ -30,7 +33,8 @@ root_md_paths = []
 [[harness]]
 id = "pi"
 display_name = "Pi"
-verified = true
+paths_verified = true
+precedence_verified = true
 detect = [".pi", "~/.pi"]
 project_paths = [".pi/skills", ".agents/skills"]
 global_paths = ["~/.pi/agent/skills", "~/.agents/skills"]
@@ -48,11 +52,13 @@ root_md_paths = [".pi/skills", "~/.pi/agent/skills"]
 # NOT verified: which path wins when a project skill and a global skill
 # share a name. Neither page documents precedence/override behavior for
 # that case, so search_order below is the seeded guess, not a confirmed
-# fact -- kept verified = false for the whole entry on that basis.
+# fact. Granular verification 2026-07-20: paths_verified = true (dirs and
+# recursion are doc-confirmed above); precedence_verified = false.
 [[harness]]
 id = "cursor"
 display_name = "Cursor"
-verified = false
+paths_verified = true
+precedence_verified = false
 detect = [".cursor", "~/.cursor"]
 project_paths = [".cursor/skills", ".agents/skills"]
 global_paths = ["~/.cursor/skills", "~/.agents/skills"]
@@ -79,22 +85,19 @@ root_md_paths = []
 # both instances remain visible rather than one shadowing the other.
 # search_order = "project-first" reflects the confirmed scan order (project
 # roots are the higher-precedence layer), not a strict override guarantee.
-# Controller ruling 2026-07-19: kept verified = false despite the above --
-# the brief's bar requires all three facts (dirs, recursion, collision
-# winner) confirmed, and codex's real collision behavior cannot be
-# expressed by our binary search_order. Encoding search_order =
-# "project-first" here is an approximation, not a confirmed winner rule;
-# revisit once the schema supports search_order = "none" for harnesses
-# that don't shadow on name collisions. Paths and recursion above remain
-# source-confirmed.
+# Granular verification 2026-07-20: search_order = "none" now expresses
+# codex's confirmed no-shadowing collision behavior, so both facets are
+# verified (paths and recursion from source, collision rule from
+# developers.openai.com/codex/skills).
 [[harness]]
 id = "codex"
 display_name = "Codex CLI"
-verified = false
+paths_verified = true
+precedence_verified = true
 detect = [".codex", "~/.codex"]
 project_paths = [".codex/skills", ".agents/skills"]
 global_paths = ["~/.codex/skills", "~/.agents/skills"]
-search_order = "project-first"
+search_order = "none"
 recursive = true
 root_md_paths = []
 
@@ -107,12 +110,14 @@ root_md_paths = []
 # recursive within a skill directory, and do not state which location
 # wins when a project skill and a personal skill share a name. The CLI
 # is closed source (github/copilot-cli only ships install scripts), so
-# there was no source to check either. Kept verified = false; recursive
-# and search_order below are unconfirmed seed defaults.
+# there was no source to check either. Unverified on both facets:
+# recursion is a paths-facet fact, so paths_verified stays false too;
+# recursive and search_order below are unconfirmed seed defaults.
 [[harness]]
 id = "copilot"
 display_name = "GitHub Copilot CLI"
-verified = false
+paths_verified = false
+precedence_verified = false
 detect = [".github/copilot-instructions.md", "~/.copilot"]
 project_paths = [".github/skills", ".claude/skills", ".agents/skills"]
 global_paths = ["~/.copilot/skills", "~/.agents/skills"]
@@ -137,7 +142,8 @@ root_md_paths = []
 [[harness]]
 id = "gemini-cli"
 display_name = "Gemini CLI"
-verified = true
+paths_verified = true
+precedence_verified = true
 detect = [".gemini", "~/.gemini"]
 project_paths = [".gemini/skills", ".agents/skills"]
 global_paths = ["~/.gemini/skills", "~/.agents/skills"]
@@ -146,12 +152,14 @@ recursive = false
 root_md_paths = []
 
 # --- Vendored from vercel-labs/skills (MIT), commit 777599e1159e401b11ce4c8a57c20f09a8f1596e ---
-# All entries below are verified = false; see header comment for provenance.
+# All entries below are unverified on both facets; see the header comment
+# for provenance.
 
 [[harness]]
 id = "adal"
 display_name = "AdaL"
-verified = false
+paths_verified = false
+precedence_verified = false
 detect = ["~/.adal"]
 project_paths = [".adal/skills"]
 global_paths = ["~/.adal/skills"]
@@ -162,7 +170,8 @@ root_md_paths = []
 [[harness]]
 id = "aider-desk"
 display_name = "AiderDesk"
-verified = false
+paths_verified = false
+precedence_verified = false
 detect = ["~/.aider-desk"]
 project_paths = [".aider-desk/skills"]
 global_paths = ["~/.aider-desk/skills"]
@@ -173,7 +182,8 @@ root_md_paths = []
 [[harness]]
 id = "amp"
 display_name = "Amp"
-verified = false
+paths_verified = false
+precedence_verified = false
 detect = ["~/.config/amp"]
 project_paths = [".agents/skills"]
 global_paths = ["~/.config/agents/skills"]
@@ -184,7 +194,8 @@ root_md_paths = []
 [[harness]]
 id = "antigravity"
 display_name = "Antigravity"
-verified = false
+paths_verified = false
+precedence_verified = false
 detect = ["~/.gemini/antigravity"]
 project_paths = [".agents/skills"]
 global_paths = ["~/.gemini/antigravity/skills"]
@@ -195,7 +206,8 @@ root_md_paths = []
 [[harness]]
 id = "antigravity-cli"
 display_name = "Antigravity CLI"
-verified = false
+paths_verified = false
+precedence_verified = false
 detect = ["~/.gemini/antigravity-cli"]
 project_paths = [".agents/skills"]
 global_paths = ["~/.gemini/antigravity-cli/skills"]
@@ -206,7 +218,8 @@ root_md_paths = []
 [[harness]]
 id = "astrbot"
 display_name = "AstrBot"
-verified = false
+paths_verified = false
+precedence_verified = false
 detect = ["~/.astrbot", "data/skills"]
 project_paths = ["data/skills"]
 global_paths = ["~/.astrbot/data/skills"]
@@ -217,7 +230,8 @@ root_md_paths = []
 [[harness]]
 id = "augment"
 display_name = "Augment"
-verified = false
+paths_verified = false
+precedence_verified = false
 detect = ["~/.augment"]
 project_paths = [".augment/skills"]
 global_paths = ["~/.augment/skills"]
@@ -228,7 +242,8 @@ root_md_paths = []
 [[harness]]
 id = "autohand-code"
 display_name = "Autohand Code CLI"
-verified = false
+paths_verified = false
+precedence_verified = false
 detect = ["~/.autohand"]
 project_paths = [".autohand/skills"]
 global_paths = ["~/.autohand/skills"]
@@ -239,7 +254,8 @@ root_md_paths = []
 [[harness]]
 id = "bob"
 display_name = "IBM Bob"
-verified = false
+paths_verified = false
+precedence_verified = false
 detect = ["~/.bob"]
 project_paths = [".bob/skills"]
 global_paths = ["~/.bob/skills"]
@@ -247,21 +263,43 @@ search_order = "project-first"
 recursive = true
 root_md_paths = []
 
+# Verified against source, 2026-07-20: github.com/cline/cline
+# (commit cabeb61036561b83b857d34fe1089460b04485a8).
+# apps/vscode/src/core/storage/skill-directories.ts getSkillsDirectoriesForScan()
+# lists four project-relative roots (.clinerules/skills, .cline/skills,
+# .claude/skills, .agents/skills) and two global roots (~/.cline/skills,
+# ~/.agents/skills); docs/customization/skills.mdx documents the first
+# three project dirs and ~/.cline/skills but omits the .agents/skills
+# pair, which only the source confirms.
+# apps/vscode/src/core/context/instructions/user-instructions/skills.ts
+# scanSkillsDirectory() does fs.readdir(dirPath) one level to find skill
+# subfolders, then loadSkillMetadata() looks for exactly
+# `<skillDir>/SKILL.md` -- equivalent to a `*/SKILL.md` glob, not an
+# arbitrary-depth walk -- so recursive = false.
+# discoverSkills()/getAvailableSkills() push project skills first, then
+# disk-global, then remote/enterprise, and dedupe by iterating the array
+# backwards so later entries win; docs/customization/skills.mdx confirms
+# in prose: "When a global skill and project skill have the same name,
+# the global skill takes precedence." One entry wins outright -- the
+# shadowed project skill is dropped from getAvailableSkills(), not kept
+# visible alongside it.
 [[harness]]
 id = "cline"
 display_name = "Cline"
-verified = false
-detect = ["~/.cline"]
-project_paths = [".agents/skills"]
-global_paths = ["~/.agents/skills"]
-search_order = "project-first"
-recursive = true
+paths_verified = true
+precedence_verified = true
+detect = [".clinerules", "~/.cline"]
+project_paths = [".clinerules/skills", ".cline/skills", ".claude/skills", ".agents/skills"]
+global_paths = ["~/.cline/skills", "~/.agents/skills"]
+search_order = "global-first"
+recursive = false
 root_md_paths = []
 
 [[harness]]
 id = "codearts-agent"
 display_name = "CodeArts Agent"
-verified = false
+paths_verified = false
+precedence_verified = false
 detect = ["~/.codeartsdoer"]
 project_paths = [".codeartsdoer/skills"]
 global_paths = ["~/.codeartsdoer/skills"]
@@ -272,7 +310,8 @@ root_md_paths = []
 [[harness]]
 id = "codebuddy"
 display_name = "CodeBuddy"
-verified = false
+paths_verified = false
+precedence_verified = false
 detect = ["~/.codebuddy", ".codebuddy"]
 project_paths = [".codebuddy/skills"]
 global_paths = ["~/.codebuddy/skills"]
@@ -283,7 +322,8 @@ root_md_paths = []
 [[harness]]
 id = "codemaker"
 display_name = "Codemaker"
-verified = false
+paths_verified = false
+precedence_verified = false
 detect = ["~/.codemaker"]
 project_paths = [".codemaker/skills"]
 global_paths = ["~/.codemaker/skills"]
@@ -294,7 +334,8 @@ root_md_paths = []
 [[harness]]
 id = "codestudio"
 display_name = "Code Studio"
-verified = false
+paths_verified = false
+precedence_verified = false
 detect = ["~/.codestudio"]
 project_paths = [".codestudio/skills"]
 global_paths = ["~/.codestudio/skills"]
@@ -305,7 +346,8 @@ root_md_paths = []
 [[harness]]
 id = "command-code"
 display_name = "Command Code"
-verified = false
+paths_verified = false
+precedence_verified = false
 detect = ["~/.commandcode"]
 project_paths = [".commandcode/skills"]
 global_paths = ["~/.commandcode/skills"]
@@ -316,7 +358,8 @@ root_md_paths = []
 [[harness]]
 id = "continue"
 display_name = "Continue"
-verified = false
+paths_verified = false
+precedence_verified = false
 detect = ["~/.continue", ".continue"]
 project_paths = [".continue/skills"]
 global_paths = ["~/.continue/skills"]
@@ -327,7 +370,8 @@ root_md_paths = []
 [[harness]]
 id = "cortex"
 display_name = "Cortex Code"
-verified = false
+paths_verified = false
+precedence_verified = false
 detect = ["~/.snowflake/cortex"]
 project_paths = [".cortex/skills"]
 global_paths = ["~/.snowflake/cortex/skills"]
@@ -338,7 +382,8 @@ root_md_paths = []
 [[harness]]
 id = "crush"
 display_name = "Crush"
-verified = false
+paths_verified = false
+precedence_verified = false
 detect = ["~/.config/crush"]
 project_paths = [".crush/skills"]
 global_paths = ["~/.config/crush/skills"]
@@ -349,7 +394,8 @@ root_md_paths = []
 [[harness]]
 id = "deepagents"
 display_name = "Deep Agents"
-verified = false
+paths_verified = false
+precedence_verified = false
 detect = ["~/.deepagents"]
 project_paths = [".agents/skills"]
 global_paths = ["~/.deepagents/agent/skills"]
@@ -360,7 +406,8 @@ root_md_paths = []
 [[harness]]
 id = "devin"
 display_name = "Devin for Terminal"
-verified = false
+paths_verified = false
+precedence_verified = false
 detect = ["~/.config/devin"]
 project_paths = [".devin/skills"]
 global_paths = ["~/.config/devin/skills"]
@@ -371,7 +418,8 @@ root_md_paths = []
 [[harness]]
 id = "dexto"
 display_name = "Dexto"
-verified = false
+paths_verified = false
+precedence_verified = false
 detect = ["~/.dexto"]
 project_paths = [".agents/skills"]
 global_paths = ["~/.agents/skills"]
@@ -382,7 +430,8 @@ root_md_paths = []
 [[harness]]
 id = "droid"
 display_name = "Droid"
-verified = false
+paths_verified = false
+precedence_verified = false
 detect = ["~/.factory"]
 project_paths = [".factory/skills"]
 global_paths = ["~/.factory/skills"]
@@ -393,7 +442,8 @@ root_md_paths = []
 [[harness]]
 id = "eve"
 display_name = "Eve"
-verified = false
+paths_verified = false
+precedence_verified = false
 detect = ["agent"]
 project_paths = ["agent/skills"]
 global_paths = []
@@ -404,7 +454,8 @@ root_md_paths = []
 [[harness]]
 id = "firebender"
 display_name = "Firebender"
-verified = false
+paths_verified = false
+precedence_verified = false
 detect = ["~/.firebender"]
 project_paths = [".agents/skills"]
 global_paths = ["~/.firebender/skills"]
@@ -415,7 +466,8 @@ root_md_paths = []
 [[harness]]
 id = "forgecode"
 display_name = "ForgeCode"
-verified = false
+paths_verified = false
+precedence_verified = false
 detect = ["~/.forge"]
 project_paths = [".forge/skills"]
 global_paths = ["~/.forge/skills"]
@@ -426,7 +478,8 @@ root_md_paths = []
 [[harness]]
 id = "goose"
 display_name = "Goose"
-verified = false
+paths_verified = false
+precedence_verified = false
 detect = ["~/.config/goose"]
 project_paths = [".goose/skills"]
 global_paths = ["~/.config/goose/skills"]
@@ -437,7 +490,8 @@ root_md_paths = []
 [[harness]]
 id = "hermes-agent"
 display_name = "Hermes Agent"
-verified = false
+paths_verified = false
+precedence_verified = false
 detect = ["~/.hermes"]
 project_paths = [".hermes/skills"]
 global_paths = ["~/.hermes/skills"]
@@ -448,7 +502,8 @@ root_md_paths = []
 [[harness]]
 id = "iflow-cli"
 display_name = "iFlow CLI"
-verified = false
+paths_verified = false
+precedence_verified = false
 detect = ["~/.iflow"]
 project_paths = [".iflow/skills"]
 global_paths = ["~/.iflow/skills"]
@@ -459,7 +514,8 @@ root_md_paths = []
 [[harness]]
 id = "inference-sh"
 display_name = "inference.sh"
-verified = false
+paths_verified = false
+precedence_verified = false
 detect = ["~/.inferencesh"]
 project_paths = [".inferencesh/skills"]
 global_paths = ["~/.inferencesh/skills"]
@@ -470,7 +526,8 @@ root_md_paths = []
 [[harness]]
 id = "jazz"
 display_name = "Jazz"
-verified = false
+paths_verified = false
+precedence_verified = false
 detect = ["~/.jazz", ".jazz"]
 project_paths = [".jazz/skills"]
 global_paths = ["~/.jazz/skills"]
@@ -481,7 +538,8 @@ root_md_paths = []
 [[harness]]
 id = "junie"
 display_name = "Junie"
-verified = false
+paths_verified = false
+precedence_verified = false
 detect = ["~/.junie"]
 project_paths = [".junie/skills"]
 global_paths = ["~/.junie/skills"]
@@ -492,7 +550,8 @@ root_md_paths = []
 [[harness]]
 id = "kilo"
 display_name = "Kilo Code"
-verified = false
+paths_verified = false
+precedence_verified = false
 detect = ["~/.kilocode"]
 project_paths = [".kilocode/skills"]
 global_paths = ["~/.kilocode/skills"]
@@ -503,7 +562,8 @@ root_md_paths = []
 [[harness]]
 id = "kimi-code-cli"
 display_name = "Kimi Code CLI"
-verified = false
+paths_verified = false
+precedence_verified = false
 detect = ["~/.kimi-code", "~/.kimi"]
 project_paths = [".agents/skills"]
 global_paths = ["~/.agents/skills"]
@@ -514,7 +574,8 @@ root_md_paths = []
 [[harness]]
 id = "kiro-cli"
 display_name = "Kiro CLI"
-verified = false
+paths_verified = false
+precedence_verified = false
 detect = ["~/.kiro"]
 project_paths = [".kiro/skills"]
 global_paths = ["~/.kiro/skills"]
@@ -525,7 +586,8 @@ root_md_paths = []
 [[harness]]
 id = "kode"
 display_name = "Kode"
-verified = false
+paths_verified = false
+precedence_verified = false
 detect = ["~/.kode"]
 project_paths = [".kode/skills"]
 global_paths = ["~/.kode/skills"]
@@ -536,7 +598,8 @@ root_md_paths = []
 [[harness]]
 id = "lingma"
 display_name = "Lingma"
-verified = false
+paths_verified = false
+precedence_verified = false
 detect = ["~/.lingma"]
 project_paths = [".lingma/skills"]
 global_paths = ["~/.lingma/skills"]
@@ -547,7 +610,8 @@ root_md_paths = []
 [[harness]]
 id = "loaf"
 display_name = "Loaf"
-verified = false
+paths_verified = false
+precedence_verified = false
 detect = ["~/.loaf"]
 project_paths = [".agents/skills"]
 global_paths = ["~/.agents/skills"]
@@ -558,7 +622,8 @@ root_md_paths = []
 [[harness]]
 id = "mcpjam"
 display_name = "MCPJam"
-verified = false
+paths_verified = false
+precedence_verified = false
 detect = ["~/.mcpjam"]
 project_paths = [".mcpjam/skills"]
 global_paths = ["~/.mcpjam/skills"]
@@ -569,7 +634,8 @@ root_md_paths = []
 [[harness]]
 id = "mistral-vibe"
 display_name = "Mistral Vibe"
-verified = false
+paths_verified = false
+precedence_verified = false
 detect = ["~/.vibe"]
 project_paths = [".vibe/skills"]
 global_paths = ["~/.vibe/skills"]
@@ -580,7 +646,8 @@ root_md_paths = []
 [[harness]]
 id = "moxby"
 display_name = "Moxby"
-verified = false
+paths_verified = false
+precedence_verified = false
 detect = ["~/.moxby"]
 project_paths = [".moxby/skills"]
 global_paths = ["~/.moxby/skills"]
@@ -591,7 +658,8 @@ root_md_paths = []
 [[harness]]
 id = "mux"
 display_name = "Mux"
-verified = false
+paths_verified = false
+precedence_verified = false
 detect = ["~/.mux"]
 project_paths = [".mux/skills"]
 global_paths = ["~/.mux/skills"]
@@ -602,7 +670,8 @@ root_md_paths = []
 [[harness]]
 id = "neovate"
 display_name = "Neovate"
-verified = false
+paths_verified = false
+precedence_verified = false
 detect = ["~/.neovate"]
 project_paths = [".neovate/skills"]
 global_paths = ["~/.neovate/skills"]
@@ -613,7 +682,8 @@ root_md_paths = []
 [[harness]]
 id = "ona"
 display_name = "Ona"
-verified = false
+paths_verified = false
+precedence_verified = false
 detect = ["~/.ona"]
 project_paths = [".ona/skills"]
 global_paths = ["~/.ona/skills"]
@@ -624,7 +694,8 @@ root_md_paths = []
 [[harness]]
 id = "openclaw"
 display_name = "OpenClaw"
-verified = false
+paths_verified = false
+precedence_verified = false
 detect = ["~/.openclaw", "~/.clawdbot", "~/.moltbot"]
 project_paths = ["skills"]
 global_paths = ["~/.openclaw/skills"]
@@ -635,7 +706,8 @@ root_md_paths = []
 [[harness]]
 id = "opencode"
 display_name = "OpenCode"
-verified = false
+paths_verified = false
+precedence_verified = false
 detect = ["~/.config/opencode"]
 project_paths = [".agents/skills"]
 global_paths = ["~/.config/opencode/skills"]
@@ -646,7 +718,8 @@ root_md_paths = []
 [[harness]]
 id = "openhands"
 display_name = "OpenHands"
-verified = false
+paths_verified = false
+precedence_verified = false
 detect = ["~/.openhands"]
 project_paths = [".openhands/skills"]
 global_paths = ["~/.openhands/skills"]
@@ -657,7 +730,8 @@ root_md_paths = []
 [[harness]]
 id = "pochi"
 display_name = "Pochi"
-verified = false
+paths_verified = false
+precedence_verified = false
 detect = ["~/.pochi"]
 project_paths = [".pochi/skills"]
 global_paths = ["~/.pochi/skills"]
@@ -668,7 +742,8 @@ root_md_paths = []
 [[harness]]
 id = "promptscript"
 display_name = "PromptScript"
-verified = false
+paths_verified = false
+precedence_verified = false
 detect = [".promptscript", "promptscript.yaml"]
 project_paths = [".agents/skills"]
 global_paths = []
@@ -679,7 +754,8 @@ root_md_paths = []
 [[harness]]
 id = "qoder"
 display_name = "Qoder"
-verified = false
+paths_verified = false
+precedence_verified = false
 detect = ["~/.qoder"]
 project_paths = [".qoder/skills"]
 global_paths = ["~/.qoder/skills"]
@@ -690,7 +766,8 @@ root_md_paths = []
 [[harness]]
 id = "qoder-cn"
 display_name = "Qoder CN"
-verified = false
+paths_verified = false
+precedence_verified = false
 detect = ["~/.qoder-cn"]
 project_paths = [".qoder/skills"]
 global_paths = ["~/.qoder-cn/skills"]
@@ -701,7 +778,8 @@ root_md_paths = []
 [[harness]]
 id = "qwen-code"
 display_name = "Qwen Code"
-verified = false
+paths_verified = false
+precedence_verified = false
 detect = ["~/.qwen"]
 project_paths = [".qwen/skills"]
 global_paths = ["~/.qwen/skills"]
@@ -712,7 +790,8 @@ root_md_paths = []
 [[harness]]
 id = "reasonix"
 display_name = "Reasonix"
-verified = false
+paths_verified = false
+precedence_verified = false
 detect = ["~/.reasonix"]
 project_paths = [".reasonix/skills"]
 global_paths = ["~/.reasonix/skills"]
@@ -723,7 +802,8 @@ root_md_paths = []
 [[harness]]
 id = "replit"
 display_name = "Replit"
-verified = false
+paths_verified = false
+precedence_verified = false
 detect = [".replit"]
 project_paths = [".agents/skills"]
 global_paths = ["~/.config/agents/skills"]
@@ -734,7 +814,8 @@ root_md_paths = []
 [[harness]]
 id = "roo"
 display_name = "Roo Code"
-verified = false
+paths_verified = false
+precedence_verified = false
 detect = ["~/.roo"]
 project_paths = [".roo/skills"]
 global_paths = ["~/.roo/skills"]
@@ -745,7 +826,8 @@ root_md_paths = []
 [[harness]]
 id = "rovodev"
 display_name = "Rovo Dev"
-verified = false
+paths_verified = false
+precedence_verified = false
 detect = ["~/.rovodev"]
 project_paths = [".rovodev/skills"]
 global_paths = ["~/.rovodev/skills"]
@@ -756,7 +838,8 @@ root_md_paths = []
 [[harness]]
 id = "tabnine-cli"
 display_name = "Tabnine CLI"
-verified = false
+paths_verified = false
+precedence_verified = false
 detect = ["~/.tabnine"]
 project_paths = [".tabnine/agent/skills"]
 global_paths = ["~/.tabnine/agent/skills"]
@@ -767,7 +850,8 @@ root_md_paths = []
 [[harness]]
 id = "terramind"
 display_name = "Terramind"
-verified = false
+paths_verified = false
+precedence_verified = false
 detect = ["~/.terramind"]
 project_paths = [".terramind/skills"]
 global_paths = ["~/.terramind/skills"]
@@ -778,7 +862,8 @@ root_md_paths = []
 [[harness]]
 id = "tinycloud"
 display_name = "Tinycloud"
-verified = false
+paths_verified = false
+precedence_verified = false
 detect = ["~/.tinycloud"]
 project_paths = [".tinycloud/skills"]
 global_paths = ["~/.tinycloud/skills"]
@@ -789,7 +874,8 @@ root_md_paths = []
 [[harness]]
 id = "trae"
 display_name = "Trae"
-verified = false
+paths_verified = false
+precedence_verified = false
 detect = ["~/.trae"]
 project_paths = [".trae/skills"]
 global_paths = ["~/.trae/skills"]
@@ -800,7 +886,8 @@ root_md_paths = []
 [[harness]]
 id = "trae-cn"
 display_name = "Trae CN"
-verified = false
+paths_verified = false
+precedence_verified = false
 detect = ["~/.trae-cn"]
 project_paths = [".trae/skills"]
 global_paths = ["~/.trae-cn/skills"]
@@ -811,7 +898,8 @@ root_md_paths = []
 [[harness]]
 id = "warp"
 display_name = "Warp"
-verified = false
+paths_verified = false
+precedence_verified = false
 detect = ["~/.warp"]
 project_paths = [".agents/skills"]
 global_paths = ["~/.agents/skills"]
@@ -822,7 +910,8 @@ root_md_paths = []
 [[harness]]
 id = "windsurf"
 display_name = "Windsurf"
-verified = false
+paths_verified = false
+precedence_verified = false
 detect = ["~/.codeium/windsurf"]
 project_paths = [".windsurf/skills"]
 global_paths = ["~/.codeium/windsurf/skills"]
@@ -833,7 +922,8 @@ root_md_paths = []
 [[harness]]
 id = "zcode"
 display_name = "ZCode"
-verified = false
+paths_verified = false
+precedence_verified = false
 detect = ["~/.zcode"]
 project_paths = [".zcode/skills"]
 global_paths = ["~/.zcode/skills"]
@@ -844,7 +934,8 @@ root_md_paths = []
 [[harness]]
 id = "zed"
 display_name = "Zed"
-verified = false
+paths_verified = false
+precedence_verified = false
 detect = ["~/.config/zed"]
 project_paths = [".agents/skills"]
 global_paths = ["~/.agents/skills"]
@@ -855,7 +946,8 @@ root_md_paths = []
 [[harness]]
 id = "zencoder"
 display_name = "Zencoder"
-verified = false
+paths_verified = false
+precedence_verified = false
 detect = ["~/.zencoder"]
 project_paths = [".zencoder/skills"]
 global_paths = ["~/.zencoder/skills"]
@@ -871,7 +963,8 @@ root_md_paths = []
 [[harness]]
 id = "zenflow"
 display_name = "Zenflow"
-verified = false
+paths_verified = false
+precedence_verified = false
 detect = ["~/.zencoder"]
 project_paths = [".zencoder/skills"]
 global_paths = ["~/.zencoder/skills"]

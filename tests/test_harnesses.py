@@ -8,8 +8,9 @@ def get(harnesses, hid):
 def test_loads_verified_core():
     hs = load_harnesses()
     assert {"claude-code", "pi"} <= {h.id for h in hs}
-    assert get(hs, "claude-code").verified is True
-    assert get(hs, "pi").verified is True
+    cc, pi = get(hs, "claude-code"), get(hs, "pi")
+    assert cc.paths_verified and cc.precedence_verified
+    assert pi.paths_verified and pi.precedence_verified
 
 
 def test_pi_rules_match_docs():
@@ -53,10 +54,12 @@ def test_core_six_present():
 
 def test_vendored_entries_are_unverified_by_default():
     hs = load_harnesses()
-    core = {"claude-code", "cursor", "codex", "copilot", "gemini-cli", "pi"}
+    core = {"claude-code", "cline", "cursor", "codex", "copilot", "gemini-cli", "pi"}
     for h in hs:
         if h.id not in core:
-            assert h.verified is False, f"{h.id} must stay best-effort"
+            assert not h.paths_verified and not h.precedence_verified, (
+                f"{h.id} must stay best-effort"
+            )
 
 
 def test_every_entry_has_at_least_one_path():

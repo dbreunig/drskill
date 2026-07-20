@@ -12,7 +12,8 @@ from pydantic import BaseModel, Field
 class HarnessDef(BaseModel):
     id: str
     display_name: str
-    verified: bool = False
+    paths_verified: bool = False
+    precedence_verified: bool = False
     detect: list[str] = Field(default_factory=list)
     project_paths: list[str] = Field(default_factory=list)
     global_paths: list[str] = Field(default_factory=list)

@@ -23,11 +23,13 @@ def sample_finding(check="double-load", severity="error", harnesses=("claude-cod
 
 
 def world_with(verified=True):
+    # verified toggles both facets; facet-specific worlds are built inline
     return World(
         contributors={"/a": make_contributor(id="/a", name="pdf-tools")},
         harnesses={
             "claude-code": HarnessDef(
-                id="claude-code", display_name="Claude Code", verified=verified
+                id="claude-code", display_name="Claude Code",
+                paths_verified=verified, precedence_verified=verified
             )
         },
     )
@@ -51,9 +53,31 @@ def test_render_sections_and_ack_line():
     assert "token counts are approximate" in text
 
 
-def test_best_effort_label_for_unverified():
+def test_unverified_paths_marks_harness_and_legend():
     text = render_to_text(world_with(verified=False), [sample_finding()], [])
-    assert "best effort" in text
+    assert "claude-code?" in text
+    assert "has not verified" in text
+
+
+def test_verified_findings_carry_no_marker_or_legend():
+    text = render_to_text(world_with(), [sample_finding()], [])
+    assert "claude-code?" not in text
+    assert "has not verified" not in text
+
+
+def test_precedence_marker_only_on_precedence_checks():
+    world = world_with()
+    world.harnesses["claude-code"] = world.harnesses["claude-code"].model_copy(
+        update={"precedence_verified": False}
+    )
+    shadow = sample_finding(check="name-shadow", severity="warning")
+    diverged = sample_finding(check="diverged-copies", severity="warning")
+    text = render_to_text(world, [shadow, diverged], [])
+    lines = text.splitlines()
+    shadow_idx = next(i for i, ln in enumerate(lines) if "name-shadow" in ln)
+    diverged_idx = next(i for i, ln in enumerate(lines) if "diverged-copies" in ln)
+    assert "claude-code?" in lines[shadow_idx + 1]
+    assert "claude-code?" not in lines[diverged_idx + 1]
 
 
 def test_clean_report():
@@ -121,10 +145,11 @@ def world_two_harnesses():
         contributors={"/a": c},
         harnesses={
             "claude-code": HarnessDef(
-                id="claude-code", display_name="Claude Code", verified=True
+                id="claude-code", display_name="Claude Code",
+                paths_verified=True, precedence_verified=True
             ),
             "qwen-code": HarnessDef(
-                id="qwen-code", display_name="Qwen Code", verified=False
+                id="qwen-code", display_name="Qwen Code"
             ),
         },
     )

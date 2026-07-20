@@ -48,7 +48,8 @@ def fetch(root: Path) -> None:
 
 def corpus_world(tree: Path):
     h = HarnessDef(
-        id="corpus", display_name="Corpus", verified=True,
+        id="corpus", display_name="Corpus",
+        paths_verified=True, precedence_verified=True,
         project_paths=["."], recursive=True,
     )
     instances, broken = discover(h, tree, tree / "_nonexistent_home")
