@@ -107,3 +107,37 @@ Nothing changes. Tier 2 findings flow through the existing severity sections, fi
 - Conformance: one case per check, plus forbid entries guarding well-scoped descriptions (e.g. the existing clean-pair skills must fire none of the four).
 - Corpus-derived conformance cases from the tuning pass, with licenses recorded.
 - The success metric from the design doc, checked by hand before release: after one triage pass on this machine's real loadout, a rescan is quiet.
+
+## Addendum: diverged-copies (2026-07-20, from real-machine feedback)
+
+Testing on a real loadout surfaced a case the check set mislabeled: two
+physical copies of the same skill, same name, drifted content, where no
+single harness loads both. `name-shadow` cannot fire (no shared harness),
+`near-duplicate` misses once the drift is large, and `description-overlap`
+caught it by accident and issued routing advice that made no sense because
+the descriptions were byte identical.
+
+New check `diverged-copies` (warning), living with the other name-centric
+checks in `checks/shadowing.py`:
+
+- Fires when two or more contributors share a skill name with at least two
+  distinct content hashes, and no single harness loads two or more members
+  of the group. Co-loaded same-name pairs stay `name-shadow` and
+  `double-load` territory.
+- The message states the evidence and the action: whether the descriptions
+  match, the body diff line count for two-copy groups, and each copy's path
+  with its file modification time, newest first and labeled. Modification
+  times come from a read-only stat; an unreadable stat prints "unknown".
+- Fix command: keep the newest copy and symlink or delete the others, with
+  the concrete paths shell quoted for two-copy groups.
+- Fingerprint: the standard formula over content hashes, so any change to
+  any copy resurfaces an ack. For this check whole-content is the right
+  basis, because the finding is about content divergence.
+
+`description-overlap` now collapses same-name contributors into one
+representative before clustering, exactly like duplicate groups, so this
+case can never again be reported as a routing problem. The name collision
+labels inside overlap messages are removed as dead code, since a cluster
+can no longer contain two members with the same name.
+
+The report prints a blank line between findings.
