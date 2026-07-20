@@ -5,9 +5,16 @@ import tomllib
 from pathlib import Path
 
 import tomli_w
-from pydantic import BaseModel, Field
+from pydantic import BaseModel, Field, ValidationError
 
 from drskill.models import Finding
+
+
+class LedgerError(Exception):
+    """Raised when a drskill.toml ledger file is malformed or schema-invalid.
+
+    Callers (the CLI layer) catch this and print a one-line error instead of
+    letting a raw tomllib/pydantic traceback reach the user."""
 
 
 class Budget(BaseModel):
@@ -37,10 +44,23 @@ def ledger_path(project_root: Path, home: Path, global_mode: bool) -> Path:
     return home / ".drskill.toml" if global_mode else project_root / "drskill.toml"
 
 
+def _validation_one_liner(e: ValidationError) -> str:
+    first = e.errors()[0]
+    loc = ".".join(str(p) for p in first["loc"])
+    return f"{loc}: {first['msg']}" if loc else first["msg"]
+
+
 def load_config(path: Path) -> Config:
     if not path.is_file():
         return Config()
-    return Config(**tomllib.loads(path.read_text()))
+    try:
+        data = tomllib.loads(path.read_text())
+    except tomllib.TOMLDecodeError as e:
+        raise LedgerError(f"{path}: invalid TOML: {e}") from e
+    try:
+        return Config(**data)
+    except ValidationError as e:
+        raise LedgerError(f"{path}: {_validation_one_liner(e)}") from e
 
 
 def append_ack(path: Path, ack: Ack) -> None:

@@ -34,6 +34,14 @@ def _home() -> Path:
     return Path(env) if env else Path.home()
 
 
+def _load_config_or_exit(path: Path) -> ledger.Config:
+    try:
+        return ledger.load_config(path)
+    except ledger.LedgerError as e:
+        console.print(f"[red]error:[/red] {escape(str(e))}")
+        raise typer.Exit(1)
+
+
 @app.callback()
 def main() -> None:
     pass
@@ -48,7 +56,7 @@ def scan(
 ) -> None:
     """Analyze every detected harness's skill set and report findings."""
     home = _home()
-    config = ledger.load_config(ledger.ledger_path(root, home, global_mode))
+    config = _load_config_or_exit(ledger.ledger_path(root, home, global_mode))
     world, findings = run_scan(root, home, global_mode, config)
     active, acked = ledger.filter_findings(findings, config)
     if as_json:
@@ -72,7 +80,7 @@ def ack(
     """Acknowledge a finding so it stays silent until the skills change."""
     home = _home()
     path = ledger.ledger_path(root, home, global_mode)
-    config = ledger.load_config(path)
+    config = _load_config_or_exit(path)
     world, findings = run_scan(root, home, global_mode, config)
     active, _ = ledger.filter_findings(findings, config)
     wanted = set(skills)
@@ -103,7 +111,8 @@ def list_cmd(
 ) -> None:
     """Show each harness's effective skill set."""
     home = _home()
-    world, _findings = run_scan(root, home, global_mode)
+    config = _load_config_or_exit(ledger.ledger_path(root, home, global_mode))
+    world, _findings = run_scan(root, home, global_mode, config)
     for hid, hdef in sorted(world.harnesses.items()):
         if harness and hid != harness:
             continue

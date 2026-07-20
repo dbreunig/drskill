@@ -1,6 +1,8 @@
 import os
 from pathlib import Path
 
+import pytest
+
 from drskill.discovery import discover
 from drskill.harnesses import load_harnesses
 from drskill.resolution import (
@@ -9,6 +11,10 @@ from drskill.resolution import (
     normalize_content,
     split_frontmatter,
 )
+
+
+def running_as_root() -> bool:
+    return hasattr(os, "geteuid") and os.geteuid() == 0
 
 
 def get(hid):
@@ -105,6 +111,23 @@ def test_gh_provenance_detected(tmp_path):
     c = next(iter(world.contributors.values()))
     assert c.source.kind == "gh-skill"
     assert c.source.source == "octo/repo"
+
+
+def test_unreadable_skill_recorded_and_not_a_contributor(tmp_path):
+    if running_as_root():
+        pytest.skip("root ignores file permissions")
+    proj, home = tmp_path / "proj", tmp_path / "home"
+    d = write_skill(proj / ".claude" / "skills", "locked")
+    (d / "SKILL.md").chmod(0)
+    try:
+        world = world_for("claude-code", proj, home)
+        assert world.contributors == {}
+        assert len(world.unreadable) == 1
+        harness, path = world.unreadable[0]
+        assert harness == "claude-code"
+        assert path.endswith("locked/SKILL.md")
+    finally:
+        (d / "SKILL.md").chmod(0o644)
 
 
 def test_token_costs_populated(tmp_path):

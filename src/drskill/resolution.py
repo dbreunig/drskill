@@ -52,6 +52,7 @@ class World(BaseModel):
     contributors: dict[str, Contributor] = Field(default_factory=dict)
     harnesses: dict[str, HarnessDef] = Field(default_factory=dict)
     broken_symlinks: list[BrokenSymlink] = Field(default_factory=list)
+    unreadable: list[tuple[str, str]] = Field(default_factory=list)  # (harness, path)
     lockfile: dict[str, dict] | None = None
 
     def harness_loads(self, harness_id: str) -> list[tuple[Contributor, Deployment]]:
@@ -90,7 +91,11 @@ def build_world(
         cid = str(real)
         c = world.contributors.get(cid)
         if c is None:
-            text = real.read_text(encoding="utf-8", errors="replace")
+            try:
+                text = real.read_text(encoding="utf-8", errors="replace")
+            except OSError:
+                world.unreadable.append((inst.harness, cid))
+                continue
             fm, raw_fm, body = split_frontmatter(text)
             name = _skill_name(fm, real)
             description = ""

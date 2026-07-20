@@ -1,11 +1,17 @@
 import json
+import os
 from pathlib import Path
 
+import pytest
 from typer.testing import CliRunner
 
 from drskill.cli import app
 
 runner = CliRunner()
+
+
+def running_as_root() -> bool:
+    return hasattr(os, "geteuid") and os.geteuid() == 0
 
 
 def env_for(tmp_path):
@@ -72,3 +78,29 @@ def test_bare_invocation_shows_usage_not_traceback(tmp_path):
     r = runner.invoke(app, [], env=env_for(tmp_path))
     assert r.exit_code == 2
     assert "Traceback" not in r.output
+
+
+def test_malformed_config_reports_clean_error_not_traceback(tmp_path):
+    proj = tmp_path / "proj"
+    proj.mkdir()
+    (proj / "drskill.toml").write_text('budget = "oops"\n')
+    r = scan(tmp_path)
+    assert r.exit_code == 1
+    assert "error:" in r.output
+    assert "Traceback" not in r.output
+
+
+def test_unreadable_skill_does_not_crash_scan_and_is_reported(tmp_path):
+    if running_as_root():
+        pytest.skip("root ignores file permissions")
+    proj = tmp_path / "proj"
+    write(proj, "locked", "---\nname: locked\ndescription: d\n---\nb\n")
+    f = proj / ".claude" / "skills" / "locked" / "SKILL.md"
+    f.chmod(0)
+    try:
+        r = scan(tmp_path)
+        assert r.exception is None
+        assert "Traceback" not in r.output
+        assert "unreadable-skill" in r.output
+    finally:
+        f.chmod(0o644)

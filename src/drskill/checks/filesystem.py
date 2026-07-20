@@ -20,3 +20,17 @@ def broken_symlink(world: World, config: Config) -> list[Finding]:
         )
         for b in world.broken_symlinks
     ]
+
+
+@check("unreadable-skill")
+def unreadable_skill(world: World, config: Config) -> list[Finding]:
+    return [
+        make_finding(
+            "unreadable-skill", "warning", [],
+            f"cannot read {path}: skipped",
+            harnesses=[harness],
+            extra_key=str(path),
+            fix_commands=[f"Check permissions: ls -l {shlex.quote(str(path))}"],
+        )
+        for harness, path in world.unreadable
+    ]

@@ -2,7 +2,17 @@ import datetime as dt
 import tomllib
 from pathlib import Path
 
-from drskill.ledger import Ack, Config, append_ack, filter_findings, ledger_path, load_config
+import pytest
+
+from drskill.ledger import (
+    Ack,
+    Config,
+    LedgerError,
+    append_ack,
+    filter_findings,
+    ledger_path,
+    load_config,
+)
 from drskill.models import Finding
 
 
@@ -39,6 +49,20 @@ def test_load_full_file(tmp_path):
     assert cfg.budget.catalog_tokens_max == 100
     assert cfg.thresholds.near_duplicate == 0.9
     assert cfg.ack[0].date == dt.date(2026, 7, 19)
+
+
+def test_load_config_malformed_toml_raises_ledger_error(tmp_path):
+    p = tmp_path / "drskill.toml"
+    p.write_text("[budget\n")  # invalid TOML syntax
+    with pytest.raises(LedgerError):
+        load_config(p)
+
+
+def test_load_config_schema_invalid_raises_ledger_error(tmp_path):
+    p = tmp_path / "drskill.toml"
+    p.write_text('budget = "oops"\n')  # budget must be a table, not a string
+    with pytest.raises(LedgerError):
+        load_config(p)
 
 
 def test_filter_findings_matches_fingerprint(tmp_path):
