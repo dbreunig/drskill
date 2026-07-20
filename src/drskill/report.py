@@ -98,7 +98,9 @@ def short_id(f: Finding) -> str:
 
 def _print_finding(world: World, f: Finding, console: Console) -> bool:
     marked = False
-    console.print(f"  [[bold]{escape(f.check_id)}[/bold]] {escape(f.message)}")
+    console.print(
+        f"  [[bold]{escape(short_id(f))}[/bold]] {escape(f.check_id)}: {escape(f.message)}"
+    )
     if f.harnesses:
         labels = []
         for hid in f.harnesses:
@@ -110,13 +112,6 @@ def _print_finding(world: World, f: Finding, console: Console) -> bool:
         console.print(f"      harnesses: {escape(', '.join(labels))}")
     for cmd in f.fix_commands:
         console.print(f"      fix: {escape(cmd)}")
-    sid = short_id(f)
-    if f.contributor_names:
-        names = " ".join(shlex.quote(n) for n in f.contributor_names)
-        long_form = f"{f.check_id} {names}"
-    else:
-        long_form = f.check_id
-    console.print(f"      or:  drskill ack {escape(sid)}   # {escape(long_form)}")
     console.print()
     return marked
 
@@ -158,3 +153,13 @@ def render(
         console.print(
             "[dim]? = drskill has not verified this harness's skill-loading rules[/dim]"
         )
+    if active:
+        example = " ".join(short_id(f) for f in active[:2])
+        console.print(f"\nack findings by id, e.g. `drskill ack {escape(example)}`:")
+        width = max(len(f.check_id) for f in active)
+        for f in active:
+            names = ", ".join(f.contributor_names)
+            console.print(
+                f"  [bold]{escape(short_id(f))}[/bold] "
+                f"{escape(f.check_id.ljust(width))}  {escape(names)}"
+            )

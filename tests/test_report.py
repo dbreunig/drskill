@@ -46,9 +46,10 @@ def test_render_sections_and_ack_line():
     warn = sample_finding(check="near-duplicate", severity="warning")
     text = render_to_text(world_with(), [err, warn], [sample_finding(check="name-shadow", severity="warning")])
     assert "ERRORS" in text and "WARNINGS" in text
-    assert "# double-load pdf-tools" in text  # long form rides as a comment
-    import re
-    assert re.search(r"drskill ack [0-9a-f]{4}", text)
+    assert "[f0f1] double-load:" in text  # header leads with the id
+    assert "drskill ack f0f1" in text  # recap example line
+    recap = text[text.index("ack findings by id"):]
+    assert "f0f1 double-load" in recap and "pdf-tools" in recap
     assert "npx skills remove pdf-tools" in text
     assert "1 error" in text and "2 warnings" not in text  # 1 active warning
     assert "1 acknowledged" in text
@@ -103,21 +104,27 @@ def test_ack_hint_for_contributorless_finding_has_no_trailing_names():
     )
     text = render_to_text(world_with(), [f], [])
     line = next(l for l in text.splitlines() if "drskill ack" in l)
-    assert line.strip().startswith("or:  drskill ack ")
-    assert line.strip().endswith("# lockfile-drift")
+    recap = text[text.index("ack findings by id"):]
+    line = next(ln for ln in recap.splitlines() if "lockfile-drift" in ln)
+    assert line.strip().endswith("lockfile-drift")  # no trailing names
 
 
-def test_ack_hint_quotes_adversarial_contributor_name():
+def test_suggested_ack_command_is_ids_only_even_with_adversarial_name():
+    import re
+
     f = Finding(
         check_id="near-duplicate", severity="warning",
         contributors=["/a"], contributor_names=[PAYLOAD],
         harnesses=["claude-code"], message="adversarial name",
-        fingerprint="sha256:f",
+        fingerprint="sha256:abcd1234",
     )
     text = render_to_text(world_with(), [f], [])
+    # the only copy-pasteable command in the report is the recap example,
+    # and it must contain nothing but hex ids (shell-safe by construction)
     line = next(l for l in text.splitlines() if "drskill ack" in l)
-    tokens = shlex.split(line.strip())
-    assert tokens[-1] == PAYLOAD
+    cmd = re.search(r"drskill ack ([0-9a-f ]+)`", line).group(1)
+    assert cmd.split() == ["abcd"]
+    assert PAYLOAD in text  # the name still renders, as display text only
 
 
 def test_render_escapes_rich_markup_in_dynamic_text():

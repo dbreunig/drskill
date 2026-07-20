@@ -152,7 +152,7 @@ def _mk(proj, name):
 
 def _short_ids(output):
     import re
-    return re.findall(r"drskill ack ([0-9a-f]{4})", output)
+    return re.findall(r"^  \[([0-9a-f]{4})\]", output, re.M)
 
 
 def test_ack_by_short_id(tmp_path):
