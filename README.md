@@ -36,6 +36,20 @@ List every harness's effective skill set with token counts:
 drskill list --tokens
 ```
 
+Scan and also print each harness's skill table in one run:
+
+```
+drskill scan --detailed
+```
+
+Scope the scan to a single harness and see exactly what that harness sees:
+
+```
+drskill scan --harness pi
+```
+
+An unknown harness id is an error that names the valid ids. Harnesses that are detected but load no skills are hidden from the tables by default; a closing line names them, and `--all` shows them.
+
 Run in CI, where any unacknowledged warning should fail the build:
 
 ```
@@ -86,6 +100,8 @@ date = 2026-07-19
 A finding's fingerprint is a hash of the check id plus the content of every skill involved. An ack silences a finding only while that fingerprint still matches. If you edit one of the skills named in the ack, its content hash changes, the fingerprint no longer matches, and the finding comes back on the next scan. This is deliberate. An ack means "this exact situation is fine," not "never check this pair again."
 
 In global mode (`--global`), the ledger lives at `~/.drskill.toml` instead.
+
+The `source` column in `list` shows where a skill came from: `skills-lock` for skills named in a project's `skills-lock.json`, `gh-skill` for skills with `gh skill` provenance in their frontmatter, and `linked` for skills that live in or link into a `.agents/skills` store. The `linked` label means an installer arranged the layout; drskill does not guess which one. `unmanaged` means a plain directory with no known manager.
 
 ## Known limitations
 
