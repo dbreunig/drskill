@@ -79,10 +79,18 @@ root_md_paths = []
 # both instances remain visible rather than one shadowing the other.
 # search_order = "project-first" reflects the confirmed scan order (project
 # roots are the higher-precedence layer), not a strict override guarantee.
+# Controller ruling 2026-07-19: kept verified = false despite the above --
+# the brief's bar requires all three facts (dirs, recursion, collision
+# winner) confirmed, and codex's real collision behavior cannot be
+# expressed by our binary search_order. Encoding search_order =
+# "project-first" here is an approximation, not a confirmed winner rule;
+# revisit once the schema supports search_order = "none" for harnesses
+# that don't shadow on name collisions. Paths and recursion above remain
+# source-confirmed.
 [[harness]]
 id = "codex"
 display_name = "Codex CLI"
-verified = true
+verified = false
 detect = [".codex", "~/.codex"]
 project_paths = [".codex/skills", ".agents/skills"]
 global_paths = ["~/.codex/skills", "~/.agents/skills"]
@@ -855,6 +863,11 @@ search_order = "project-first"
 recursive = true
 root_md_paths = []
 
+# zenflow genuinely shares .zencoder dirs with the zencoder entry above in
+# upstream vercel-labs/skills src/agents.ts lines 675-683 (zenflow's
+# skillsDir/globalSkillsDir/detectInstalled are byte-identical to
+# zencoder's) -- not an extraction slip, re-checked against the scratch
+# clone 2026-07-19.
 [[harness]]
 id = "zenflow"
 display_name = "Zenflow"
