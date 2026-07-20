@@ -132,7 +132,18 @@ def description_overlap(world: World, config: Config) -> list[Finding]:
         members = sorted(members, key=lambda c: c.name)
         phrases = text.shared_phrases([m.routing_text for m in members])[:3]
         claim = f" all claim '{phrases[0]}'" if phrases else " have near-identical descriptions"
-        names = ", ".join(m.name for m in members)
+        name_counts: dict[str, int] = {}
+        for m in members:
+            name_counts[m.name] = name_counts.get(m.name, 0) + 1
+
+        def _label(m: Contributor) -> str:
+            if name_counts[m.name] == 1:
+                return m.name
+            # Same name twice (diverged copies): disambiguate by the
+            # directory that holds the skills folder, e.g. ".claude".
+            return f"{m.name} ({Path(m.id).parent.parent.parent.name})"
+
+        names = ", ".join(_label(m) for m in members)
         out.append(
             make_finding(
                 "description-overlap", "warning", members,

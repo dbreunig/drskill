@@ -83,6 +83,10 @@ Without `--ci`, warnings alone exit 0. This lets you run `drskill scan` locally 
 | `lockfile-drift` | warning | A skill's content hash does not match its `skills-lock.json` entry. The message attributes the likely cause, e.g. a `gh skill update` or a hand edit, and does not call it corruption. |
 | `budget-catalog-tokens` | warning | A harness's total catalog tokens exceed `[budget] catalog_tokens_max`. |
 | `budget-body-tokens` | warning | A skill's body tokens exceed `[budget] body_tokens_warn`. |
+| `description-overlap` | warning | Two or more descriptions are similar enough that a router could confuse them. The finding names the cluster and the trigger phrases they share. Threshold `description_overlap`. |
+| `missing-activation` | warning | A description never states when the skill should trigger, e.g. no "when", "trigger", or "if the user" phrasing. |
+| `generic-description` | warning | A description has fewer distinctive words than `generic_min_distinct_tokens`, e.g. "Helps with various tasks." |
+| `opposing-imperatives` | warning | Two skills give opposite orders about the same action, e.g. "Always use tabs" against "Never use tabs". Deliberately strict matching, so paraphrased conflicts are not caught. |
 
 ## The ledger
 
@@ -114,3 +118,12 @@ Claude Code skills bundled inside plugins are not scanned yet. drskill only walk
 Harness rules have three levels of confidence. Claude Code, Pi, and Gemini CLI are verified against their own docs or source. Codex, Cursor, and Copilot are best effort. Codex in particular does not shadow skills the way drskill's precedence model assumes, since Codex keeps both copies visible on a name collision instead of picking a winner, and that behavior does not fit the model yet. About 66 further harnesses are vendored from the `vercel-labs/skills` project and are also best effort; drskill detects them and reports their findings, but their search paths have not been independently confirmed against each harness's own documentation. Reports label every finding from an unverified harness "best effort" so you know how much to trust it.
 
 Token counts are approximate. drskill counts tokens with `tiktoken`'s `o200k_base` encoding, which is a reasonable estimate but will not match every harness's actual tokenizer or catalog rendering exactly.
+
+The four description and instruction checks are heuristics. Their thresholds are tuned against real public skill sets to stay quiet on well-written skills, and every finding can be acknowledged, but they will miss paraphrased conflicts and will flag some judgment calls. The thresholds live in `drskill.toml`:
+
+```toml
+[thresholds]
+near_duplicate = 0.85
+description_overlap = 0.6
+generic_min_distinct_tokens = 2
+```

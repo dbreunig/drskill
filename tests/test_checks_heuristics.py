@@ -123,3 +123,23 @@ def test_opposing_near_miss_stays_quiet(tmp_path):
     write(proj, "b", "Use when doing b.", body="Never use spaces here.")
     findings = run_all(world_from(proj, home), Config())
     assert by_check(findings, "opposing-imperatives") == []
+
+
+def test_overlap_disambiguates_colliding_names(tmp_path):
+    proj, home = tmp_path / "p", tmp_path / "h"
+    write(proj, "docs", PILE_A, body="x" * 40)  # .claude/skills/docs
+    d = proj / ".pi" / "skills" / "docs"
+    d.mkdir(parents=True)
+    (d / "SKILL.md").write_text(f"---\nname: docs\ndescription: {PILE_B}\n---\n{'y' * 40}\n")
+    hs = [h for h in load_harnesses() if h.id in ("claude-code", "pi")]
+    instances, broken = [], []
+    for h in hs:
+        i, b = discover(h, proj, home)
+        instances += i
+        broken += b
+    world = build_world(instances, {h.id: h for h in hs}, broken)
+    findings = run_all(world, Config())
+    hits = by_check(findings, "description-overlap")
+    assert len(hits) == 1
+    assert "docs (.claude)" in hits[0].message
+    assert "docs (.pi)" in hits[0].message
