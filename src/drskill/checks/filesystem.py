@@ -1,5 +1,7 @@
 from __future__ import annotations
 
+import shlex
+
 from drskill.checks import check, make_finding
 from drskill.ledger import Config
 from drskill.models import Finding
@@ -14,7 +16,7 @@ def broken_symlink(world: World, config: Config) -> list[Finding]:
             f"broken symlink: {b.path} points at nothing",
             harnesses=[b.harness],
             extra_key=str(b.path),
-            fix_commands=[f"rm '{b.path}'"],
+            fix_commands=[f"rm {shlex.quote(str(b.path))}"],
         )
         for b in world.broken_symlinks
     ]

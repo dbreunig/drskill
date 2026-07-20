@@ -1,4 +1,5 @@
 import json
+import shlex
 
 from rich.console import Console
 
@@ -7,6 +8,8 @@ from drskill.models import Finding, TokenCost
 from drskill.report import render, to_json
 from drskill.resolution import World
 from tests.test_models import make_contributor
+
+PAYLOAD = "'; echo pwned; '"
 
 
 def sample_finding(check="double-load", severity="error", harnesses=("claude-code",)):
@@ -63,6 +66,19 @@ def test_to_json_stable():
     assert data[0]["check_id"] == "double-load"
     assert data[0]["fingerprint"] == "sha256:f"
     assert list(data[0].keys()) == sorted(data[0].keys())
+
+
+def test_ack_hint_quotes_adversarial_contributor_name():
+    f = Finding(
+        check_id="near-duplicate", severity="warning",
+        contributors=["/a"], contributor_names=[PAYLOAD],
+        harnesses=["claude-code"], message="adversarial name",
+        fingerprint="sha256:f",
+    )
+    text = render_to_text(world_with(), [f], [])
+    line = next(l for l in text.splitlines() if "drskill ack" in l)
+    tokens = shlex.split(line.strip())
+    assert tokens[-1] == PAYLOAD
 
 
 def test_render_escapes_rich_markup_in_dynamic_text():

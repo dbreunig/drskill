@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import json
+import shlex
 
 from rich.console import Console
 from rich.markup import escape
@@ -29,7 +30,7 @@ def _print_finding(world: World, f: Finding, console: Console) -> None:
     for cmd in f.fix_commands:
         console.print(f"      fix: {escape(cmd)}")
     if f.contributor_names:
-        names = " ".join(f.contributor_names)
+        names = " ".join(shlex.quote(n) for n in f.contributor_names)
         console.print(f"      or:  drskill ack {escape(f.check_id)} {escape(names)}")
 
 

@@ -3,6 +3,7 @@
 
 from __future__ import annotations
 
+import shlex
 from pathlib import Path
 
 from drskill.checks import check, make_finding
@@ -23,7 +24,7 @@ def spec_invalid_frontmatter(world: World, config: Config) -> list[Finding]:
         make_finding(
             "spec-invalid-frontmatter", "error", [c],
             f"'{c.name}': frontmatter does not parse as YAML ({c.id})",
-            fix_commands=[f"Fix the YAML frontmatter in {c.id}"],
+            fix_commands=[f"Fix the YAML frontmatter in {shlex.quote(c.id)}"],
         )
         for c in _skill_md_contributors(world)
         if not c.frontmatter_valid
@@ -41,7 +42,8 @@ def spec_name_mismatch(world: World, config: Config) -> list[Finding]:
                     "spec-name-mismatch", "error", [c],
                     f"frontmatter name '{c.name}' does not match folder '{folder}'",
                     fix_commands=[
-                        f"Rename the folder to '{c.name}' or set 'name: {folder}' in {c.id}"
+                        f"Rename the folder to {shlex.quote(c.name)} or set "
+                        f"'name: {shlex.quote(folder)}' in {shlex.quote(c.id)}"
                     ],
                 )
             )
@@ -54,7 +56,9 @@ def spec_missing_description(world: World, config: Config) -> list[Finding]:
         make_finding(
             "spec-missing-description", "error", [c],
             f"'{c.name}' has no description; the router cannot route to it",
-            fix_commands=[f"Add a 'description:' with a clear 'use when' condition to {c.id}"],
+            fix_commands=[
+                f"Add a 'description:' with a clear 'use when' condition to {shlex.quote(c.id)}"
+            ],
         )
         for c in _skill_md_contributors(world)
         if c.frontmatter_valid and not c.routing_text.strip()
@@ -67,7 +71,9 @@ def spec_description_too_long(world: World, config: Config) -> list[Finding]:
         make_finding(
             "spec-description-too-long", "error", [c],
             f"'{c.name}' description is {len(c.routing_text)} chars (max {DESCRIPTION_MAX})",
-            fix_commands=[f"Shorten the description in {c.id} to {DESCRIPTION_MAX} chars or fewer"],
+            fix_commands=[
+                f"Shorten the description in {shlex.quote(c.id)} to {DESCRIPTION_MAX} chars or fewer"
+            ],
         )
         for c in _skill_md_contributors(world)
         if len(c.routing_text) > DESCRIPTION_MAX
@@ -95,7 +101,7 @@ def frontmatter_angle_brackets(world: World, config: Config) -> list[Finding]:
         make_finding(
             "frontmatter-angle-brackets", "warning", [c],
             f"'{c.name}' frontmatter contains angle brackets, a spec-flagged injection vector",
-            fix_commands=[f"Remove '<' and '>' from the frontmatter of {c.id}"],
+            fix_commands=[f"Remove '<' and '>' from the frontmatter of {shlex.quote(c.id)}"],
         )
         for c in _skill_md_contributors(world)
         if c.frontmatter_valid and _has_angle_bracket(c.frontmatter)

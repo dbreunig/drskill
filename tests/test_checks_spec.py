@@ -1,3 +1,4 @@
+import shlex
 from pathlib import Path
 
 from drskill.checks import REGISTRY, run_all
@@ -5,6 +6,8 @@ from drskill.discovery import discover
 from drskill.harnesses import load_harnesses
 from drskill.ledger import Config
 from drskill.resolution import build_world
+
+PAYLOAD = "'; echo pwned; '"
 
 
 def world_from(proj: Path, home: Path):
@@ -67,6 +70,18 @@ def test_errors_sort_before_warnings(tmp_path):
     findings = run_all(world_from(proj, home), Config())
     severities = [f.severity for f in findings]
     assert severities == sorted(severities)  # "error" < "warning"
+
+
+def test_spec_name_mismatch_fix_command_quotes_adversarial_name(tmp_path):
+    proj, home = tmp_path / "p", tmp_path / "h"
+    # double-quoted YAML scalar so the payload's own single quotes survive
+    # frontmatter parsing unmangled
+    write(proj, "folder", f'---\nname: "{PAYLOAD}"\ndescription: d\n---\nb\n')
+    findings = run_all(world_from(proj, home), Config())
+    mismatch = [f for f in findings if f.check_id == "spec-name-mismatch"]
+    assert len(mismatch) == 1
+    cmd = mismatch[0].fix_commands[0]
+    assert shlex.quote(PAYLOAD) in cmd
 
 
 def test_fingerprint_stable_and_distinct():

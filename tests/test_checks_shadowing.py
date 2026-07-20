@@ -1,4 +1,5 @@
 import os
+import shlex
 from pathlib import Path
 
 from drskill.checks import run_all
@@ -6,6 +7,8 @@ from drskill.discovery import discover
 from drskill.harnesses import load_harnesses
 from drskill.ledger import Config
 from drskill.resolution import build_world
+
+PAYLOAD = "'; echo pwned; '"
 
 
 def world_from(proj, home, harness_ids=("claude-code",)):
@@ -110,3 +113,26 @@ def test_broken_symlink(tmp_path):
     bs = find(findings, "broken-symlink")
     assert len(bs) == 1 and bs[0].severity == "error"
     assert "dead" in bs[0].message
+
+
+def test_broken_symlink_fix_command_quotes_adversarial_path(tmp_path):
+    proj, home = tmp_path / "p", tmp_path / "h"
+    d = proj / ".claude" / "skills"
+    d.mkdir(parents=True)
+    os.symlink(proj / "gone", d / PAYLOAD)
+    findings = run_all(world_from(proj, home), Config())
+    bs = find(findings, "broken-symlink")
+    assert len(bs) == 1
+    cmd = bs[0].fix_commands[0]
+    assert shlex.split(cmd)[-1].endswith(PAYLOAD)
+
+
+def test_name_shadow_fix_command_quotes_adversarial_name(tmp_path):
+    proj, home = tmp_path / "p", tmp_path / "h"
+    write(proj, ".claude/skills", PAYLOAD, body="project version")
+    write(home, ".claude/skills", PAYLOAD, body="user version")
+    findings = run_all(world_from(proj, home), Config())
+    shadows = find(findings, "name-shadow")
+    assert len(shadows) == 1
+    cmd = shadows[0].fix_commands[0]
+    assert PAYLOAD in shlex.split(cmd)[-1]

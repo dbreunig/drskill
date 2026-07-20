@@ -3,6 +3,7 @@ zlib.crc32 because builtin str hash() is salted per process."""
 
 from __future__ import annotations
 
+import shlex
 import zlib
 from itertools import combinations
 
@@ -70,7 +71,8 @@ def exact_duplicate(world: World, config: Config) -> list[Finding]:
                     "identical skills installed in more than one place: "
                     + ", ".join(sorted(c.id for c in group)),
                     fix_commands=[
-                        f"npx skills remove {group[0].name}  # from the copies you don't want"
+                        f"npx skills remove {shlex.quote(group[0].name)}"
+                        "  # from the copies you don't want"
                     ],
                 )
             )
@@ -93,8 +95,8 @@ def near_duplicate(world: World, config: Config) -> list[Finding]:
                     f"'{a.name}' and '{b.name}' are ~{sim:.0%} similar; "
                     "likely the same skill twice",
                     fix_commands=[
-                        f"Compare and keep one: diff '{a.id}' '{b.id}'",
-                        f"npx skills remove {b.name}",
+                        f"Compare and keep one: diff {shlex.quote(a.id)} {shlex.quote(b.id)}",
+                        f"npx skills remove {shlex.quote(b.name)}",
                     ],
                 )
             )

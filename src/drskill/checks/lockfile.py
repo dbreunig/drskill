@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import hashlib
 import json
+import shlex
 from pathlib import Path
 
 from drskill.checks import check, make_finding
@@ -78,8 +79,10 @@ def lockfile_drift(world: World, config: Config) -> list[Finding]:
                     f"'{name}' is in skills-lock.json but not found on disk",
                     harnesses=sorted(world.harnesses),
                     extra_key=f"missing:{name}",
-                    fix_commands=[f"npx skills add {entry.get('source', name)}",
-                                  "npx skills sync"],
+                    fix_commands=[
+                        f"npx skills add {shlex.quote(str(entry.get('source', name)))}",
+                        "npx skills sync",
+                    ],
                 )
             )
             continue
@@ -117,8 +120,10 @@ def lockfile_drift(world: World, config: Config) -> list[Finding]:
                     "lockfile-drift", "warning", [c],
                     f"'{name}' was modified outside `npx skills` — likely a "
                     "`gh skill update` or a hand edit; the lockfile no longer matches",
-                    fix_commands=["npx skills sync  # restore the locked version",
-                                  f"npx skills update {name}  # or re-pin the new content"],
+                    fix_commands=[
+                        "npx skills sync  # restore the locked version",
+                        f"npx skills update {shlex.quote(name)}  # or re-pin the new content",
+                    ],
                 )
             )
     return out

@@ -1,3 +1,4 @@
+import shlex
 from pathlib import Path
 
 from drskill.checks import run_all
@@ -6,6 +7,8 @@ from drskill.discovery import discover
 from drskill.harnesses import load_harnesses
 from drskill.ledger import Config
 from drskill.resolution import build_world
+
+PAYLOAD = "'; echo pwned; '"
 
 BODY = (
     "Use this skill to produce formatted documentation for Python projects. "
@@ -101,3 +104,40 @@ def test_exact_duplicate_skips_pure_same_harness_coload(tmp_path):
         (root / "SKILL.md").write_text(content)
     findings = run_all(world_from(proj, home), Config())
     assert [f for f in findings if f.check_id == "exact-duplicate"] == []
+
+
+def test_exact_duplicate_fix_command_quotes_adversarial_name(tmp_path):
+    proj, home = tmp_path / "p", tmp_path / "h"
+    # double-quoted YAML scalar so the payload's own single quotes survive
+    # frontmatter parsing unmangled
+    content = f'---\nname: "{PAYLOAD}"\ndescription: d\n---\n{BODY}'
+    for rel in [".claude/skills/dup-a", ".pi/skills/dup-b"]:
+        d = proj / rel
+        d.mkdir(parents=True)
+        (d / "SKILL.md").write_text(content)
+    findings = run_all(world_from(proj, home, ("claude-code", "pi")), Config())
+    exact = [f for f in findings if f.check_id == "exact-duplicate"]
+    assert len(exact) == 1
+    cmd = exact[0].fix_commands[0]
+    assert shlex.quote(PAYLOAD) in cmd
+    assert shlex.split(cmd.split("#")[0])[-1] == PAYLOAD
+
+
+def test_near_duplicate_fix_command_quotes_adversarial_name(tmp_path):
+    proj, home = tmp_path / "p", tmp_path / "h"
+    write(proj, ".claude/skills", "a-writer", "Writes reports.", BODY)
+    d = proj / ".claude" / "skills" / "b-writer"
+    d.mkdir(parents=True)
+    (d / "SKILL.md").write_text(
+        f'---\nname: "{PAYLOAD}"\ndescription: Helps with reports.\n---\n'
+        f"{BODY}One extra sentence.\n"
+    )
+    cfg = Config()
+    cfg.thresholds.near_duplicate = 0.5
+    findings = run_all(world_from(proj, home), cfg)
+    near = [f for f in findings if f.check_id == "near-duplicate"]
+    assert len(near) == 1
+    for cmd in near[0].fix_commands:
+        assert shlex.quote(PAYLOAD) in cmd or PAYLOAD not in cmd
+    remove_cmd = next(c for c in near[0].fix_commands if c.startswith("npx skills remove"))
+    assert shlex.split(remove_cmd)[-1] == PAYLOAD

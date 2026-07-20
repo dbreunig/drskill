@@ -1,5 +1,7 @@
 from __future__ import annotations
 
+import shlex
+
 from drskill.checks import check, make_finding
 from drskill.ledger import Config
 from drskill.models import Finding
@@ -23,7 +25,7 @@ def name_shadow(world: World, config: Config) -> list[Finding]:
                     harnesses=[hid],
                     extra_key=winner.id,
                     fix_commands=[
-                        f"Remove or rename the shadowed copy: {d.path}",
+                        f"Remove or rename the shadowed copy: {shlex.quote(str(d.path))}",
                     ],
                 )
             )
@@ -47,6 +49,7 @@ def double_load(world: World, config: Config) -> list[Finding]:
                 continue
             contributors = [c for c, _ in loads.values()]
             paths = ", ".join(str(d.path) for _, d in loads.values())
+            quoted_paths = ", ".join(shlex.quote(str(d.path)) for _, d in loads.values())
             display = world.harnesses[hid].display_name
             out.append(
                 make_finding(
@@ -55,7 +58,7 @@ def double_load(world: World, config: Config) -> list[Finding]:
                     f"'{contributors[0].name}' {len(loads)} times: {paths}",
                     harnesses=[hid],
                     extra_key=hid,
-                    fix_commands=[f"Remove all but one copy ({paths})"],
+                    fix_commands=[f"Remove all but one copy ({quoted_paths})"],
                 )
             )
     return out
