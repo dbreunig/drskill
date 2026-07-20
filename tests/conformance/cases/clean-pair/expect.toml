@@ -1,0 +1,7 @@
+[[forbid]]
+check = "near-duplicate"
+skills = ["git-helper", "docx-report"]
+
+[[forbid]]
+check = "spec-missing-description"
+skills = ["git-helper"]

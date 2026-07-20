@@ -1,0 +1,7 @@
+[[expect]]
+check = "spec-name-mismatch"
+skills = ["something-else"]
+
+[[expect]]
+check = "spec-missing-description"
+skills = ["no-desc"]
