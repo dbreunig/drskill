@@ -44,3 +44,21 @@ def test_detect_by_marker(tmp_path):
     assert ids == {"claude-code"}
     # global mode ignores project markers
     assert detect_harnesses(proj, home, global_only=True) == []
+
+
+def test_core_six_present():
+    ids = {h.id for h in load_harnesses()}
+    assert {"claude-code", "cursor", "codex", "copilot", "gemini-cli", "pi"} <= ids
+
+
+def test_vendored_entries_are_unverified_by_default():
+    hs = load_harnesses()
+    core = {"claude-code", "cursor", "codex", "copilot", "gemini-cli", "pi"}
+    for h in hs:
+        if h.id not in core:
+            assert h.verified is False, f"{h.id} must stay best-effort"
+
+
+def test_every_entry_has_at_least_one_path():
+    for h in load_harnesses():
+        assert h.project_paths or h.global_paths, h.id

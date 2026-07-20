@@ -1,6 +1,17 @@
 # Harness definition table.
 # verified = true means these rules were confirmed against the harness's own
 # docs or source. Unverified entries are best effort and labeled so in reports.
+#
+# The entries below marked "vendored" are seeded from the agent -> directory
+# mapping in vercel-labs/skills (MIT license), src/agents.ts, upstream commit
+# 777599e1159e401b11ce4c8a57c20f09a8f1596e (cloned and inspected 2026-07-19).
+# They are best-effort convenience data, not independently confirmed against
+# each harness's own docs or source, and stay verified = false. detect markers
+# are a best-effort simplification of that file's detectInstalled() checks
+# (drskill's detect schema only supports OR'd existence markers, not the
+# compound / cwd+package.json conditions some upstream entries use). Global
+# paths derived from `join(configHome, ...)` assume the XDG default
+# ~/.config since the actual value is environment-dependent upstream.
 
 [[harness]]
 id = "claude-code"
@@ -26,3 +37,831 @@ global_paths = ["~/.pi/agent/skills", "~/.agents/skills"]
 search_order = "global-first"
 recursive = true
 root_md_paths = [".pi/skills", "~/.pi/agent/skills"]
+
+# Verified against https://cursor.com/docs/skills.md and
+# https://cursor.com/help/customization/skills, 2026-07-19:
+# project dirs are .cursor/skills and .agents/skills; global dirs are
+# ~/.cursor/skills and ~/.agents/skills; discovery is recursive ("Cursor
+# walks the skills root recursively and picks up any SKILL.md it finds"),
+# and nested .cursor/skills folders in monorepo subdirectories are also
+# picked up and scoped to that subtree.
+# NOT verified: which path wins when a project skill and a global skill
+# share a name. Neither page documents precedence/override behavior for
+# that case, so search_order below is the seeded guess, not a confirmed
+# fact -- kept verified = false for the whole entry on that basis.
+[[harness]]
+id = "cursor"
+display_name = "Cursor"
+verified = false
+detect = [".cursor", "~/.cursor"]
+project_paths = [".cursor/skills", ".agents/skills"]
+global_paths = ["~/.cursor/skills", "~/.agents/skills"]
+search_order = "project-first"
+recursive = true
+root_md_paths = []
+
+# Verified against source, 2026-07-19: github.com/openai/codex
+# (commit 678157acaa819d5510adfe359abb5d0392cfe461),
+# codex-rs/config/src/state.rs ConfigLayer::config_folder() confirms the
+# project layer folder is literally `.codex/` (dot_codex_folder) and the
+# user layer folder defaults to `~/.codex/`; codex-rs/core-skills/src/
+# loader.rs skill_roots_from_layer_stack_inner() + repo_agents_skill_roots()
+# confirm four roots: project .codex/skills, project .agents/skills (walked
+# from cwd up to the repo root), global ~/.codex/skills (deprecated but
+# still read), and global ~/.agents/skills. codex-rs/core-skills/src/
+# loader/discovery.rs discover_skills() walks each root recursively via
+# ExecutorFileSystem::walk with MAX_SCAN_DEPTH = 6, so recursive = true.
+# Collision handling differs from claude-code/pi: layers are iterated
+# ConfigLayerStackOrdering::HighestPrecedenceFirst (project before user),
+# but codex-rs/core-skills does not remove either skill on a name clash --
+# per developers.openai.com/codex/skills ("If two skills share the same
+# `name`, Codex doesn't merge them; both can appear in skill selectors"),
+# both instances remain visible rather than one shadowing the other.
+# search_order = "project-first" reflects the confirmed scan order (project
+# roots are the higher-precedence layer), not a strict override guarantee.
+[[harness]]
+id = "codex"
+display_name = "Codex CLI"
+verified = true
+detect = [".codex", "~/.codex"]
+project_paths = [".codex/skills", ".agents/skills"]
+global_paths = ["~/.codex/skills", "~/.agents/skills"]
+search_order = "project-first"
+recursive = true
+root_md_paths = []
+
+# Verified against https://docs.github.com/en/copilot/concepts/agents/about-agent-skills
+# and https://docs.github.com/en/copilot/how-tos/copilot-cli/customize-copilot/add-skills,
+# 2026-07-19: project dirs are .github/skills, .claude/skills, and
+# .agents/skills; personal/global dirs are ~/.copilot/skills and
+# ~/.agents/skills.
+# NOT verified: GitHub's own docs do not say whether discovery is
+# recursive within a skill directory, and do not state which location
+# wins when a project skill and a personal skill share a name. The CLI
+# is closed source (github/copilot-cli only ships install scripts), so
+# there was no source to check either. Kept verified = false; recursive
+# and search_order below are unconfirmed seed defaults.
+[[harness]]
+id = "copilot"
+display_name = "GitHub Copilot CLI"
+verified = false
+detect = [".github/copilot-instructions.md", "~/.copilot"]
+project_paths = [".github/skills", ".claude/skills", ".agents/skills"]
+global_paths = ["~/.copilot/skills", "~/.agents/skills"]
+search_order = "project-first"
+recursive = true
+root_md_paths = []
+
+# Verified against source, 2026-07-19: github.com/google-gemini/gemini-cli
+# (commit acae7124bdd849e554eaa5e090199a0cf08cd782).
+# packages/core/src/config/storage.ts: getUserSkillsDir() = ~/.gemini/skills,
+# getUserAgentSkillsDir() = ~/.agents/skills, getProjectSkillsDir() =
+# <project>/.gemini/skills, getProjectAgentSkillsDir() = <project>/.agents/skills
+# (GEMINI_DIR = '.gemini' in packages/core/src/utils/paths.ts).
+# packages/core/src/skills/skillLoader.ts loadSkillsFromDir() globs only
+# `SKILL.md` and `*/SKILL.md` under each root -- not arbitrarily nested --
+# so recursive = false.
+# packages/core/src/skills/skillManager.ts discoverSkills() loads built-in,
+# then extension, then user (~/.gemini/skills then ~/.agents/skills), then
+# workspace (.gemini/skills then .agents/skills) last; addSkillsWithPrecedence()
+# overwrites same-named entries in a Map, so whatever loads last wins --
+# workspace/project beats user, confirming search_order = "project-first".
+[[harness]]
+id = "gemini-cli"
+display_name = "Gemini CLI"
+verified = true
+detect = [".gemini", "~/.gemini"]
+project_paths = [".gemini/skills", ".agents/skills"]
+global_paths = ["~/.gemini/skills", "~/.agents/skills"]
+search_order = "project-first"
+recursive = false
+root_md_paths = []
+
+# --- Vendored from vercel-labs/skills (MIT), commit 777599e1159e401b11ce4c8a57c20f09a8f1596e ---
+# All entries below are verified = false; see header comment for provenance.
+
+[[harness]]
+id = "adal"
+display_name = "AdaL"
+verified = false
+detect = ["~/.adal"]
+project_paths = [".adal/skills"]
+global_paths = ["~/.adal/skills"]
+search_order = "project-first"
+recursive = true
+root_md_paths = []
+
+[[harness]]
+id = "aider-desk"
+display_name = "AiderDesk"
+verified = false
+detect = ["~/.aider-desk"]
+project_paths = [".aider-desk/skills"]
+global_paths = ["~/.aider-desk/skills"]
+search_order = "project-first"
+recursive = true
+root_md_paths = []
+
+[[harness]]
+id = "amp"
+display_name = "Amp"
+verified = false
+detect = ["~/.config/amp"]
+project_paths = [".agents/skills"]
+global_paths = ["~/.config/agents/skills"]
+search_order = "project-first"
+recursive = true
+root_md_paths = []
+
+[[harness]]
+id = "antigravity"
+display_name = "Antigravity"
+verified = false
+detect = ["~/.gemini/antigravity"]
+project_paths = [".agents/skills"]
+global_paths = ["~/.gemini/antigravity/skills"]
+search_order = "project-first"
+recursive = true
+root_md_paths = []
+
+[[harness]]
+id = "antigravity-cli"
+display_name = "Antigravity CLI"
+verified = false
+detect = ["~/.gemini/antigravity-cli"]
+project_paths = [".agents/skills"]
+global_paths = ["~/.gemini/antigravity-cli/skills"]
+search_order = "project-first"
+recursive = true
+root_md_paths = []
+
+[[harness]]
+id = "astrbot"
+display_name = "AstrBot"
+verified = false
+detect = ["~/.astrbot", "data/skills"]
+project_paths = ["data/skills"]
+global_paths = ["~/.astrbot/data/skills"]
+search_order = "project-first"
+recursive = true
+root_md_paths = []
+
+[[harness]]
+id = "augment"
+display_name = "Augment"
+verified = false
+detect = ["~/.augment"]
+project_paths = [".augment/skills"]
+global_paths = ["~/.augment/skills"]
+search_order = "project-first"
+recursive = true
+root_md_paths = []
+
+[[harness]]
+id = "autohand-code"
+display_name = "Autohand Code CLI"
+verified = false
+detect = ["~/.autohand"]
+project_paths = [".autohand/skills"]
+global_paths = ["~/.autohand/skills"]
+search_order = "project-first"
+recursive = true
+root_md_paths = []
+
+[[harness]]
+id = "bob"
+display_name = "IBM Bob"
+verified = false
+detect = ["~/.bob"]
+project_paths = [".bob/skills"]
+global_paths = ["~/.bob/skills"]
+search_order = "project-first"
+recursive = true
+root_md_paths = []
+
+[[harness]]
+id = "cline"
+display_name = "Cline"
+verified = false
+detect = ["~/.cline"]
+project_paths = [".agents/skills"]
+global_paths = ["~/.agents/skills"]
+search_order = "project-first"
+recursive = true
+root_md_paths = []
+
+[[harness]]
+id = "codearts-agent"
+display_name = "CodeArts Agent"
+verified = false
+detect = ["~/.codeartsdoer"]
+project_paths = [".codeartsdoer/skills"]
+global_paths = ["~/.codeartsdoer/skills"]
+search_order = "project-first"
+recursive = true
+root_md_paths = []
+
+[[harness]]
+id = "codebuddy"
+display_name = "CodeBuddy"
+verified = false
+detect = ["~/.codebuddy", ".codebuddy"]
+project_paths = [".codebuddy/skills"]
+global_paths = ["~/.codebuddy/skills"]
+search_order = "project-first"
+recursive = true
+root_md_paths = []
+
+[[harness]]
+id = "codemaker"
+display_name = "Codemaker"
+verified = false
+detect = ["~/.codemaker"]
+project_paths = [".codemaker/skills"]
+global_paths = ["~/.codemaker/skills"]
+search_order = "project-first"
+recursive = true
+root_md_paths = []
+
+[[harness]]
+id = "codestudio"
+display_name = "Code Studio"
+verified = false
+detect = ["~/.codestudio"]
+project_paths = [".codestudio/skills"]
+global_paths = ["~/.codestudio/skills"]
+search_order = "project-first"
+recursive = true
+root_md_paths = []
+
+[[harness]]
+id = "command-code"
+display_name = "Command Code"
+verified = false
+detect = ["~/.commandcode"]
+project_paths = [".commandcode/skills"]
+global_paths = ["~/.commandcode/skills"]
+search_order = "project-first"
+recursive = true
+root_md_paths = []
+
+[[harness]]
+id = "continue"
+display_name = "Continue"
+verified = false
+detect = ["~/.continue", ".continue"]
+project_paths = [".continue/skills"]
+global_paths = ["~/.continue/skills"]
+search_order = "project-first"
+recursive = true
+root_md_paths = []
+
+[[harness]]
+id = "cortex"
+display_name = "Cortex Code"
+verified = false
+detect = ["~/.snowflake/cortex"]
+project_paths = [".cortex/skills"]
+global_paths = ["~/.snowflake/cortex/skills"]
+search_order = "project-first"
+recursive = true
+root_md_paths = []
+
+[[harness]]
+id = "crush"
+display_name = "Crush"
+verified = false
+detect = ["~/.config/crush"]
+project_paths = [".crush/skills"]
+global_paths = ["~/.config/crush/skills"]
+search_order = "project-first"
+recursive = true
+root_md_paths = []
+
+[[harness]]
+id = "deepagents"
+display_name = "Deep Agents"
+verified = false
+detect = ["~/.deepagents"]
+project_paths = [".agents/skills"]
+global_paths = ["~/.deepagents/agent/skills"]
+search_order = "project-first"
+recursive = true
+root_md_paths = []
+
+[[harness]]
+id = "devin"
+display_name = "Devin for Terminal"
+verified = false
+detect = ["~/.config/devin"]
+project_paths = [".devin/skills"]
+global_paths = ["~/.config/devin/skills"]
+search_order = "project-first"
+recursive = true
+root_md_paths = []
+
+[[harness]]
+id = "dexto"
+display_name = "Dexto"
+verified = false
+detect = ["~/.dexto"]
+project_paths = [".agents/skills"]
+global_paths = ["~/.agents/skills"]
+search_order = "project-first"
+recursive = true
+root_md_paths = []
+
+[[harness]]
+id = "droid"
+display_name = "Droid"
+verified = false
+detect = ["~/.factory"]
+project_paths = [".factory/skills"]
+global_paths = ["~/.factory/skills"]
+search_order = "project-first"
+recursive = true
+root_md_paths = []
+
+[[harness]]
+id = "eve"
+display_name = "Eve"
+verified = false
+detect = ["agent"]
+project_paths = ["agent/skills"]
+global_paths = []
+search_order = "project-first"
+recursive = true
+root_md_paths = []
+
+[[harness]]
+id = "firebender"
+display_name = "Firebender"
+verified = false
+detect = ["~/.firebender"]
+project_paths = [".agents/skills"]
+global_paths = ["~/.firebender/skills"]
+search_order = "project-first"
+recursive = true
+root_md_paths = []
+
+[[harness]]
+id = "forgecode"
+display_name = "ForgeCode"
+verified = false
+detect = ["~/.forge"]
+project_paths = [".forge/skills"]
+global_paths = ["~/.forge/skills"]
+search_order = "project-first"
+recursive = true
+root_md_paths = []
+
+[[harness]]
+id = "goose"
+display_name = "Goose"
+verified = false
+detect = ["~/.config/goose"]
+project_paths = [".goose/skills"]
+global_paths = ["~/.config/goose/skills"]
+search_order = "project-first"
+recursive = true
+root_md_paths = []
+
+[[harness]]
+id = "hermes-agent"
+display_name = "Hermes Agent"
+verified = false
+detect = ["~/.hermes"]
+project_paths = [".hermes/skills"]
+global_paths = ["~/.hermes/skills"]
+search_order = "project-first"
+recursive = true
+root_md_paths = []
+
+[[harness]]
+id = "iflow-cli"
+display_name = "iFlow CLI"
+verified = false
+detect = ["~/.iflow"]
+project_paths = [".iflow/skills"]
+global_paths = ["~/.iflow/skills"]
+search_order = "project-first"
+recursive = true
+root_md_paths = []
+
+[[harness]]
+id = "inference-sh"
+display_name = "inference.sh"
+verified = false
+detect = ["~/.inferencesh"]
+project_paths = [".inferencesh/skills"]
+global_paths = ["~/.inferencesh/skills"]
+search_order = "project-first"
+recursive = true
+root_md_paths = []
+
+[[harness]]
+id = "jazz"
+display_name = "Jazz"
+verified = false
+detect = ["~/.jazz", ".jazz"]
+project_paths = [".jazz/skills"]
+global_paths = ["~/.jazz/skills"]
+search_order = "project-first"
+recursive = true
+root_md_paths = []
+
+[[harness]]
+id = "junie"
+display_name = "Junie"
+verified = false
+detect = ["~/.junie"]
+project_paths = [".junie/skills"]
+global_paths = ["~/.junie/skills"]
+search_order = "project-first"
+recursive = true
+root_md_paths = []
+
+[[harness]]
+id = "kilo"
+display_name = "Kilo Code"
+verified = false
+detect = ["~/.kilocode"]
+project_paths = [".kilocode/skills"]
+global_paths = ["~/.kilocode/skills"]
+search_order = "project-first"
+recursive = true
+root_md_paths = []
+
+[[harness]]
+id = "kimi-code-cli"
+display_name = "Kimi Code CLI"
+verified = false
+detect = ["~/.kimi-code", "~/.kimi"]
+project_paths = [".agents/skills"]
+global_paths = ["~/.agents/skills"]
+search_order = "project-first"
+recursive = true
+root_md_paths = []
+
+[[harness]]
+id = "kiro-cli"
+display_name = "Kiro CLI"
+verified = false
+detect = ["~/.kiro"]
+project_paths = [".kiro/skills"]
+global_paths = ["~/.kiro/skills"]
+search_order = "project-first"
+recursive = true
+root_md_paths = []
+
+[[harness]]
+id = "kode"
+display_name = "Kode"
+verified = false
+detect = ["~/.kode"]
+project_paths = [".kode/skills"]
+global_paths = ["~/.kode/skills"]
+search_order = "project-first"
+recursive = true
+root_md_paths = []
+
+[[harness]]
+id = "lingma"
+display_name = "Lingma"
+verified = false
+detect = ["~/.lingma"]
+project_paths = [".lingma/skills"]
+global_paths = ["~/.lingma/skills"]
+search_order = "project-first"
+recursive = true
+root_md_paths = []
+
+[[harness]]
+id = "loaf"
+display_name = "Loaf"
+verified = false
+detect = ["~/.loaf"]
+project_paths = [".agents/skills"]
+global_paths = ["~/.agents/skills"]
+search_order = "project-first"
+recursive = true
+root_md_paths = []
+
+[[harness]]
+id = "mcpjam"
+display_name = "MCPJam"
+verified = false
+detect = ["~/.mcpjam"]
+project_paths = [".mcpjam/skills"]
+global_paths = ["~/.mcpjam/skills"]
+search_order = "project-first"
+recursive = true
+root_md_paths = []
+
+[[harness]]
+id = "mistral-vibe"
+display_name = "Mistral Vibe"
+verified = false
+detect = ["~/.vibe"]
+project_paths = [".vibe/skills"]
+global_paths = ["~/.vibe/skills"]
+search_order = "project-first"
+recursive = true
+root_md_paths = []
+
+[[harness]]
+id = "moxby"
+display_name = "Moxby"
+verified = false
+detect = ["~/.moxby"]
+project_paths = [".moxby/skills"]
+global_paths = ["~/.moxby/skills"]
+search_order = "project-first"
+recursive = true
+root_md_paths = []
+
+[[harness]]
+id = "mux"
+display_name = "Mux"
+verified = false
+detect = ["~/.mux"]
+project_paths = [".mux/skills"]
+global_paths = ["~/.mux/skills"]
+search_order = "project-first"
+recursive = true
+root_md_paths = []
+
+[[harness]]
+id = "neovate"
+display_name = "Neovate"
+verified = false
+detect = ["~/.neovate"]
+project_paths = [".neovate/skills"]
+global_paths = ["~/.neovate/skills"]
+search_order = "project-first"
+recursive = true
+root_md_paths = []
+
+[[harness]]
+id = "ona"
+display_name = "Ona"
+verified = false
+detect = ["~/.ona"]
+project_paths = [".ona/skills"]
+global_paths = ["~/.ona/skills"]
+search_order = "project-first"
+recursive = true
+root_md_paths = []
+
+[[harness]]
+id = "openclaw"
+display_name = "OpenClaw"
+verified = false
+detect = ["~/.openclaw", "~/.clawdbot", "~/.moltbot"]
+project_paths = ["skills"]
+global_paths = ["~/.openclaw/skills"]
+search_order = "project-first"
+recursive = true
+root_md_paths = []
+
+[[harness]]
+id = "opencode"
+display_name = "OpenCode"
+verified = false
+detect = ["~/.config/opencode"]
+project_paths = [".agents/skills"]
+global_paths = ["~/.config/opencode/skills"]
+search_order = "project-first"
+recursive = true
+root_md_paths = []
+
+[[harness]]
+id = "openhands"
+display_name = "OpenHands"
+verified = false
+detect = ["~/.openhands"]
+project_paths = [".openhands/skills"]
+global_paths = ["~/.openhands/skills"]
+search_order = "project-first"
+recursive = true
+root_md_paths = []
+
+[[harness]]
+id = "pochi"
+display_name = "Pochi"
+verified = false
+detect = ["~/.pochi"]
+project_paths = [".pochi/skills"]
+global_paths = ["~/.pochi/skills"]
+search_order = "project-first"
+recursive = true
+root_md_paths = []
+
+[[harness]]
+id = "promptscript"
+display_name = "PromptScript"
+verified = false
+detect = [".promptscript", "promptscript.yaml"]
+project_paths = [".agents/skills"]
+global_paths = []
+search_order = "project-first"
+recursive = true
+root_md_paths = []
+
+[[harness]]
+id = "qoder"
+display_name = "Qoder"
+verified = false
+detect = ["~/.qoder"]
+project_paths = [".qoder/skills"]
+global_paths = ["~/.qoder/skills"]
+search_order = "project-first"
+recursive = true
+root_md_paths = []
+
+[[harness]]
+id = "qoder-cn"
+display_name = "Qoder CN"
+verified = false
+detect = ["~/.qoder-cn"]
+project_paths = [".qoder/skills"]
+global_paths = ["~/.qoder-cn/skills"]
+search_order = "project-first"
+recursive = true
+root_md_paths = []
+
+[[harness]]
+id = "qwen-code"
+display_name = "Qwen Code"
+verified = false
+detect = ["~/.qwen"]
+project_paths = [".qwen/skills"]
+global_paths = ["~/.qwen/skills"]
+search_order = "project-first"
+recursive = true
+root_md_paths = []
+
+[[harness]]
+id = "reasonix"
+display_name = "Reasonix"
+verified = false
+detect = ["~/.reasonix"]
+project_paths = [".reasonix/skills"]
+global_paths = ["~/.reasonix/skills"]
+search_order = "project-first"
+recursive = true
+root_md_paths = []
+
+[[harness]]
+id = "replit"
+display_name = "Replit"
+verified = false
+detect = [".replit"]
+project_paths = [".agents/skills"]
+global_paths = ["~/.config/agents/skills"]
+search_order = "project-first"
+recursive = true
+root_md_paths = []
+
+[[harness]]
+id = "roo"
+display_name = "Roo Code"
+verified = false
+detect = ["~/.roo"]
+project_paths = [".roo/skills"]
+global_paths = ["~/.roo/skills"]
+search_order = "project-first"
+recursive = true
+root_md_paths = []
+
+[[harness]]
+id = "rovodev"
+display_name = "Rovo Dev"
+verified = false
+detect = ["~/.rovodev"]
+project_paths = [".rovodev/skills"]
+global_paths = ["~/.rovodev/skills"]
+search_order = "project-first"
+recursive = true
+root_md_paths = []
+
+[[harness]]
+id = "tabnine-cli"
+display_name = "Tabnine CLI"
+verified = false
+detect = ["~/.tabnine"]
+project_paths = [".tabnine/agent/skills"]
+global_paths = ["~/.tabnine/agent/skills"]
+search_order = "project-first"
+recursive = true
+root_md_paths = []
+
+[[harness]]
+id = "terramind"
+display_name = "Terramind"
+verified = false
+detect = ["~/.terramind"]
+project_paths = [".terramind/skills"]
+global_paths = ["~/.terramind/skills"]
+search_order = "project-first"
+recursive = true
+root_md_paths = []
+
+[[harness]]
+id = "tinycloud"
+display_name = "Tinycloud"
+verified = false
+detect = ["~/.tinycloud"]
+project_paths = [".tinycloud/skills"]
+global_paths = ["~/.tinycloud/skills"]
+search_order = "project-first"
+recursive = true
+root_md_paths = []
+
+[[harness]]
+id = "trae"
+display_name = "Trae"
+verified = false
+detect = ["~/.trae"]
+project_paths = [".trae/skills"]
+global_paths = ["~/.trae/skills"]
+search_order = "project-first"
+recursive = true
+root_md_paths = []
+
+[[harness]]
+id = "trae-cn"
+display_name = "Trae CN"
+verified = false
+detect = ["~/.trae-cn"]
+project_paths = [".trae/skills"]
+global_paths = ["~/.trae-cn/skills"]
+search_order = "project-first"
+recursive = true
+root_md_paths = []
+
+[[harness]]
+id = "warp"
+display_name = "Warp"
+verified = false
+detect = ["~/.warp"]
+project_paths = [".agents/skills"]
+global_paths = ["~/.agents/skills"]
+search_order = "project-first"
+recursive = true
+root_md_paths = []
+
+[[harness]]
+id = "windsurf"
+display_name = "Windsurf"
+verified = false
+detect = ["~/.codeium/windsurf"]
+project_paths = [".windsurf/skills"]
+global_paths = ["~/.codeium/windsurf/skills"]
+search_order = "project-first"
+recursive = true
+root_md_paths = []
+
+[[harness]]
+id = "zcode"
+display_name = "ZCode"
+verified = false
+detect = ["~/.zcode"]
+project_paths = [".zcode/skills"]
+global_paths = ["~/.zcode/skills"]
+search_order = "project-first"
+recursive = true
+root_md_paths = []
+
+[[harness]]
+id = "zed"
+display_name = "Zed"
+verified = false
+detect = ["~/.config/zed"]
+project_paths = [".agents/skills"]
+global_paths = ["~/.agents/skills"]
+search_order = "project-first"
+recursive = true
+root_md_paths = []
+
+[[harness]]
+id = "zencoder"
+display_name = "Zencoder"
+verified = false
+detect = ["~/.zencoder"]
+project_paths = [".zencoder/skills"]
+global_paths = ["~/.zencoder/skills"]
+search_order = "project-first"
+recursive = true
+root_md_paths = []
+
+[[harness]]
+id = "zenflow"
+display_name = "Zenflow"
+verified = false
+detect = ["~/.zencoder"]
+project_paths = [".zencoder/skills"]
+global_paths = ["~/.zencoder/skills"]
+search_order = "project-first"
+recursive = true
+root_md_paths = []
