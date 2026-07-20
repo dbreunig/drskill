@@ -39,7 +39,7 @@ def _find_broken_symlinks(base: Path, recursive: bool = True) -> list[Path]:
                 out.append(p)
         # Also check one level deep (base/*/...)
         for subdir in base.iterdir():
-            if subdir.is_dir() and not subdir.is_symlink():
+            if subdir.is_dir():
                 for name in os.listdir(subdir):
                     p = subdir / name
                     if p.is_symlink() and not p.exists():

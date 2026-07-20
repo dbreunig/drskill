@@ -105,7 +105,11 @@ def test_broken_symlink_sweep_respects_recursive_flag(tmp_path):
     os.symlink(tmp_path / "nowhere", base / "top-dead")
     os.symlink(tmp_path / "nowhere", base / "a" / "mid-dead")
     os.symlink(tmp_path / "nowhere", deep / "deep-dead")
+    canonical = tmp_path / "canonical"
+    canonical.mkdir()
+    os.symlink(tmp_path / "nowhere", canonical / "linked-dead")
+    os.symlink(canonical, base / "linked")
     shallow = {p.name for p in _find_broken_symlinks(base, recursive=False)}
-    assert shallow == {"top-dead", "mid-dead"}
+    assert shallow == {"top-dead", "mid-dead", "linked-dead"}
     full = {p.name for p in _find_broken_symlinks(base, recursive=True)}
-    assert full == {"top-dead", "mid-dead", "deep-dead"}
+    assert full == {"top-dead", "mid-dead", "deep-dead", "linked-dead"}
