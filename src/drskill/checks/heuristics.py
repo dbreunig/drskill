@@ -27,7 +27,8 @@ def missing_activation(world: World, config: Config) -> list[Finding]:
     return [
         make_finding(
             "missing-activation", "warning", [c],
-            f"'{c.name}' never says when to use it; the router has to guess",
+            f"'{c.name}' never says when to use it; the router has to guess "
+            "(or a user has to invoke it by name)",
             fix_commands=[
                 f"Start the description in {c.id} with a condition, e.g. 'Use when ...'"
             ],
@@ -152,7 +153,8 @@ def description_overlap(world: World, config: Config) -> list[Finding]:
         members = sorted(members, key=lambda c: c.name)
         phrases = text.shared_phrases([m.routing_text for m in members])[:3]
         if phrases:
-            claim = f" all claim '{'; '.join(phrases)}'"
+            quoted = ", ".join(f"'{p}'" for p in phrases)
+            claim = f" all claim {quoted}"
         else:
             claim = " have near-identical descriptions"
         name_counts: dict[str, int] = {}

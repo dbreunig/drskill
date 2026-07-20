@@ -8,7 +8,9 @@ from __future__ import annotations
 
 import re
 
-_WORD = re.compile(r"[a-z0-9][a-z0-9'-]*")
+# Tokens must end alphanumeric so quoted text ('Berlin',) does not leave a
+# trailing apostrophe on the token; internal apostrophes (what's) survive.
+_WORD = re.compile(r"[a-z0-9](?:[a-z0-9'-]*[a-z0-9])?")
 
 STOPWORDS: frozenset[str] = frozenset(
     """a an and are as at be by for from has have if in into is it its of on or

@@ -68,3 +68,8 @@ def test_has_activation():
 def test_vocab_contents():
     assert "tasks" in GENERIC_VOCAB and "helps" in GENERIC_VOCAB
     assert "when" in STOPWORDS and "use" in STOPWORDS
+
+
+def test_tokenize_strips_quote_artifacts():
+    assert tokenize("'Berlin', 'Boston'") == ["berlin", "boston"]
+    assert tokenize("what's the box") == ["what's", "the", "box"]
