@@ -78,3 +78,26 @@ def test_exact_duplicate_across_harnesses_only(tmp_path):
     exact = [f for f in findings if f.check_id == "exact-duplicate"]
     assert len(exact) == 1
     assert set(exact[0].harnesses) == {"claude-code", "pi"}
+
+
+def test_exact_duplicate_fires_despite_coloaded_subgroup(tmp_path):
+    # 3-way group: claude-code co-loads two copies (double-load territory),
+    # but the pi copy is a genuine cross-harness duplicate and must surface
+    proj, home = tmp_path / "p", tmp_path / "h"
+    content = f"---\nname: dup\ndescription: d\n---\n{BODY}"
+    for root in [proj / ".claude/skills/dup", home / ".claude/skills/dup", proj / ".pi/skills/dup"]:
+        root.mkdir(parents=True)
+        (root / "SKILL.md").write_text(content)
+    findings = run_all(world_from(proj, home, ("claude-code", "pi")), Config())
+    exact = [f for f in findings if f.check_id == "exact-duplicate"]
+    assert len(exact) == 1
+
+
+def test_exact_duplicate_skips_pure_same_harness_coload(tmp_path):
+    proj, home = tmp_path / "p", tmp_path / "h"
+    content = f"---\nname: dup\ndescription: d\n---\n{BODY}"
+    for root in [proj / ".claude/skills/dup", home / ".claude/skills/dup"]:
+        root.mkdir(parents=True)
+        (root / "SKILL.md").write_text(content)
+    findings = run_all(world_from(proj, home), Config())
+    assert [f for f in findings if f.check_id == "exact-duplicate"] == []

@@ -58,12 +58,12 @@ def exact_duplicate(world: World, config: Config) -> list[Finding]:
         if len(group) < 2:
             continue
         # pairs co-loaded by one harness belong to double-load, not here
-        pairs = [
+        clean_pairs = [
             (a, b)
             for a, b in combinations(group, 2)
             if not _harnesses_loading_both(world, a, b)
         ]
-        if len(pairs) == len(list(combinations(group, 2))) and pairs:
+        if clean_pairs:
             out.append(
                 make_finding(
                     "exact-duplicate", "warning", group,
