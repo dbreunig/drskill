@@ -66,16 +66,34 @@ def scan(
     global_mode: bool = typer.Option(False, "--global", help="analyze machine-level skills only"),
     ci: bool = typer.Option(False, "--ci", help="exit 2 on unacknowledged warnings"),
     as_json: bool = typer.Option(False, "--json", help="emit findings as JSON"),
+    detailed: bool = typer.Option(False, "--detailed", help="also print each harness's skill table"),
+    show_all: bool = typer.Option(False, "--all", help="with --detailed, include harnesses with no skills"),
+    harness: str | None = typer.Option(None, "--harness", help="scope the scan to one harness"),
 ) -> None:
     """Analyze every detected harness's skill set and report findings."""
+    _validate_harness(harness)
     home = _home()
     config = _load_config_or_exit(ledger.ledger_path(root, home, global_mode))
-    world, findings = run_scan(root, home, global_mode, config)
+    world, findings = run_scan(root, home, global_mode, config, harness=harness)
     active, acked = ledger.filter_findings(findings, config)
     if as_json:
         print(report.to_json(active))
     else:
+        if harness is not None:
+            from drskill.harnesses import detect_harnesses
+
+            detected = {h.id for h in detect_harnesses(root, home, global_mode)}
+            if harness not in detected:
+                console.print(
+                    f"[dim]note: harness {escape(harness)} is not detected on this "
+                    "machine; scanning its search paths anyway[/dim]"
+                )
         report.render(world, active, acked, console)
+        if detailed:
+            console.print()
+            report.render_harness_tables(
+                world, console, tokens=False, harness=None, show_all=show_all
+            )
     if any(f.severity == "error" for f in active):
         raise typer.Exit(1)
     if ci and any(f.severity == "warning" for f in active):

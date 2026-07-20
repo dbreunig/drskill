@@ -154,3 +154,16 @@ def test_show_all_includes_empty():
 def test_harness_filter_suppresses_closing_line():
     text = tables_to_text(world_two_harnesses(), harness="claude-code")
     assert "Claude Code" in text and "show with --all" not in text
+
+
+def test_header_splits_empty_harness_count():
+    text = render_to_text(world_two_harnesses(), [], [])
+    assert "1 harness (1 more empty), 1 skills" in text
+
+
+def test_header_plain_when_no_empty():
+    world = world_two_harnesses()
+    del world.harnesses["qwen-code"]
+    text = render_to_text(world, [], [])
+    assert "more empty" not in text
+    assert "1 harness, 1 skills" in text

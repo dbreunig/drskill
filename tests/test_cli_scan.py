@@ -104,3 +104,48 @@ def test_unreadable_skill_does_not_crash_scan_and_is_reported(tmp_path):
         assert "unreadable-skill" in r.output
     finally:
         f.chmod(0o644)
+
+
+def test_scan_detailed_appends_tables(tmp_path):
+    proj = tmp_path / "proj"
+    write(proj, "clean", "---\nname: clean\ndescription: fine\n---\nb\n")
+    r = scan(tmp_path, "--detailed")
+    assert r.exit_code == 0
+    assert "No findings" in r.output and "clean" in r.output and "Claude Code" in r.output
+
+
+def test_scan_json_wins_over_detailed(tmp_path):
+    import json
+    proj = tmp_path / "proj"
+    write(proj, "clean", "---\nname: clean\ndescription: fine\n---\nb\n")
+    r = scan(tmp_path, "--detailed", "--json")
+    json.loads(r.output)
+
+
+def test_scan_unknown_harness_errors(tmp_path):
+    proj = tmp_path / "proj"
+    proj.mkdir(exist_ok=True)
+    r = scan(tmp_path, "--harness", "bogus")
+    assert r.exit_code == 1 and "unknown harness" in r.output
+
+
+def test_scan_scoped_harness_drops_cross_harness_findings(tmp_path):
+    proj = tmp_path / "proj"
+    content = "---\nname: same\ndescription: d\n---\nbody\n"
+    for rel in [".claude/skills/same", ".pi/skills/same"]:
+        d = proj / rel
+        d.mkdir(parents=True)
+        (d / "SKILL.md").write_text(content)
+    full = scan(tmp_path)
+    assert "exact-duplicate" in full.output
+    scoped = scan(tmp_path, "--harness", "pi")
+    assert "exact-duplicate" not in scoped.output
+    assert scoped.exit_code == 0
+
+
+def test_scan_valid_but_undetected_harness_notes_and_passes(tmp_path):
+    proj = tmp_path / "proj"
+    write(proj, "clean", "---\nname: clean\ndescription: fine\n---\nb\n")
+    r = scan(tmp_path, "--harness", "qwen-code")
+    assert r.exit_code == 0
+    assert "not detected" in r.output

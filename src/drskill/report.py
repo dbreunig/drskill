@@ -93,9 +93,15 @@ def _print_finding(world: World, f: Finding, console: Console) -> None:
 def render(
     world: World, active: list[Finding], acked: list[Finding], console: Console
 ) -> None:
-    n_harness = len(world.harnesses)
+    populated = [hid for hid in world.harnesses if world.effective(hid)]
+    empty = len(world.harnesses) - len(populated)
     n_skills = len(world.contributors)
-    console.print(f"[bold]drskill scan[/bold] — {n_harness} harnesses, {n_skills} skills")
+    plural = "es" if len(populated) != 1 else ""
+    header = f"[bold]drskill scan[/bold] — {len(populated)} harness{plural}"
+    if empty:
+        header += f" ({empty} more empty)"
+    header += f", {n_skills} skills"
+    console.print(header)
     errors = [f for f in active if f.severity == "error"]
     warnings = [f for f in active if f.severity == "warning"]
     if not active:

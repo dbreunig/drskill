@@ -5,7 +5,7 @@ from pathlib import Path
 from drskill.checks import run_all
 from drskill.checks.lockfile import load_lockfile
 from drskill.discovery import discover
-from drskill.harnesses import detect_harnesses
+from drskill.harnesses import detect_harnesses, load_harnesses
 from drskill.ledger import Config, ledger_path, load_config
 from drskill.models import Finding, Provenance
 from drskill.resolution import World, build_world
@@ -16,10 +16,14 @@ def run_scan(
     home: Path,
     global_only: bool = False,
     config: Config | None = None,
+    harness: str | None = None,
 ) -> tuple[World, list[Finding]]:
     if config is None:
         config = load_config(ledger_path(project_root, home, global_only))
-    harnesses = detect_harnesses(project_root, home, global_only)
+    if harness is None:
+        harnesses = detect_harnesses(project_root, home, global_only)
+    else:
+        harnesses = [h for h in load_harnesses() if h.id == harness]
     instances, broken = [], []
     for h in harnesses:
         i, b = discover(h, project_root, home, global_only)
