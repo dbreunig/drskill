@@ -33,7 +33,11 @@ ACTIVATION_PATTERNS: tuple[str, ...] = (
 )
 
 _ACTIVATION_TOKENS: frozenset[str] = frozenset(
-    {"when", "whenever", "trigger", "triggers", "triggered", "invoke", "invokes", "invoked"}
+    {
+        "when", "whenever",
+        "trigger", "triggers", "triggered", "triggering",
+        "invoke", "invokes", "invoked", "invoking",
+    }
 )
 
 GENERIC_VOCAB: frozenset[str] = frozenset(
@@ -92,7 +96,10 @@ def shared_phrases(texts: list[str], max_n: int = 3) -> list[str]:
                 continue
             gram_sets.append({" ".join(tl[i : i + n]) for i in range(len(tl) - n + 1)})
         for phrase in sorted(set.intersection(*gram_sets)):
-            if not any(phrase in longer for longer in kept):
+            # Word-boundary containment: "document" is not part of the kept
+            # phrase "write project documentation" even though it is a raw
+            # substring of it.
+            if not any(f" {phrase} " in f" {longer} " for longer in kept):
                 kept.append(phrase)
     return kept
 

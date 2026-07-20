@@ -22,15 +22,15 @@ Fires when two or more descriptions are so similar that a router could confuse t
 
 - Score every pair of contributors by cosine similarity between word shingle vectors of their `routing_text`, after stopword filtering (method below).
 - Pairs at or above `[thresholds] description_overlap` are edges. Connected components with two or more members become clusters (union find).
-- One finding per cluster. The message names the members and the shared trigger phrases, e.g. "4 skills all claim 'documentation'; none states an exclusive condition". Shared phrases are the longest word n-grams (n from 3 down to 1) that appear in every member's filtered description, ranked by length then frequency; the message shows at most 3.
-- A pair whose contributors are duplicates contributes no edge. Duplication is the stronger diagnosis; reporting the same pair twice is noise. Checks run independently, so the overlap check does not read another check's output. It re-derives the condition with the existing helpers: equal content hashes (exact) or a MinHash estimate at or above `[thresholds] near_duplicate` (near), both imported from `checks/duplicates.py`.
-- Fingerprint: the standard formula over the cluster members' content hashes, so an ack resurfaces when any member changes.
+- One finding per cluster. The message names the members and the shared trigger phrases, e.g. "4 skills all claim 'documentation'; none states an exclusive condition". Shared phrases are the longest word n-grams (n from 3 down to 1) that appear in every member's filtered description, longest first, with word-boundary substring dedup; the message shows at most 3, joined with semicolons.
+- Duplicate groups collapse to one representative before clustering. Duplication is the stronger diagnosis; reporting the same skills twice is noise, and skipping only the direct edge is not enough because a bridging third skill can reunite a duplicate pair inside one cluster. Checks run independently, so the overlap check does not read another check's output. It re-derives the duplicate condition with the existing helpers: equal content hashes (exact) or a MinHash estimate at or above `[thresholds] near_duplicate` (near), both imported from `checks/duplicates.py`.
+- Fingerprint: the standard formula, but hashed over each member's `routing_text` rather than whole-file content, because the check only judged descriptions. An ack survives body-only edits and resurfaces when any member's description changes. The same basis rule applies to all four checks: missing-activation and generic-description fingerprint the description, opposing-imperatives fingerprints the two bodies.
 
 ### `missing-activation`
 
 Fires when a description never states when the skill should trigger.
 
-- A built-in lexicon of activation patterns is matched case-insensitively against `routing_text`. The lexicon includes at least: "use when", "use this when", "use this skill when", "use whenever", "when the user", "when you", "when a ", "when working", "trigger", "invoke", "for questions about", "if the user", "before ", "after ", "during ".
+- Detection is a hybrid, settled during corpus tuning: condition words ("when", "whenever", "trigger", "invoke" and their derived forms) are matched as whole tokens anywhere in `routing_text`, so a mid-sentence clause like "when building new UI" counts (a real description in anthropics/skills). Phrase patterns cover the rest: "for questions about", "if the user", "if you", "before ", "after ", "during ".
 - No match and a non-empty description means the finding fires. Empty descriptions stay Tier 1's `spec-missing-description`.
 - The lexicon lives in `text.py` as data. It is not user-tunable in v0.2; the ack ledger is the escape hatch.
 
@@ -46,8 +46,8 @@ Fires when a description contains too few distinctive words to route on.
 
 Fires when two skills give opposite orders about the same thing.
 
-- From each contributor's body, extract pairs with the regex `\b(always|never)\s+((?:\w+[ \t]){0,3}\w+)` , case-insensitive. Normalize the captured phrase: lowercase, stopwords dropped, tokens sorted.
-- Two contributors where one says "always" and the other says "never" about the same normalized phrase produce a finding naming both skills and the phrase.
+- From each contributor's body, extract pairs with the regex `\b(always|never)\s+((?:\w+[ \t]){0,3}\w+)` , case-insensitive. Normalize the captured phrase to its first two non-glue tokens (verbs kept; articles, prepositions, and location adverbs dropped).
+- Two contributors where one says "always" and the other says "never" about the same verb+object bigram produce a finding naming both skills and the phrase. This exact rule came from corpus tuning: looser set-intersection and set-containment variants fired 119 and 248 times on the hermes-agent loadout (179 skills), almost entirely on single shared verbs; the bigram rule fires zero times on all three corpora while still catching "always use tabs" against "never use tabs".
 - This is deliberately low recall. It catches "always use tabs" against "never use tabs" and misses paraphrases. The check description and the report message do not pretend otherwise.
 
 ## Shared text utilities
@@ -85,7 +85,9 @@ A dev-only script, `scripts/corpus.py` in the repo and excluded from the wheel, 
 2. Builds a scan world from each corpus tree and runs only the Tier 2 checks across a sweep of thresholds.
 3. Emits a review sheet (markdown table per corpus): check, score, skills involved, description excerpts.
 
-We hand-review the sheets, pick defaults that keep false positives rare on these real sets, and record the decision in the spec's ledger section and the plan. The clearest true positives and false positives get frozen as conformance cases, copying the skill text in with the upstream license noted in the case directory.
+We hand-review the sheets, pick defaults that keep false positives rare on these real sets, and record the decision in the spec's ledger section and the plan.
+
+Tuning outcome (2026-07-20, corpora: anthropics/skills at 18 skills, vercel-labs/agent-skills at 9, NousResearch/hermes-agent at 179): `description_overlap = 0.6` confirmed with zero pairs at or above 0.4 on any corpus; `generic_min_distinct_tokens = 2` confirmed with zero findings on any corpus; missing-activation flags 3, 0, and 147 skills respectively, which matches the ecosystem's known missing-condition baseline and is treated as signal, not noise; opposing-imperatives fires zero times on all corpora under the bigram rule. The tuning run also exposed and fixed a v0.1 crash: a real hermes skill contains a literal special-token string that tiktoken refused to encode. The clearest true positives and false positives get frozen as conformance cases, copying the skill text in with the upstream license noted in the case directory.
 
 ## Report and CLI
 

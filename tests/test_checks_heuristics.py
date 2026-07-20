@@ -141,5 +141,52 @@ def test_overlap_disambiguates_colliding_names(tmp_path):
     findings = run_all(world, Config())
     hits = by_check(findings, "description-overlap")
     assert len(hits) == 1
-    assert "docs (.claude)" in hits[0].message
-    assert "docs (.pi)" in hits[0].message
+    assert "/.claude/skills)" in hits[0].message
+    assert "/.pi/skills)" in hits[0].message
+
+
+def test_overlap_bridge_cannot_reunite_duplicate_pair(tmp_path):
+    proj, home = tmp_path / "p", tmp_path / "h"
+    shared_body = "Collect the metrics and summarize each work stream carefully. " * 10
+    write(proj, "dup-a", PILE_A, body=shared_body)
+    write(proj, "dup-b", PILE_B, body=shared_body + "extra.")
+    write(proj, "doc-c", PILE_C, body="c" * 40)
+    cfg = Config()
+    cfg.thresholds.near_duplicate = 0.5
+    findings = run_all(world_from(proj, home), cfg)
+    hits = by_check(findings, "description-overlap")
+    assert len(hits) == 1
+    # one duplicate representative + the bridge skill, never both duplicates
+    assert "doc-c" in hits[0].contributor_names
+    assert not {"dup-a", "dup-b"} <= set(hits[0].contributor_names)
+
+
+def test_description_check_acks_survive_body_edits(tmp_path):
+    from drskill.ledger import Ack, filter_findings
+
+    proj, home = tmp_path / "p", tmp_path / "h"
+    write(proj, "doc-a", PILE_A, body="original body a")
+    write(proj, "doc-b", PILE_B, body="original body b")
+    findings = run_all(world_from(proj, home), Config())
+    hit = by_check(findings, "description-overlap")[0]
+    cfg = Config(ack=[Ack(check=hit.check_id, skills=hit.contributor_names,
+                          fingerprint=hit.fingerprint)])
+    # body-only edit: finding stays acked
+    f = proj / ".claude" / "skills" / "doc-a" / "SKILL.md"
+    f.write_text(f.read_text().replace("original body a", "totally new body a"))
+    findings2 = run_all(world_from(proj, home), cfg)
+    active, acked = filter_findings(findings2, cfg)
+    assert [x for x in acked if x.check_id == "description-overlap"]
+    assert not [x for x in active if x.check_id == "description-overlap"]
+    # description edit: finding resurfaces
+    f.write_text(f.read_text().replace("documentation pages", "documentation booklets"))
+    findings3 = run_all(world_from(proj, home), cfg)
+    active3, _ = filter_findings(findings3, cfg)
+    assert [x for x in active3 if x.check_id == "description-overlap"]
+
+
+def test_activation_matches_derived_forms():
+    from drskill.text import has_activation
+
+    assert has_activation("Supports triggering deployments from CI.")
+    assert has_activation("Handy for invoking build pipelines.")

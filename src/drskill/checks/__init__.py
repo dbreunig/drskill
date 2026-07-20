@@ -19,8 +19,20 @@ def check(check_id: str):
     return deco
 
 
-def fingerprint(check_id: str, contributors: list[Contributor], extra: str = "") -> str:
-    payload = "|".join([check_id, *sorted(c.content_hash for c in contributors), extra])
+def fingerprint(
+    check_id: str,
+    contributors: list[Contributor],
+    extra: str = "",
+    texts: list[str] | None = None,
+) -> str:
+    """Fingerprint over the material the check judged. By default that is
+    each contributor's whole normalized content; a check that only judged a
+    slice (e.g. descriptions) passes `texts` so acks survive unrelated edits."""
+    if texts is None:
+        parts = sorted(c.content_hash for c in contributors)
+    else:
+        parts = sorted(hashlib.sha256(t.encode()).hexdigest() for t in texts)
+    payload = "|".join([check_id, *parts, extra])
     return "sha256:" + hashlib.sha256(payload.encode()).hexdigest()
 
 
@@ -33,6 +45,7 @@ def make_finding(
     harnesses: list[str] | None = None,
     fix_commands: list[str] | None = None,
     extra_key: str = "",
+    fingerprint_texts: list[str] | None = None,
 ) -> Finding:
     if harnesses is None:
         harnesses = sorted({d.harness for c in contributors for d in c.deployments})
@@ -44,7 +57,7 @@ def make_finding(
         harnesses=harnesses,
         message=message,
         fix_commands=fix_commands or [],
-        fingerprint=fingerprint(check_id, contributors, extra_key),
+        fingerprint=fingerprint(check_id, contributors, extra_key, fingerprint_texts),
     )
 
 
