@@ -1,13 +1,28 @@
 from __future__ import annotations
 
+import datetime as dt
 import os
 from pathlib import Path
 
 import typer
 from rich.console import Console
+from rich.table import Table
 
 from drskill import ledger, report
+from drskill.ledger import Ack
 from drskill.pipeline import run_scan
+
+INIT_TEMPLATE = """\
+# drskill configuration and decision ledger.
+# Commit this file. Acks silence a finding until the skill content changes.
+
+[budget]
+catalog_tokens_max = 6000   # per-harness startup catalog budget (approximate tokens)
+body_tokens_warn = 20000    # per-skill body ceiling (approximate tokens)
+
+[thresholds]
+near_duplicate = 0.85       # Jaccard similarity that counts as a near duplicate
+"""
 
 app = typer.Typer(add_completion=False, help="brew doctor for your agent's skill loadout")
 console = Console()
@@ -43,3 +58,92 @@ def scan(
         raise typer.Exit(1)
     if ci and any(f.severity == "warning" for f in active):
         raise typer.Exit(2)
+
+
+@app.command()
+def ack(
+    check_id: str = typer.Argument(...),
+    skills: list[str] = typer.Argument(...),
+    note: str | None = typer.Option(None, "--note"),
+    root: Path = typer.Option(Path("."), "--root", hidden=True),
+    global_mode: bool = typer.Option(False, "--global"),
+) -> None:
+    """Acknowledge a finding so it stays silent until the skills change."""
+    home = _home()
+    path = ledger.ledger_path(root, home, global_mode)
+    config = ledger.load_config(path)
+    world, findings = run_scan(root, home, global_mode, config)
+    active, _ = ledger.filter_findings(findings, config)
+    wanted = set(skills)
+    exact = [f for f in active if f.check_id == check_id and set(f.contributor_names) == wanted]
+    superset = [f for f in active if f.check_id == check_id and wanted <= set(f.contributor_names)]
+    matches = exact or superset
+    if not matches:
+        console.print(f"[red]No active finding matches[/red] {check_id} {' '.join(skills)}")
+        raise typer.Exit(1)
+    if len(matches) > 1:
+        console.print(f"[red]Ambiguous:[/red] {len(matches)} findings match; name all involved skills")
+        raise typer.Exit(1)
+    f = matches[0]
+    ledger.append_ack(
+        path,
+        Ack(check=check_id, skills=sorted(f.contributor_names),
+            fingerprint=f.fingerprint, note=note, date=dt.date.today()),
+    )
+    console.print(f"Acknowledged [bold]{check_id}[/bold] for {', '.join(f.contributor_names)} → {path}")
+
+
+@app.command("list")
+def list_cmd(
+    tokens: bool = typer.Option(False, "--tokens"),
+    harness: str | None = typer.Option(None, "--harness"),
+    root: Path = typer.Option(Path("."), "--root", hidden=True),
+    global_mode: bool = typer.Option(False, "--global"),
+) -> None:
+    """Show each harness's effective skill set."""
+    home = _home()
+    world, _findings = run_scan(root, home, global_mode)
+    for hid, hdef in sorted(world.harnesses.items()):
+        if harness and hid != harness:
+            continue
+        title = hdef.display_name + ("" if hdef.verified else " (best effort)")
+        table = Table(title=title)
+        table.add_column("skill")
+        table.add_column("scope")
+        table.add_column("source")
+        if tokens:
+            table.add_column("catalog", justify="right")
+            table.add_column("body", justify="right")
+        table.add_column("notes")
+        cat_total = body_total = 0
+        for c, d in world.harness_loads(hid):
+            notes = []
+            if d.shadowed_by:
+                notes.append("shadowed")
+            if d.via_symlink:
+                notes.append("symlink")
+            row = [c.name, d.scope, c.source.kind]
+            if tokens:
+                row += [str(c.token_cost.catalog_tokens), str(c.token_cost.body_tokens)]
+                if d.shadowed_by is None:
+                    cat_total += c.token_cost.catalog_tokens
+                    body_total += c.token_cost.body_tokens
+            row.append(", ".join(notes))
+            table.add_row(*row)
+        if tokens:
+            table.add_row("total (effective)", "", "", str(cat_total), str(body_total), "",
+                          style="bold")
+        console.print(table)
+    if tokens:
+        console.print("[dim]token counts are approximate[/dim]")
+
+
+@app.command()
+def init(root: Path = typer.Option(Path("."), "--root", hidden=True)) -> None:
+    """Write a starter drskill.toml with default budgets and thresholds."""
+    path = root / "drskill.toml"
+    if path.exists():
+        console.print(f"[red]{path} already exists[/red]; not overwriting")
+        raise typer.Exit(1)
+    path.write_text(INIT_TEMPLATE)
+    console.print(f"Wrote {path}")
