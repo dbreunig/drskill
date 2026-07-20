@@ -1,0 +1,3 @@
+[[expect]]
+check = "exact-duplicate"
+skills = ["fmt"]
