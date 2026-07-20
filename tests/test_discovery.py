@@ -85,3 +85,27 @@ def test_global_only(tree):
     proj, home = tree
     instances, _ = discover(get("claude-code"), proj, home, global_only=True)
     assert [i.skill_file.parent.name for i in instances] == ["beta"]
+
+
+def test_dangling_skill_md_symlink_is_broken_not_instance(tmp_path):
+    proj, home = tmp_path / "proj", tmp_path / "home"
+    d = proj / ".claude" / "skills" / "ghost"
+    d.mkdir(parents=True)
+    os.symlink(proj / "nowhere", d / "SKILL.md")
+    instances, broken = discover(get("claude-code"), proj, home)
+    assert instances == []
+    assert [b.path.name for b in broken] == ["SKILL.md"]
+
+
+def test_broken_symlink_sweep_respects_recursive_flag(tmp_path):
+    from drskill.discovery import _find_broken_symlinks
+    base = tmp_path / "skills"
+    deep = base / "a" / "b"
+    deep.mkdir(parents=True)
+    os.symlink(tmp_path / "nowhere", base / "top-dead")
+    os.symlink(tmp_path / "nowhere", base / "a" / "mid-dead")
+    os.symlink(tmp_path / "nowhere", deep / "deep-dead")
+    shallow = {p.name for p in _find_broken_symlinks(base, recursive=False)}
+    assert shallow == {"top-dead", "mid-dead"}
+    full = {p.name for p in _find_broken_symlinks(base, recursive=True)}
+    assert full == {"top-dead", "mid-dead", "deep-dead"}

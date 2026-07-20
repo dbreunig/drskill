@@ -29,13 +29,27 @@ def _find_skill_files(base: Path, recursive: bool) -> list[Path]:
     return sorted(out)
 
 
-def _find_broken_symlinks(base: Path) -> list[Path]:
+def _find_broken_symlinks(base: Path, recursive: bool = True) -> list[Path]:
     out = []
-    for dirpath, dirnames, filenames in _walk_dirs(base):
-        for name in list(dirnames) + list(filenames):
-            p = dirpath / name
+    if not recursive:
+        # Check only entries directly in base and in base/* directories (depth matching */SKILL.md glob)
+        for name in os.listdir(base):
+            p = base / name
             if p.is_symlink() and not p.exists():
                 out.append(p)
+        # Also check one level deep (base/*/...)
+        for subdir in base.iterdir():
+            if subdir.is_dir() and not subdir.is_symlink():
+                for name in os.listdir(subdir):
+                    p = subdir / name
+                    if p.is_symlink() and not p.exists():
+                        out.append(p)
+    else:
+        for dirpath, dirnames, filenames in _walk_dirs(base):
+            for name in list(dirnames) + list(filenames):
+                p = dirpath / name
+                if p.is_symlink() and not p.exists():
+                    out.append(p)
     return sorted(out)
 
 
@@ -66,6 +80,9 @@ def discover(
                 if p.name != "SKILL.md" and p.is_file()
             )
         for f in files:
+            # Skip dangling symlinks (they are already reported as broken)
+            if not f.exists():
+                continue
             instances.append(
                 RawInstance(
                     harness=h.id,
@@ -75,5 +92,5 @@ def discover(
                     order=order,
                 )
             )
-        broken += [BrokenSymlink(harness=h.id, path=p) for p in _find_broken_symlinks(base)]
+        broken += [BrokenSymlink(harness=h.id, path=p) for p in _find_broken_symlinks(base, h.recursive)]
     return instances, broken
