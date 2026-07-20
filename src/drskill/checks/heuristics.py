@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import re
 from itertools import combinations
 from pathlib import Path
 
@@ -34,6 +35,51 @@ def missing_activation(world: World, config: Config) -> list[Finding]:
         for c in _skill_md(world)
         if c.routing_text.strip() and not text.has_activation(c.routing_text)
     ]
+
+
+_IMPERATIVE = re.compile(r"\b(always|never)\s+((?:\w+[ \t]){0,3}\w+)", re.IGNORECASE)
+
+
+def _imperative_phrases(c: Contributor) -> dict[str, list[set[str]]]:
+    out: dict[str, list[set[str]]] = {"always": [], "never": []}
+    for m in _IMPERATIVE.finditer(c.body):
+        norm = {t for t in text.tokenize(m.group(2)) if t not in text.STOPWORDS}
+        if norm:
+            out[m.group(1).lower()].append(norm)
+    return out
+
+
+@check("opposing-imperatives")
+def opposing_imperatives(world: World, config: Config) -> list[Finding]:
+    cs = _skill_md(world)
+    phrases = {c.id: _imperative_phrases(c) for c in cs}
+    out = []
+    for a, b in combinations(cs, 2):
+        seen: set[str] = set()
+        for kind_a, kind_b in (("always", "never"), ("never", "always")):
+            for sa in phrases[a.id][kind_a]:
+                for sb in phrases[b.id][kind_b]:
+                    common = sa & sb
+                    if not common:
+                        continue
+                    phrase = " ".join(sorted(common))
+                    if phrase in seen:
+                        continue
+                    seen.add(phrase)
+                    out.append(
+                        make_finding(
+                            "opposing-imperatives", "warning", [a, b],
+                            f"'{a.name}' and '{b.name}' give opposite orders about "
+                            f"'{phrase}' (always vs never); an agent loading both gets "
+                            "contradictory instructions (low-recall check: paraphrased "
+                            "contradictions are not detected)",
+                            fix_commands=[
+                                "Align the two instructions, or scope each to its own condition"
+                            ],
+                            extra_key=phrase,
+                        )
+                    )
+    return out
 
 
 def _is_duplicate_pair(

@@ -100,3 +100,26 @@ def test_overlap_threshold_tunable(tmp_path):
     cfg.thresholds.description_overlap = 0.999
     findings = run_all(world_from(proj, home), cfg)
     assert by_check(findings, "description-overlap") == []
+
+
+def test_opposing_imperatives(tmp_path):
+    proj, home = tmp_path / "p", tmp_path / "h"
+    write(proj, "tabs", "Use when formatting code with tabs.",
+          body="Always use tabs for indentation.")
+    write(proj, "spaces", "Use when formatting code with spaces.",
+          body="Never use tabs anywhere in the file.")
+    write(proj, "meals", "Use when planning meals for the week.",
+          body="Never skip breakfast before coding.")
+    findings = run_all(world_from(proj, home), Config())
+    hits = by_check(findings, "opposing-imperatives")
+    assert len(hits) == 1
+    assert set(hits[0].contributor_names) == {"tabs", "spaces"}
+    assert "tabs" in hits[0].message
+
+
+def test_opposing_near_miss_stays_quiet(tmp_path):
+    proj, home = tmp_path / "p", tmp_path / "h"
+    write(proj, "a", "Use when doing a.", body="Always use tabs here.")
+    write(proj, "b", "Use when doing b.", body="Never use spaces here.")
+    findings = run_all(world_from(proj, home), Config())
+    assert by_check(findings, "opposing-imperatives") == []
