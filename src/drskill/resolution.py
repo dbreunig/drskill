@@ -8,6 +8,7 @@ from pydantic import BaseModel, Field
 
 from drskill import tokens
 from drskill.harnesses import HarnessDef
+from drskill.mcp import MCPServer
 from drskill.models import (
     BrokenSymlink,
     BundledFile,
@@ -117,6 +118,9 @@ class World(BaseModel):
     broken_symlinks: list[BrokenSymlink] = Field(default_factory=list)
     unreadable: list[tuple[str, str]] = Field(default_factory=list)  # (harness, path)
     lockfile: dict[str, dict] | None = None
+    mcp_servers: list[MCPServer] = Field(default_factory=list)
+    # (harness, path, message, in_project)
+    mcp_config_errors: list[tuple[str, str, str, bool]] = Field(default_factory=list)
 
     def harness_loads(self, harness_id: str) -> list[tuple[Contributor, Deployment]]:
         out = [

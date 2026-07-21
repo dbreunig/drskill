@@ -139,6 +139,13 @@ Without `--ci`, warnings alone exit 0. This lets you run `drskill scan` locally 
 | `injection-egress` | warning | A bundled script calls the network, e.g. `curl` or `requests.post`. The finding quotes each call so you can check the destination. |
 | `injection-encoded-blob` | warning | Skill text or a bundled file contains a long base64 or hex run that a reviewer cannot read. |
 | `injection-remote-fetch` | warning | Skill text tells the agent to fetch remote content and act on it, e.g. `curl` piped to a shell or "download X and follow the instructions". |
+| `mcp-config-invalid` | error | An MCP config file exists but does not parse. |
+| `mcp-shadowed-server` | warning | One harness configures the same server name in project and user scope with different settings. The message names the winner. |
+| `mcp-diverged-server` | warning | The same server name is configured differently across harnesses. The evidence lists the differing fields. |
+| `mcp-secret-in-config` | error in project files, warning in user files | An MCP env block holds a credential-shaped literal value. Evidence names the variable, never the value. |
+| `mcp-unpinned-server` | warning | A server runs an unpinned package, e.g. `npx -y pkg` or `pkg@latest`. Whatever publishes next runs next. |
+| `mcp-insecure-url` | warning | A remote MCP server uses plaintext `http://`. Localhost is excluded. |
+| `mcp-dead-server` | error | A stdio server's command is not on PATH or its absolute path does not exist. |
 
 ## Deep checks
 
@@ -170,6 +177,20 @@ When every pair in an overlap cluster is judged distinct, the warning becomes a 
 When the judge classes a pair as a description collision, the same run also proposes a fix. A second model call rewrites one of the two descriptions, and the finding shows the proposal as a diff: the current description on a minus line, the proposed one on a plus line, with the model's reason for picking that skill. The proposal is model text headed for your skill file, so read it before pasting. drskill never edits the file itself. A rewrite costs one extra call from the same `--max-calls` budget, and a proposal that failed to generate is retried at the start of the next `--deep` run. Once you apply a rewrite, the description has changed, so the next `--deep` run judges the pair fresh, and a good rewrite comes back distinct.
 
 Two commands manage the cache. `drskill cache stats` prints entry counts by verdict, by model, and the age range. `drskill cache prune` deletes entries that no longer match any flagged pair.
+
+## MCP servers
+
+Skills are half of an agent's loadout. MCP servers are the other half, and each harness configures them in its own file: `.mcp.json` and `~/.claude.json` for Claude Code, `.cursor/mcp.json` for Cursor, `.vscode/mcp.json` for VS Code, `~/.codex/config.toml` for Codex, `.gemini/settings.json` for Gemini CLI, and `claude_desktop_config.json` for Claude Desktop. drskill reads all of them on every scan. It only reads. Nothing is launched, and no server is connected to.
+
+The `mcp-` checks in the table above cover what the config files alone can show: the same server configured twice with drifted settings, credential-shaped values sitting in a committable file, unpinned `npx` packages, plaintext remote URLs, and commands that no longer exist. A `?` after a harness name on an mcp finding means drskill has not verified that harness's config format against its docs.
+
+See every configured server in one table:
+
+```
+drskill list --mcp
+```
+
+A second MCP cycle will add an opt-in connection mode that enumerates each server's tools, measures their real token cost, and checks tool descriptions for the same routing conflicts skills get checked for today.
 
 ## The ledger
 
