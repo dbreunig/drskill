@@ -137,6 +137,7 @@ recursive = true
 root_md_paths = []
 mcp_project_configs = [".vscode/mcp.json"]
 mcp_format = "vscode-json"
+mcp_verified = true
 
 # Verified against source, 2026-07-19: github.com/google-gemini/gemini-cli
 # (commit acae7124bdd849e554eaa5e090199a0cf08cd782).
