@@ -172,6 +172,13 @@ def scan(
                 spath, [f.fingerprint for f in findings], dt.date.today()
             )
         if deep_mode:
+            last_error = getattr(judge, "last_error", None)
+            if last_error:
+                flat = " ".join(str(last_error).split())
+                console.print(
+                    f"[yellow]deep: model calls are failing; last error: "
+                    f"{escape(flat)}[/yellow]"
+                )
             cache = deep.load_cache(deep.cache_dir(root, home, global_mode))
             remaining = deep.unjudged_count(world, active, cache)
             if remaining:

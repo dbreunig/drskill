@@ -63,7 +63,9 @@ def build_judge(model_id: str) -> JudgeFn:
             return JudgeResult(
                 verdict=out.verdict, rationale=out.rationale, detail=out.detail
             )
-        except Exception:
-            return None  # errored or unparseable: caller keeps the warning
+        except Exception as e:  # errored or unparseable: caller keeps the warning
+            judge.last_error = f"{type(e).__name__}: {e}"
+            return None
 
+    judge.last_error = None
     return judge

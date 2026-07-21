@@ -201,3 +201,19 @@ def test_cache_prune_removes_corrupt_files(tmp_path):
     assert r.exit_code == 0
     assert "removed 1" in r.output
     assert list(cdir.glob("*.json")) == []
+
+
+def test_deep_scan_surfaces_last_call_error(tmp_path, monkeypatch):
+    proj = overlap_project(tmp_path)
+
+    def build_judge(model_id):
+        def judge(a, b):
+            judge.last_error = "AuthenticationError: invalid x-api-key"
+            return None
+        judge.last_error = None
+        return judge
+
+    monkeypatch.setattr(deep_llm, "build_judge", build_judge)
+    r = runner.invoke(app, ["scan", "--root", str(proj), "--deep"], env=env_for(tmp_path))
+    assert "deep: model calls are failing" in r.output
+    assert "AuthenticationError" in r.output

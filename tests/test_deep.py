@@ -318,3 +318,21 @@ def test_deep_budget_skips_acked_clusters(tmp_path, monkeypatch):
 
     run_scan(proj, home, config=cfg, judge=judge)
     assert calls == []  # the acked cluster's pairs never spend budget
+
+
+def test_judge_pairs_aborts_after_three_consecutive_failures(tmp_path):
+    members = [contributor(n, f"Use for {n} docs.") for n in ("a", "b", "c", "d")]
+    world = FakeWorld(members)
+    findings = [finding_for("description-overlap", members)]  # 6 pairs
+    calls = []
+
+    def judge(x, y):
+        calls.append((x.name, y.name))
+        return None
+
+    judged, remaining = deep.judge_pairs(
+        world, findings, {}, tmp_path / "c", judge, "m", max_calls=10
+    )
+    assert judged == 0
+    assert len(calls) == 3  # persistent failure stops burning the budget
+    assert remaining == 6

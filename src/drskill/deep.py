@@ -115,10 +115,17 @@ def judge_pairs(
         (a, b) for a, b in flagged_pairs(world, findings) if pair_key(a, b) not in cache
     ]
     judged = 0
+    consecutive_failures = 0
     for a, b in todo[:max_calls]:
         result = judge(a, b)
         if result is None:  # errored or unparseable call: never cached
+            consecutive_failures += 1
+            if consecutive_failures >= 3:
+                # Persistent failure (bad key, dead network): stop burning
+                # the budget on calls that will not succeed.
+                break
             continue
+        consecutive_failures = 0
         v = Verdict(
             **result.model_dump(),
             model=model_id,
