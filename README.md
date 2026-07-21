@@ -15,6 +15,12 @@ Every problem it reports ends in a command: a fix command or a command to acknow
 ## Install
 
 ```
+uv tool install "drskill[deep]"
+```
+
+This installs everything, including the model-judged deep checks. If you want the minimal install, e.g. for CI, where the LLM layer is never used, drop the extra:
+
+```
 uv tool install drskill
 ```
 
@@ -57,9 +63,11 @@ drskill review
 - `s` skips it, 
 - and `q` quits. 
 
-Each ack is written the moment you press the key, to the same ledger the `ack` command would pick: the project's `drskill.toml`, or `~/.drskill.toml` when the finding involves only machine-level skills. Quitting midway loses nothing, and the exit summary lists what was acked into which ledger. `review` only runs in a real terminal. When stdin or stdout is not a TTY, or `CI` or `DRSKILL_NO_INTERACTIVE` is set, it prints one line pointing at `scan` and `ack` and exits. `scan` itself never prompts, so a script or an agent calling drskill can never get stuck at a prompt.
+Each ack is written the moment you press the key, to the same ledger the `ack` command would pick: the project's `drskill.toml`, or `~/.drskill.toml` when the finding involves only machine-level skills. 
 
-Print the full evidence for one finding, or for a whole check class:
+Quitting midway loses nothing, and the exit summary lists what was acked into which ledger. `review` only runs in a real terminal. When stdin or stdout is not a TTY, or `CI` or `DRSKILL_NO_INTERACTIVE` is set, it prints one line pointing at `scan` and `ack` and exits. `scan` itself never prompts, so a script or an agent calling drskill can never get stuck at a prompt.
+
+Print the full evidence for a finding, or for a whole check class:
 
 ```
 drskill show fe5b
@@ -82,6 +90,7 @@ Scope the scan to a single harness and see exactly what that harness sees:
 
 ```
 drskill scan --harness pi
+drskill scan --harness claude-code
 ```
 
 An unknown harness id is an error that names the valid ids. Harnesses that are detected but load no skills are hidden from the tables by default; a closing line names them, and `--all` shows them.
@@ -133,7 +142,7 @@ Without `--ci`, warnings alone exit 0. This lets you run `drskill scan` locally 
 
 ## Deep checks
 
-The description-overlap check compares text, so some of its warnings are false alarms. `drskill scan --deep` sends each flagged pair of skills to a language model, which judges whether the two skills are distinct, whether their descriptions collide, or whether their scopes genuinely overlap. Deep mode needs an extra install, `pip install 'drskill[deep]'`, and a provider API key, e.g. `ANTHROPIC_API_KEY`. drskill sends only skill names and descriptions to the model, and it sends nothing at all unless you pass `--deep`.
+The description-overlap check compares text, so some of its warnings are false alarms. `drskill scan --deep` sends each flagged pair of skills to a language model, which judges whether the two skills are distinct, whether their descriptions collide, or whether their scopes genuinely overlap. Deep mode is included in the recommended install above; a minimal install without it needs `uv tool install "drskill[deep]"` first. The only other requirement is a provider API key, e.g. `ANTHROPIC_API_KEY`. drskill sends only skill names and descriptions to the model, and it sends nothing at all unless you pass `--deep`.
 
 The key comes from your environment. To set it once per machine, put it in `~/.drskill/env`:
 
@@ -141,7 +150,7 @@ The key comes from your environment. To set it once per machine, put it in `~/.d
 ANTHROPIC_API_KEY=sk-ant-...
 ```
 
-drskill reads this file before a deep run and loads any variable your shell has not already set. The shell always wins. drskill never writes a key, and it never reads an env file from inside a project, because a scanned repo is untrusted content.
+`drskill` reads this file before a deep run and loads any variable your shell has not already set. The shell always wins. `drskill` never writes a key, and it never reads an env file from inside a project, because a scanned repo is untrusted content.
 
 The judge model is set in the ledger and defaults to a current Anthropic model:
 
