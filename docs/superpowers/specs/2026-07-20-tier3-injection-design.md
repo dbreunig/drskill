@@ -88,6 +88,15 @@ Nothing structural changes. Tier 3 findings flow through the existing severity s
 
 We hand review the sheets before merge. False positives get fixed in the lexicons, not shipped. Clear verdicts freeze into conformance cases, with a LICENSE-NOTE.md in the case directory whenever skill text is copied in.
 
+Tuning outcome (2026-07-20, corpora: anthropics/skills at 18 skills, vercel-labs/agent-skills at 9, NousResearch/hermes-agent at 179). The first sheet surfaced four false positive classes, and each produced a lexicon fix with a regression test:
+
+- The bare `.key` pattern in the credential check matched JS property access such as `merged?.metrics?.[eq.key]?.rows` and produced a false error. The pattern is removed. `.pem`, `id_rsa`, and the directory paths stay.
+- The mandatory script check matched the noun phrase "first run" in a table row that also named a bundled file. The check now requires the bundled path to appear after the mandatory framing on the line.
+- The remote fetch check fired on any line with a URL and the word "run", which flagged dev server chatter such as `npm run dev` beside a localhost URL. Local URLs are now excluded, and the directive branch requires a fetch verb joined to an act verb, e.g. "download X and run it". The "follow the instructions" phrasing and pipes to a shell still fire on their own.
+- The egress check matched `urllib.parse`, which is string handling, and Unix domain sockets, which are local IPC. The lexicon now matches `urllib.request`, `socket.create_connection`, and `AF_INET` instead.
+
+Final counts after the fixes: anthropics/skills fires 1 override (a document that quotes override phrasing while warning against it) and 1 egress. vercel-labs fires 1 credential warning (a deploy script excluding `.env` from an upload) and 2 egress. hermes-agent fires 1 unicode error (zero width spaces in a scraped reference file), 8 credential warnings (skills reading the loadout's own `.env` by convention), 2 override (security documents quoting attack phrasing), 29 egress, and 13 remote fetch (installer instructions that pipe curl or wget to a shell). These remaining findings were reviewed and kept by decision: egress volume ships as is because the class ack (`drskill ack injection-egress`) silences it after one triage pass, and installer pipes stay flagged because piping remote content to a shell is the exact surface this tier exists to show. The clearest verdicts are frozen in `tests/conformance/cases/corpus-injection/`.
+
 ## Testing
 
 - Unit tests per check, each with a firing case and a near miss that must not fire. The near misses include a plain script pointer for `injection-mandatory-script`, a sha256 hash for `injection-encoded-blob`, and an emoji joiner sequence for `injection-unicode`.

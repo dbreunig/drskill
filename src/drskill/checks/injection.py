@@ -279,8 +279,15 @@ def injection_override(world: World, config: Config) -> list[Finding]:
 
 _PIPE_TO_SHELL = re.compile(r"\b(curl|wget)\b[^\n]*\|\s*(sudo\s+)?(ba|z|da)?sh\b")
 _URLISH = re.compile(r"https?://")
+# Local URLs are dev-server chatter, not remote content (corpus tuning
+# 2026-07-20: `npm run dev` beside http://localhost was the main noise).
+_LOCAL_URL = re.compile(r"https?://(?:localhost|127\.0\.0\.1|0\.0\.0\.0|\[::1\])\S*")
+# A bare "run" near a URL is not a fetch instruction. Require a fetch verb
+# joined to an act verb, or the explicit "follow the instructions" phrasing.
 _FETCH_DIRECTIVE = re.compile(
-    r"\b(run|execute|eval|follow (the|these|its) instructions|apply (it|them))\b",
+    r"\b(download|fetch|retrieve|curl|wget|get)\b.{0,60}\b(and|then)\s+"
+    r"(run|execute|eval|follow|apply)\b"
+    r"|\bfollow (the|these|its) instructions\b",
     re.IGNORECASE,
 )
 
@@ -294,8 +301,9 @@ def injection_remote_fetch(world: World, config: Config) -> list[Finding]:
             if s.kind not in _PROSE_KINDS:
                 continue
             for i, line in enumerate(s.lines, start=1):
-                if _PIPE_TO_SHELL.search(line) or (
-                    _URLISH.search(line) and _FETCH_DIRECTIVE.search(line)
+                cleaned = _LOCAL_URL.sub("", line)
+                if _PIPE_TO_SHELL.search(cleaned) or (
+                    _URLISH.search(cleaned) and _FETCH_DIRECTIVE.search(cleaned)
                 ):
                     hits.append((s, i, line))
         if hits:
@@ -328,10 +336,13 @@ _EGRESS = [
         r"\bInvoke-WebRequest\b",
         r"\bInvoke-RestMethod\b",
         r"\brequests\.",
-        r"\burllib\b",
+        # urllib.parse is string handling, not egress; Unix-domain sockets
+        # are local IPC (corpus tuning 2026-07-20).
+        r"\burllib\.request\b",
         r"\bhttpx\b",
         r"\baiohttp\b",
-        r"\bsocket\.",
+        r"\bsocket\.create_connection\b",
+        r"\bAF_INET\b",
         r"\bfetch\s*\(",
         r"\baxios\b",
         r"\bXMLHttpRequest\b",
@@ -370,8 +381,9 @@ _CRED_STORE = [
         r"\.ssh\b",
         r"\bid_rsa\b",
         r"\bid_ed25519\b",
+        # No bare .key pattern: JS/dict property access like `obj.key` fires
+        # it constantly (corpus tuning 2026-07-20).
         r"\.pem\b",
-        r"\.key\b",
         r"\.aws\b",
         r"\.config/gcloud",
         r"\.netrc\b",
@@ -448,9 +460,15 @@ def injection_mandatory_script(world: World, config: Config) -> list[Finding]:
             for i, line in enumerate(s.lines, start=1):
                 if i < s.body_start:
                     continue
-                if any(p.search(line) for p in _MANDATORY) and any(
-                    path in line for path in paths
-                ):
+                # The path must follow the framing: "must first run scripts/x"
+                # fires, a filename before the noun phrase "first run" does
+                # not (corpus tuning 2026-07-20).
+                match = None
+                for p in _MANDATORY:
+                    match = p.search(line)
+                    if match:
+                        break
+                if match and any(path in line[match.end():] for path in paths):
                     hits.append((s, i, line))
         if hits:
             out.append(

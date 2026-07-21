@@ -297,3 +297,59 @@ def test_mandatory_framing_without_bundled_path_does_not_fire(tmp_path):
     write_skill(tmp_path, "tester", "You must first run the test suite.")
     world = make_world(tmp_path)
     assert run_check("injection-mandatory-script", world) == []
+
+
+# ---- corpus-tuning regressions (2026-07-20) ----
+
+def test_credential_read_ignores_js_key_property(tmp_path):
+    write_skill(
+        tmp_path, "optimizer", "Body.",
+        files={"scripts/opt.mjs": "const rows = merged?.metrics?.[eq.key]?.rows;\n"},
+    )
+    world = make_world(tmp_path)
+    assert run_check("injection-credential-read", world) == []
+
+
+def test_mandatory_ignores_first_run_noun_before_path(tmp_path):
+    write_skill(
+        tmp_path, "wiki",
+        "getting-started.md          setup, first run, workflows",
+        files={"getting-started.md": "docs\n"},
+    )
+    world = make_world(tmp_path)
+    assert run_check("injection-mandatory-script", world) == []
+
+
+def test_remote_fetch_ignores_localhost_and_bare_run(tmp_path):
+    write_skill(
+        tmp_path, "devserver",
+        "npm run dev:demo    # serve bundle at http://localhost:5174/demo.js\n"
+        "Run `watch_rss.py --url https://news.ycombinator.com/rss` every hour.",
+    )
+    world = make_world(tmp_path)
+    assert run_check("injection-remote-fetch", world) == []
+
+
+def test_egress_ignores_urllib_parse_and_unix_sockets(tmp_path):
+    write_skill(
+        tmp_path, "local-ipc", "Body.",
+        files={
+            "scripts/ipc.py": (
+                "import urllib.parse\n"
+                "import socket\n"
+                "s = socket.socket(socket.AF_UNIX, socket.SOCK_STREAM)\n"
+            ),
+        },
+    )
+    world = make_world(tmp_path)
+    assert run_check("injection-egress", world) == []
+
+
+def test_egress_still_flags_urllib_request(tmp_path):
+    write_skill(
+        tmp_path, "urlopen", "Body.",
+        files={"scripts/dl.py": "import urllib.request\nurllib.request.urlopen(url)\n"},
+    )
+    world = make_world(tmp_path)
+    (f,) = run_check("injection-egress", world)
+    assert "scripts/dl.py:" in f.message
