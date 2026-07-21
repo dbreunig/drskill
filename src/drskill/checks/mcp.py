@@ -35,8 +35,7 @@ def _finding(check_id, severity, s: MCPServer, message, fix=None, fp_parts=None)
 @check("mcp-config-invalid")
 def config_invalid(world: World, config: Config) -> list[Finding]:
     out = []
-    for hid, msg in world.mcp_config_errors:
-        path = msg.split(":", 1)[0]
+    for hid, path, msg, _in_project in world.mcp_config_errors:
         out.append(Finding(
             check_id="mcp-config-invalid", severity="error",
             contributors=[path], contributor_names=[],
@@ -55,8 +54,11 @@ def secret_in_config(world: World, config: Config) -> list[Finding]:
         if not s.suspect_env:
             continue
         names = ", ".join(s.suspect_env)
-        sev = "error" if s.scope == "project" else "warning"
-        where = "a committable project file" if s.scope == "project" else "a user-scope file"
+        # Severity follows the FILE, not the applicability scope: Claude
+        # Code's local scope applies to a project but lives in the private
+        # home file, which is never committed.
+        sev = "error" if s.in_project else "warning"
+        where = "a committable project file" if s.in_project else "a user-scope file"
         out.append(_finding(
             "mcp-secret-in-config", sev, s,
             f"server '{s.name}' holds credential-shaped values in {where}: "
@@ -77,12 +79,25 @@ def unpinned_server(world: World, config: Config) -> list[Finding]:
         runner = Path(s.command).name if s.command else ""
         if runner not in _PIN_RUNNERS:
             continue
-        pkgs = [a for a in s.args if not a.startswith("-") and a not in ("dlx", "exec")]
-        if not pkgs:
+        # npx can name the installed package via --package, separate from
+        # the executed command; that is where the pin lives when present.
+        pkg = None
+        for i, a in enumerate(s.args):
+            if a.startswith("--package="):
+                pkg = a.split("=", 1)[1]
+                break
+            if a in ("--package", "-p") and i + 1 < len(s.args):
+                pkg = s.args[i + 1]
+                break
+        if pkg is None:
+            pkgs = [
+                a for a in s.args if not a.startswith("-") and a not in ("dlx", "exec")
+            ]
+            pkg = pkgs[0] if pkgs else None
+        if pkg is None:
             continue
-        pkg = pkgs[0]
         base, _, ver = pkg.rpartition("@")
-        pinned = bool(base) and ver not in ("", "latest")
+        pinned = (bool(base) and ver not in ("", "latest")) or "==" in pkg
         if not pinned:
             out.append(_finding(
                 "mcp-unpinned-server", "warning", s,
@@ -99,7 +114,11 @@ def insecure_url(world: World, config: Config) -> list[Finding]:
     out = []
     for s in world.mcp_servers:
         if s.url and s.url.startswith("http://"):
-            host = s.url.removeprefix("http://").split("/", 1)[0].split(":", 1)[0]
+            hostport = s.url.removeprefix("http://").split("/", 1)[0]
+            if hostport.startswith("[") and "]" in hostport:
+                host = hostport[: hostport.index("]") + 1]  # bracketed IPv6
+            else:
+                host = hostport.split(":", 1)[0]
             if host in _LOCAL_HOSTS:
                 continue
             out.append(_finding(
@@ -163,9 +182,18 @@ def shadowed_server(world: World, config: Config) -> list[Finding]:
 @check("mcp-diverged-server")
 def diverged_server(world: World, config: Config) -> list[Finding]:
     out = []
-    per = defaultdict(list)
+    # Compare each harness's EFFECTIVE entry (the scope winner), so a
+    # same-harness scope drift already reported by the shadow check does
+    # not double-report here when the winners actually agree.
+    grouped = defaultdict(list)
     for s in world.mcp_servers:
-        per[s.name].append(s)
+        grouped[(s.harness, s.name)].append(s)
+    per = defaultdict(list)
+    for (hid, name), entries in grouped.items():
+        h = world.harnesses.get(hid)
+        preferred = "user" if h and h.search_order == "global-first" else "project"
+        winner = next((e for e in entries if e.scope == preferred), entries[0])
+        per[name].append(winner)
     for name, entries in sorted(per.items()):
         variants: dict[str, list[MCPServer]] = {}
         for e in entries:

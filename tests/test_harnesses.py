@@ -62,10 +62,16 @@ def test_vendored_entries_are_unverified_by_default():
             )
 
 
+MCP_ONLY_HARNESSES = {"claude-desktop"}
+
+
 def test_every_entry_has_at_least_one_path():
-    # claude-desktop is MCP-only by design: no skill paths, one config path
+    """Skill-bearing harnesses must keep skill paths; only the explicit
+    MCP-only entries may omit them. A blanket or-clause here would let a
+    data edit silently strip a real harness's skill paths."""
     for h in load_harnesses():
-        assert (
-            h.project_paths or h.global_paths
-            or h.mcp_project_configs or h.mcp_global_configs
-        ), h.id
+        if h.id in MCP_ONLY_HARNESSES:
+            assert h.mcp_project_configs or h.mcp_global_configs, h.id
+            assert not h.project_paths and not h.global_paths, h.id
+        else:
+            assert h.project_paths or h.global_paths, h.id

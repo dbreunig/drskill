@@ -98,13 +98,19 @@ def ack_destination(
         return ledger_path(project_root, home, True)
     if force_local:
         return ledger_path(project_root, home, False)
-    by_source = {s.source: s.scope for s in getattr(world, "mcp_servers", [])}
+    # For MCP sources the routing fact is where the FILE lives, not which
+    # scope a server applies to: everything in a home-side file is a
+    # machine decision. Parse-error paths are included so an invalid
+    # user config also acks to the machine ledger.
+    by_source = {s.source: s.in_project for s in getattr(world, "mcp_servers", [])}
+    for _hid, path, _msg, in_project in getattr(world, "mcp_config_errors", []):
+        by_source.setdefault(path, in_project)
     scopes = set()
     for cid in finding.contributors:
         if cid in world.contributors:
             scopes.add(world.contributors[cid].scope)
         elif cid in by_source:
-            scopes.add(by_source[cid])
+            scopes.add("project" if by_source[cid] else "user")
     if scopes and scopes == {"user"}:
         return ledger_path(project_root, home, True)
     return ledger_path(project_root, home, False)

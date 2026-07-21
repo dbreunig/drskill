@@ -172,3 +172,95 @@ def test_unpinned_detected_through_absolute_runner_path(tmp_path, monkeypatch):
     _, findings = scan(proj, home, monkeypatch, tmp_path)
     hit = {f.contributor_names[0] for f in by_check(findings, "mcp-unpinned-server")}
     assert hit == {"memory", "playwright"}
+
+
+def test_local_scope_secret_in_home_file_is_warning_not_error(tmp_path):
+    """Claude Code local scope: project-applicable, but stored in the
+    private ~/.claude.json, which is never committed."""
+    proj, home = project_with(tmp_path, {})
+    home.mkdir(exist_ok=True)
+    (home / ".claude.json").write_text(json.dumps({
+        "projects": {str(proj.resolve()): {"mcpServers": {
+            "gh": {"command": "gh-mcp", "env": {"API_KEY": "literal-value"}},
+        }}},
+    }))
+    r = runner.invoke(app, ["scan", "--root", str(proj), "--json"], env=env_for(tmp_path))
+    findings = json.loads(r.output)
+    (f,) = [x for x in findings if x["check_id"] == "mcp-secret-in-config"]
+    assert f["severity"] == "warning"
+    assert "committable" not in f["message"]
+
+
+def test_home_file_secret_ack_routes_to_machine_ledger_despite_local_scope(tmp_path):
+    proj, home = project_with(tmp_path, {})
+    home.mkdir(exist_ok=True)
+    (home / ".claude.json").write_text(json.dumps({
+        "mcpServers": {"u": {"command": "u-mcp", "env": {"API_KEY": "literal-value"}}},
+        "projects": {str(proj.resolve()): {"mcpServers": {
+            "l": {"command": "l-mcp"},
+        }}},
+    }))
+    r = runner.invoke(
+        app, ["ack", "mcp-secret-in-config", "--root", str(proj)], env=env_for(tmp_path)
+    )
+    assert r.exit_code == 0, r.output
+    assert (home / ".drskill.toml").is_file()
+    assert not (proj / "drskill.toml").exists()
+
+
+def test_global_scan_hides_project_scoped_home_entries(tmp_path):
+    proj, home = project_with(tmp_path, {})
+    home.mkdir(exist_ok=True)
+    (home / ".claude.json").write_text(json.dumps({
+        "projects": {str(proj.resolve()): {"mcpServers": {"l": {"command": "l-mcp"}}}},
+    }))
+    r = runner.invoke(app, ["scan", "--root", str(proj), "--global", "--json"], env=env_for(tmp_path))
+    findings = json.loads(r.output)
+    assert [x for x in findings if x["check_id"].startswith("mcp-")] == []
+
+
+def test_invalid_home_config_ack_routes_to_machine_ledger(tmp_path):
+    proj, home = project_with(tmp_path, {})
+    home.mkdir(exist_ok=True)
+    (home / ".claude.json").write_text("{broken")
+    r = runner.invoke(
+        app, ["ack", "mcp-config-invalid", "--root", str(proj)], env=env_for(tmp_path)
+    )
+    assert r.exit_code == 0, r.output
+    assert (home / ".drskill.toml").is_file()
+    assert not (proj / "drskill.toml").exists()
+
+
+def test_package_flag_and_pep508_pins_are_clean(tmp_path, monkeypatch):
+    proj, home = project_with(tmp_path, {
+        "flagged": {"command": "npx", "args": ["-y", "--package=mcp-remote@0.1.4", "mcp-remote"]},
+        "peppy": {"command": "uvx", "args": ["mcp-server-git==2.0.0"]},
+    })
+    _, findings = scan(proj, home, monkeypatch, tmp_path)
+    assert by_check(findings, "mcp-unpinned-server") == []
+
+
+def test_ipv6_loopback_is_not_insecure(tmp_path, monkeypatch):
+    proj, home = project_with(tmp_path, {
+        "six": {"url": "http://[::1]:8080/mcp"},
+    })
+    _, findings = scan(proj, home, monkeypatch, tmp_path)
+    assert by_check(findings, "mcp-insecure-url") == []
+
+
+def test_no_diverged_when_effective_configs_match(tmp_path, monkeypatch):
+    """claude-code has project (A) + user (B) scopes; cursor matches A.
+    Shadowing reports the scope drift; the effective configs agree, so
+    diverged must stay quiet."""
+    proj, home = project_with(
+        tmp_path,
+        {"gh": {"command": "gh-mcp", "args": ["--fast"]}},
+        home_claude_json={"mcpServers": {"gh": {"command": "gh-mcp", "args": ["--old"]}}},
+    )
+    (proj / ".cursor").mkdir()
+    (proj / ".cursor" / "mcp.json").write_text(json.dumps({"mcpServers": {
+        "gh": {"command": "gh-mcp", "args": ["--fast"]},
+    }}))
+    _, findings = scan(proj, home, monkeypatch, tmp_path)
+    assert by_check(findings, "mcp-shadowed-server")  # the real drift, reported once
+    assert by_check(findings, "mcp-diverged-server") == []

@@ -117,3 +117,37 @@ def test_hash_and_public_material_is_not_a_secret():
     assert not mcp.looks_secret("SSH_PUBLIC_KEY", "AAAAB3NzaC1yc2EAAAADAQABAAABgQ0000000000000000")
     # a known secret prefix still wins even under an innocent name
     assert mcp.looks_secret("CLIENT_SHA256S", "sk-ant-abcdef1234567890abcdef")
+
+
+def test_looks_secret_ignores_urls_and_paths():
+    assert not mcp.looks_secret("API_BASE_URL", "https://api.example-corp.com/v2/mcp01")
+    assert not mcp.looks_secret("CACHE_DIR", "/Users/someone/Library/Caches/app123456789")
+    assert not mcp.looks_secret("DB_PASSWORD_FILE", "~/secrets/db-password-2026-file.txt")
+
+
+def test_claude_user_json_local_entries_are_not_in_project(tmp_path):
+    proj = tmp_path / "proj"
+    proj.mkdir()
+    p = tmp_path / ".claude.json"
+    p.write_text(json.dumps({
+        "mcpServers": {"g": {"command": "x"}},
+        "projects": {str(proj.resolve()): {"mcpServers": {"l": {"command": "y"}}}},
+    }))
+    servers, _ = mcp.parse_config(p, "claude-user-json", "claude-code", "user", proj)
+    flags = {s.name: s.in_project for s in servers}
+    # both live in the private home file, whatever their applicability scope
+    assert flags == {"g": False, "l": False}
+
+
+def test_claude_user_json_global_only_excludes_project_entries(tmp_path):
+    proj = tmp_path / "proj"
+    proj.mkdir()
+    p = tmp_path / ".claude.json"
+    p.write_text(json.dumps({
+        "mcpServers": {"g": {"command": "x"}},
+        "projects": {str(proj.resolve()): {"mcpServers": {"l": {"command": "y"}}}},
+    }))
+    servers, _ = mcp.parse_config(
+        p, "claude-user-json", "claude-code", "user", proj, include_project_scope=False
+    )
+    assert [s.name for s in servers] == ["g"]

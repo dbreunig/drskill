@@ -119,7 +119,8 @@ class World(BaseModel):
     unreadable: list[tuple[str, str]] = Field(default_factory=list)  # (harness, path)
     lockfile: dict[str, dict] | None = None
     mcp_servers: list[MCPServer] = Field(default_factory=list)
-    mcp_config_errors: list[tuple[str, str]] = Field(default_factory=list)
+    # (harness, path, message, in_project)
+    mcp_config_errors: list[tuple[str, str, str, bool]] = Field(default_factory=list)
 
     def harness_loads(self, harness_id: str) -> list[tuple[Contributor, Deployment]]:
         out = [
