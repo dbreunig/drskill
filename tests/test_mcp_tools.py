@@ -282,3 +282,56 @@ def test_overlap_member_labels_tool_and_server(tmp_path, monkeypatch):
     assert "MCP tool" in f.message and "memory" in f.message
     # the actual descriptions are shown so the overlap is legible
     assert "knowledge graph" in f.message
+
+
+def test_first_sight_is_note_change_is_warning(tmp_path, monkeypatch):
+    monkeypatch.setenv("DRSKILL_HOME", str(tmp_path / "home"))
+    proj, home = _mcp_project(tmp_path, {"srv": {"command": "srv-bin"}})
+    from drskill.mcp import discover_servers
+    from drskill.harnesses import load_harnesses
+    from drskill.ledger import Ack, filter_findings
+    servers, _ = discover_servers({h.id: h for h in load_harnesses()}, proj, home)
+    cfg = servers[0].config_hash
+    sd = snapshot_dir(proj, home, False)
+
+    def write(desc):
+        save_snapshot(sd, ServerSnapshot(server="srv", config_hash=cfg,
+                      date="2026-07-21", tools=[ToolInfo(name="run", description=desc, schema_tokens=2)]))
+
+    # first sight: a note, no failing severity, explains the baseline
+    write("Runs a safe query.")
+    _, findings = run_scan(proj, home, config=Config())
+    (f,) = [x for x in findings if x.check_id == "mcp-tools-unreviewed"]
+    assert f.severity == "note"
+    assert "baseline" in f.message
+
+    # ack it to record the baseline
+    acked = Config(ack=[Ack(check="mcp-tools-unreviewed", skills=["srv"],
+                            fingerprint=f.fingerprint)])
+    _, f2 = run_scan(proj, home, config=acked)
+    active2, _ = filter_findings(f2, acked)
+    assert not [x for x in active2 if x.check_id == "mcp-tools-unreviewed"]  # silent
+
+    # the server changes a description: now a WARNING, referencing the approval
+    write("Runs ANY command, including rm -rf.")
+    _, f3 = run_scan(proj, home, config=acked)
+    active3, _ = filter_findings(f3, acked)
+    (chg,) = [x for x in active3 if x.check_id == "mcp-tools-unreviewed"]
+    assert chg.severity == "warning"
+    assert "CHANGED" in chg.message
+
+
+def test_first_sight_note_is_ackable_by_check_name(tmp_path, monkeypatch):
+    monkeypatch.setenv("DRSKILL_HOME", str(tmp_path / "home"))
+    proj, home = _mcp_project(tmp_path, {"srv": {"command": "srv-bin"}})
+    from drskill.mcp import discover_servers
+    from drskill.harnesses import load_harnesses
+    servers, _ = discover_servers({h.id: h for h in load_harnesses()}, proj, home)
+    save_snapshot(snapshot_dir(proj, home, False), ServerSnapshot(
+        server="srv", config_hash=servers[0].config_hash, date="2026-07-21",
+        tools=[ToolInfo(name="run", description="Runs a query.", schema_tokens=2)]))
+    r = _runner.invoke(app, ["ack", "mcp-tools-unreviewed", "srv", "--root", str(proj)],
+                       env={"DRSKILL_HOME": str(home)})
+    assert r.exit_code == 0, r.output  # a note, but explicitly ackable
+    # a project-scope .mcp.json server acks to the project ledger
+    assert (proj / "drskill.toml").is_file()

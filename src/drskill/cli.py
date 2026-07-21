@@ -276,9 +276,16 @@ def ack(
     config = _load_effective_config_or_exit(root, home, global_mode)
     world, findings = run_scan(root, home, global_mode, config)
     active, _ = ledger.filter_findings(findings, config)
-    # Notes need no ack; sweeping them into the ledger would hide them and
-    # leave a stale ack behind if the verdict cache is ever pruned.
-    active = [f for f in active if f.severity != "note"]
+    # Most notes must not be acked: a deep "judged distinct" note shares a
+    # fingerprint with the warning it would revert to if the verdict cache
+    # is pruned, so acking it would silently pre-silence that warning. An
+    # MCP tool baseline is the exception: acking it is the whole point, and
+    # a later tool change produces a new fingerprint the ack cannot cover.
+    _ACKABLE_NOTE_CHECKS = {"mcp-tools-unreviewed"}
+    active = [
+        f for f in active
+        if f.severity != "note" or f.check_id in _ACKABLE_NOTE_CHECKS
+    ]
     from drskill.checks import REGISTRY
 
     refs = refs or []

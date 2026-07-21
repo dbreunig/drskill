@@ -89,19 +89,41 @@ def tools_unreviewed(world: World, config: Config) -> list[Finding]:
         )
         date = world.mcp_snapshot_dates.get(cfg, "unknown")
         n = len(tools)
-        out.append(Finding(
-            check_id="mcp-tools-unreviewed", severity="warning",
-            contributors=sorted({s.source for s in servers}),
-            contributor_names=[server.name],
-            harnesses=harnesses,
-            message=(
+        fp = _fp("mcp-tools-unreviewed", [server.name, cfg, *pairs])
+        # First sight of a server is a low-key note: it only asks you to
+        # record a baseline. A server that CHANGED its tools since you
+        # approved them is a warning: that is the rug-pull the check exists
+        # to catch, and it should fail CI.
+        prior = [
+            a for a in config.ack
+            if a.check == "mcp-tools-unreviewed" and server.name in a.skills
+        ]
+        changed = bool(prior) and fp not in {a.fingerprint for a in prior}
+        if changed:
+            when = next((str(a.date) for a in prior if a.date), "earlier")
+            head = (
+                f"server '{server.name}' ({', '.join(harnesses)}) CHANGED its "
+                f"tools since you approved them ({when}). A server that rewrites "
+                f"a tool description after you trusted it is worth a look. "
+                f"Re-ack once you have reviewed the current set (seen {date}):"
+            )
+            severity = "warning"
+        else:
+            head = (
                 f"server '{server.name}' ({', '.join(harnesses)}) has "
                 f"{n} tool{'s' if n != 1 else ''} drskill has not recorded yet "
                 f"(seen {date}). Acking saves this set as your approved "
                 f"baseline, so drskill can flag it if the server later changes "
-                f"a tool's description.{lines}"
-            ),
+                f"a tool's description:"
+            )
+            severity = "note"
+        out.append(Finding(
+            check_id="mcp-tools-unreviewed", severity=severity,
+            contributors=sorted({s.source for s in servers}),
+            contributor_names=[server.name],
+            harnesses=harnesses,
+            message=head + lines,
             fix_commands=[f"drskill ack mcp-tools-unreviewed {server.name}"],
-            fingerprint=_fp("mcp-tools-unreviewed", [server.name, cfg, *pairs]),
+            fingerprint=fp,
         ))
     return out
