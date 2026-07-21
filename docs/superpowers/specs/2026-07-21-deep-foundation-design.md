@@ -38,7 +38,7 @@ Two failure modes stop the run before any scan work:
 
 Every scan, deep or not, reads the verdict cache and applies cached verdicts to the report. Reading the cache is plain JSON and needs neither the extras nor a key. This is how one person's `--deep` run benefits every teammate and CI.
 
-`--deep` adds the judging step. The flagged pairs are all unordered pairs of members within each description-overlap cluster. Pairs whose key is already in the cache are skipped. The remaining pairs are judged in a stable order, largest cluster first and then by skill name, so repeated runs under a budget make progress instead of rejudging the same prefix. The `--max-calls N` flag is a hard budget per run, default 25. When the budget truncates the work, the report says how many flagged pairs remain unjudged. Nothing is truncated silently.
+`--deep` adds the judging step. The flagged pairs are all unordered pairs of members within each description-overlap cluster. Pairs whose key is already in the cache are skipped. The remaining pairs are judged in a stable order, largest cluster first and then by skill name, so repeated runs under a budget make progress instead of rejudging the same prefix. The `--max-calls` flag is a hard budget per run, default 25. `--max-calls all` removes the limit for one run. When a budget truncates the work, the report says how many flagged pairs remain unjudged. Nothing is truncated silently.
 
 ## The ConflictJudge program
 

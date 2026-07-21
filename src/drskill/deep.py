@@ -138,11 +138,11 @@ def judge_pairs(
     cdir: Path,
     judge: JudgeFn,
     model_id: str,
-    max_calls: int,
+    max_calls: int | None,
 ) -> tuple[int, int]:
-    """Judge uncached flagged pairs under a hard call budget. Each verdict
-    lands in `cache` and on disk immediately, so an interrupted run loses
-    nothing. Returns (judged, remaining unjudged)."""
+    """Judge uncached flagged pairs under a hard call budget; None means no
+    limit. Each verdict lands in `cache` and on disk immediately, so an
+    interrupted run loses nothing. Returns (judged, remaining unjudged)."""
     todo = [
         (a, b) for a, b in flagged_pairs(world, findings) if pair_key(a, b) not in cache
     ]

@@ -137,14 +137,27 @@ def scan(
     show_all: bool = typer.Option(False, "--all", help="with --detailed, include harnesses with no skills"),
     harness: str | None = typer.Option(None, "--harness", help="scope the scan to one harness"),
     deep_mode: bool = typer.Option(False, "--deep", help="judge flagged pairs with the configured model"),
-    max_calls: int = typer.Option(25, "--max-calls", help="hard budget of model calls per --deep run"),
+    max_calls: str = typer.Option("25", "--max-calls", help="model calls per --deep run: a number, or 'all' for no limit"),
 ) -> None:
     """Analyze every detected harness's skill set and report findings."""
     _validate_harness(harness)
     home = _home()
     config = _load_effective_config_or_exit(root, home, global_mode)
     judge = None
+    budget: int | None = None
     if deep_mode:
+        if max_calls == "all":
+            budget = None
+        else:
+            try:
+                budget = int(max_calls)
+                if budget < 0:
+                    raise ValueError
+            except ValueError:
+                console.print(
+                    f"[red]--max-calls takes a number or 'all', not[/red] {escape(max_calls)}"
+                )
+                raise typer.Exit(1)
         from drskill import deep_llm
 
         deep.load_user_env(home)
@@ -154,7 +167,7 @@ def scan(
             console.print(f"[red]{escape(str(e))}[/red]")
             raise typer.Exit(1)
     world, findings = run_scan(
-        root, home, global_mode, config, harness=harness, judge=judge, max_calls=max_calls
+        root, home, global_mode, config, harness=harness, judge=judge, max_calls=budget
     )
     active, acked = ledger.filter_findings(findings, config)
     if as_json:

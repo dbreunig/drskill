@@ -237,3 +237,29 @@ def test_deep_scan_loads_global_env_file(tmp_path, monkeypatch):
     r = runner.invoke(app, ["scan", "--root", str(proj), "--deep"], env=env)
     assert r.exit_code == 0, r.output
     assert seen["key"] == "from-file"
+
+
+def test_max_calls_all_judges_everything(tmp_path, monkeypatch):
+    proj = overlap_project(tmp_path)
+    write(proj, "doc-c", "Use when the user asks to write project documentation chapters.", "c" * 40)
+    monkeypatch.setattr(
+        deep_llm, "build_judge",
+        fake_builder(deep.JudgeResult(verdict="distinct", rationale="r", detail="d")),
+    )
+    r = runner.invoke(
+        app, ["scan", "--root", str(proj), "--deep", "--max-calls", "all"],
+        env=env_for(tmp_path),
+    )
+    assert r.exit_code == 0, r.output
+    assert "still unjudged" not in r.output
+    assert "judged distinct" in r.output
+
+
+def test_max_calls_rejects_garbage(tmp_path):
+    proj = overlap_project(tmp_path)
+    r = runner.invoke(
+        app, ["scan", "--root", str(proj), "--deep", "--max-calls", "lots"],
+        env=env_for(tmp_path),
+    )
+    assert r.exit_code == 1
+    assert "--max-calls" in r.output

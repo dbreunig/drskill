@@ -19,7 +19,7 @@ def run_scan(
     config: Config | None = None,
     harness: str | None = None,
     judge: deep.JudgeFn | None = None,
-    max_calls: int = 25,
+    max_calls: int | None = 25,
 ) -> tuple[World, list[Finding]]:
     if config is None:
         # Same merge the CLI uses: machine-level acks are honored everywhere.

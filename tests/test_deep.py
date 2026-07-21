@@ -390,3 +390,17 @@ def test_build_judge_missing_key_message_names_env_file_and_console(monkeypatch)
     assert "ANTHROPIC_API_KEY" in msg
     assert "~/.drskill/env" in msg
     assert "console.anthropic.com" in msg
+
+
+def test_judge_pairs_unlimited_budget(tmp_path):
+    members = [contributor(n, f"Use for {n} docs.") for n in ("a", "b", "c", "d")]
+    world = FakeWorld(members)
+    findings = [finding_for("description-overlap", members)]  # 6 pairs
+
+    def judge(x, y):
+        return deep.JudgeResult(verdict="distinct", rationale="r", detail="d")
+
+    judged, remaining = deep.judge_pairs(
+        world, findings, {}, tmp_path / "c", judge, "m", max_calls=None
+    )
+    assert judged == 6 and remaining == 0
