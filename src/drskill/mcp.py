@@ -118,3 +118,28 @@ def parse_config(
         )
         return out, []
     return [], [f"{path}: unknown MCP config format '{fmt}'"]
+
+
+def discover_servers(
+    harnesses: dict, project_root: Path, home: Path, global_only: bool = False
+) -> tuple[list[MCPServer], list[tuple[str, str]]]:
+    servers: list[MCPServer] = []
+    errors: list[tuple[str, str]] = []
+    for hid, h in sorted(harnesses.items()):
+        sources = []
+        if not global_only:
+            sources += [
+                (project_root / s, "project", h.mcp_format)
+                for s in h.mcp_project_configs
+            ]
+        gfmt = h.mcp_format_global or h.mcp_format
+        sources += [
+            (home / s.removeprefix("~/"), "user", gfmt) for s in h.mcp_global_configs
+        ]
+        for path, scope, fmt in sources:
+            if not path.is_file():
+                continue
+            found, errs = parse_config(path, fmt, hid, scope, project_root)
+            servers += found
+            errors += [(hid, e) for e in errs]
+    return servers, errors

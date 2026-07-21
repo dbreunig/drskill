@@ -63,5 +63,9 @@ def test_vendored_entries_are_unverified_by_default():
 
 
 def test_every_entry_has_at_least_one_path():
+    # claude-desktop is MCP-only by design: no skill paths, one config path
     for h in load_harnesses():
-        assert h.project_paths or h.global_paths, h.id
+        assert (
+            h.project_paths or h.global_paths
+            or h.mcp_project_configs or h.mcp_global_configs
+        ), h.id

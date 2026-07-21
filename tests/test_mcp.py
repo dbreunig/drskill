@@ -71,3 +71,38 @@ def test_config_hash_ignores_values_and_orders(tmp_path):
     a = entry({"K1": "value-one", "K2": "x"})
     b = entry({"K2": "y", "K1": "value-two"})  # same names, different values/order
     assert a.config_hash == b.config_hash
+
+
+from drskill.harnesses import load_harnesses
+from drskill.ledger import Config
+from drskill.pipeline import run_scan
+
+
+def test_harness_data_has_mcp_entries():
+    hs = {h.id: h for h in load_harnesses()}
+    assert ".mcp.json" in hs["claude-code"].mcp_project_configs
+    assert "~/.claude.json" in hs["claude-code"].mcp_global_configs
+    assert hs["claude-code"].mcp_format_global == "claude-user-json"
+    assert "claude-desktop" in hs
+    assert hs["claude-desktop"].project_paths == []  # no skills, only MCP
+
+
+def test_run_scan_discovers_servers(tmp_path, monkeypatch):
+    monkeypatch.setenv("DRSKILL_HOME", str(tmp_path / "home"))
+    proj, home = tmp_path / "proj", tmp_path / "home"
+    (proj / ".claude" / "skills").mkdir(parents=True)  # detect claude-code
+    (proj / ".mcp.json").write_text(json.dumps({"mcpServers": {
+        "github": {"command": "npx", "args": ["-y", "@modelcontextprotocol/server-github"]},
+    }}))
+    world, findings = run_scan(proj, home, config=Config())
+    names = {(s.harness, s.name, s.scope) for s in world.mcp_servers}
+    assert ("claude-code", "github", "project") in names
+
+
+def test_run_scan_reports_config_errors(tmp_path, monkeypatch):
+    monkeypatch.setenv("DRSKILL_HOME", str(tmp_path / "home"))
+    proj, home = tmp_path / "proj", tmp_path / "home"
+    (proj / ".claude" / "skills").mkdir(parents=True)
+    (proj / ".mcp.json").write_text("{broken")
+    world, findings = run_scan(proj, home, config=Config())
+    assert world.mcp_config_errors and world.mcp_config_errors[0][0] == "claude-code"

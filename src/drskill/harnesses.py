@@ -23,6 +23,11 @@ class HarnessDef(BaseModel):
     search_order: Literal["project-first", "global-first", "none"] = "project-first"
     recursive: bool = True
     root_md_paths: list[str] = Field(default_factory=list)
+    mcp_project_configs: list[str] = Field(default_factory=list)
+    mcp_global_configs: list[str] = Field(default_factory=list)
+    mcp_format: str = "mcp-json"
+    mcp_format_global: str | None = None  # defaults to mcp_format when None
+    mcp_verified: bool = False
 
     def search_paths(
         self, project_root: Path, home: Path, global_only: bool = False

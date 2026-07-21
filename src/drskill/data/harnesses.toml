@@ -26,6 +26,11 @@ global_paths = ["~/.claude/skills"]
 search_order = "project-first"
 recursive = true
 root_md_paths = []
+mcp_project_configs = [".mcp.json"]
+mcp_global_configs = ["~/.claude.json"]
+mcp_format = "mcp-json"
+mcp_format_global = "claude-user-json"
+mcp_verified = true
 
 # Verified against pi docs (packages/coding-agent/docs/skills.md):
 # global paths load first and first-found wins; bare .md files count as
@@ -65,6 +70,9 @@ global_paths = ["~/.cursor/skills", "~/.agents/skills"]
 search_order = "project-first"
 recursive = true
 root_md_paths = []
+mcp_project_configs = [".cursor/mcp.json"]
+mcp_global_configs = ["~/.cursor/mcp.json"]
+mcp_verified = true
 
 # Verified against source, 2026-07-19: github.com/openai/codex
 # (commit 678157acaa819d5510adfe359abb5d0392cfe461),
@@ -100,6 +108,9 @@ global_paths = ["~/.codex/skills", "~/.agents/skills"]
 search_order = "none"
 recursive = true
 root_md_paths = []
+mcp_global_configs = ["~/.codex/config.toml"]
+mcp_format = "codex-toml"
+mcp_verified = true
 
 # Verified against https://docs.github.com/en/copilot/concepts/agents/about-agent-skills
 # and https://docs.github.com/en/copilot/how-tos/copilot-cli/customize-copilot/add-skills,
@@ -124,6 +135,8 @@ global_paths = ["~/.copilot/skills", "~/.agents/skills"]
 search_order = "project-first"
 recursive = true
 root_md_paths = []
+mcp_project_configs = [".vscode/mcp.json"]
+mcp_format = "vscode-json"
 
 # Verified against source, 2026-07-19: github.com/google-gemini/gemini-cli
 # (commit acae7124bdd849e554eaa5e090199a0cf08cd782).
@@ -150,6 +163,9 @@ global_paths = ["~/.gemini/skills", "~/.agents/skills"]
 search_order = "project-first"
 recursive = false
 root_md_paths = []
+mcp_project_configs = [".gemini/settings.json"]
+mcp_global_configs = ["~/.gemini/settings.json"]
+mcp_verified = true
 
 # --- Vendored from vercel-labs/skills (MIT), commit 777599e1159e401b11ce4c8a57c20f09a8f1596e ---
 # All entries below are unverified on both facets; see the header comment
@@ -294,6 +310,7 @@ global_paths = ["~/.cline/skills", "~/.agents/skills"]
 search_order = "global-first"
 recursive = false
 root_md_paths = []
+mcp_global_configs = ["~/Library/Application Support/Code/User/globalStorage/saoudrizwan.claude-dev/settings/cline_mcp_settings.json"]
 
 [[harness]]
 id = "codearts-agent"
@@ -971,3 +988,10 @@ global_paths = ["~/.zencoder/skills"]
 search_order = "project-first"
 recursive = true
 root_md_paths = []
+
+[[harness]]
+id = "claude-desktop"
+display_name = "Claude Desktop"
+detect = ["~/Library/Application Support/Claude/claude_desktop_config.json"]
+mcp_global_configs = ["~/Library/Application Support/Claude/claude_desktop_config.json"]
+mcp_verified = true

@@ -2,7 +2,7 @@ from __future__ import annotations
 
 from pathlib import Path
 
-from drskill import deep
+from drskill import deep, mcp
 from drskill.checks import run_all
 from drskill.checks.lockfile import load_lockfile
 from drskill.discovery import discover
@@ -47,6 +47,9 @@ def run_scan(
                         )
                     }
                 )
+    world.mcp_servers, world.mcp_config_errors = mcp.discover_servers(
+        world.harnesses, project_root, home, global_only
+    )
     findings = run_all(world, config)
     cdir = deep.cache_dir(project_root, home, global_only)
     cache = deep.load_cache(cdir)
