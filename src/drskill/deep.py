@@ -42,9 +42,21 @@ class Verdict(BaseModel):
     model: str
     program_version: str
     date: str  # ISO date of the judgment
+    # Rewrite proposal, present only on description_collision entries and
+    # only once the rewrite call has succeeded. 0.3.0 entries lack all three.
+    rewrite_target: str | None = None
+    rewrite_text: str | None = None
+    rewrite_reason: str | None = None
+
+
+class RewriteResult(BaseModel):
+    target: str  # name of the skill whose description should change
+    text: str  # the proposed description
+    reason: str  # one sentence on why that skill was picked
 
 
 JudgeFn = Callable[[Contributor, Contributor], "JudgeResult | None"]
+RewriteFn = Callable[[Contributor, Contributor, str], "RewriteResult | None"]
 
 
 def load_user_env(home: Path) -> list[str]:
@@ -131,6 +143,24 @@ def unjudged_count(world, findings: list[Finding], cache: dict[str, Verdict]) ->
     return sum(1 for a, b in flagged_pairs(world, findings) if pair_key(a, b) not in cache)
 
 
+def pending_rewrites(world, findings: list[Finding], cache: dict[str, Verdict]) -> int:
+    """Collision verdicts still waiting for a rewrite proposal, because the
+    budget ran out or the rewrite call failed."""
+    out = 0
+    for a, b in flagged_pairs(world, findings):
+        v = cache.get(pair_key(a, b))
+        if v and v.verdict == "description_collision" and not v.rewrite_text:
+            out += 1
+    return out
+
+
+def _flat(s: str) -> str:
+    """Model and skill text rendered into single evidence lines must stay a
+    single line: an embedded newline would break the diff layout and could
+    forge report lines such as a fake fix command."""
+    return " ".join(s.split())
+
+
 def judge_pairs(
     world,
     findings: list[Finding],
@@ -139,35 +169,79 @@ def judge_pairs(
     judge: JudgeFn,
     model_id: str,
     max_calls: int | None,
+    rewriter: RewriteFn | None = None,
 ) -> tuple[int, int]:
     """Judge uncached flagged pairs under a hard call budget; None means no
-    limit. Each verdict lands in `cache` and on disk immediately, so an
-    interrupted run loses nothing. Returns (judged, remaining unjudged)."""
-    todo = [
-        (a, b) for a, b in flagged_pairs(world, findings) if pair_key(a, b) not in cache
-    ]
+    limit. A description_collision verdict immediately spends one more call
+    on its rewrite proposal, and collision entries missing a rewrite from a
+    failed earlier call are retried before any new pair is judged. Every
+    result lands in `cache` and on disk as it arrives, so an interrupted
+    run loses nothing. Returns (judged, remaining unjudged)."""
+    keyed = [(pair_key(a, b), a, b) for a, b in flagged_pairs(world, findings)]
+    calls = 0
+    # Three consecutive failures mean a persistent problem, so that program
+    # stops burning the budget. The counters are per program: a dead
+    # rewriter must not stop a healthy judge from judging new pairs.
+    judge_failures = 0
+    rewrite_failures = 0
+
+    def budget_left() -> bool:
+        return max_calls is None or calls < max_calls
+
+    def attempt_rewrite(key: str, a: Contributor, b: Contributor) -> None:
+        nonlocal calls, rewrite_failures
+        v = cache[key]
+        calls += 1
+        r = rewriter(a, b, v.detail)
+        if r is None or not r.text.strip():
+            # A blank proposal is a failure, never a cached rewrite.
+            rewrite_failures += 1
+            return
+        rewrite_failures = 0
+        v = v.model_copy(update={
+            "rewrite_target": r.target,
+            "rewrite_text": r.text,
+            "rewrite_reason": r.reason,
+        })
+        cache[key] = v
+        save_verdict(cdir, key, v)
+
+    # Retry pass: collisions whose rewrite call failed on an earlier run.
+    if rewriter is not None:
+        for key, a, b in keyed:
+            if not budget_left() or rewrite_failures >= 3:
+                break
+            v = cache.get(key)
+            if v and v.verdict == "description_collision" and not v.rewrite_text:
+                attempt_rewrite(key, a, b)
+
+    todo = [(key, a, b) for key, a, b in keyed if key not in cache]
     judged = 0
-    consecutive_failures = 0
-    for a, b in todo[:max_calls]:
+    for key, a, b in todo:
+        if not budget_left() or judge_failures >= 3:
+            break
+        calls += 1
         result = judge(a, b)
         if result is None:  # errored or unparseable call: never cached
-            consecutive_failures += 1
-            if consecutive_failures >= 3:
-                # Persistent failure (bad key, dead network): stop burning
-                # the budget on calls that will not succeed.
-                break
+            judge_failures += 1
             continue
-        consecutive_failures = 0
+        judge_failures = 0
         v = Verdict(
             **result.model_dump(),
             model=model_id,
             program_version=PROGRAM_VERSION,
             date=dt.date.today().isoformat(),
         )
-        key = pair_key(a, b)
         cache[key] = v
         save_verdict(cdir, key, v)
         judged += 1
+        if (
+            rewriter is not None
+            and v.verdict == "description_collision"
+            and budget_left()
+            and rewrite_failures < 3
+        ):
+            attempt_rewrite(key, a, b)
     return judged, len(todo) - judged
 
 
@@ -219,14 +293,27 @@ def apply_verdicts(
                 "fix_commands": [],
             }))
             continue
+        by_name = {m.name: m for m in members}
         lines = []
+        extra_fixes = []
         for (an, bn), v in judged.items():
             if v.verdict == "distinct":
-                lines.append(f"\n      deep: {an} vs {bn}: distinct; {v.rationale}")
-            else:
+                lines.append(f"\n      deep: {an} vs {bn}: distinct; {_flat(v.rationale)}")
+                continue
+            lines.append(
+                f"\n      deep: {an} vs {bn}: {v.verdict}; {_flat(v.rationale)}; "
+                f"confusion example: '{_flat(v.detail)}'"
+            )
+            target = by_name.get(v.rewrite_target or "")
+            if v.verdict == "description_collision" and v.rewrite_text and target:
                 lines.append(
-                    f"\n      deep: {an} vs {bn}: {v.verdict}; {v.rationale}; "
-                    f"confusion example: '{v.detail}'"
+                    f"\n      deep: rewrite for {target.name} ({_flat(v.rewrite_reason or '')}):"
+                    f"\n      - {_flat(target.routing_text)}"
+                    f"\n      + {_flat(v.rewrite_text)}"
+                )
+                extra_fixes.append(
+                    "Review the proposed description above, then edit "
+                    f"{target.id} by hand"
                 )
         missing = len(pairs) - len(judged)
         if missing:
@@ -236,5 +323,8 @@ def apply_verdicts(
                 "\n      deep: judged distinct, but downgrade withheld: "
                 f"active injection findings on {', '.join(blocked)}"
             )
-        out.append(f.model_copy(update={"message": f.message + "".join(lines)}))
+        update: dict = {"message": f.message + "".join(lines)}
+        if extra_fixes:
+            update["fix_commands"] = [*f.fix_commands, *extra_fixes]
+        out.append(f.model_copy(update=update))
     return out

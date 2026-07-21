@@ -20,6 +20,7 @@ def run_scan(
     harness: str | None = None,
     judge: deep.JudgeFn | None = None,
     max_calls: int | None = 25,
+    rewriter: deep.RewriteFn | None = None,
 ) -> tuple[World, list[Finding]]:
     if config is None:
         # Same merge the CLI uses: machine-level acks are honored everywhere.
@@ -53,6 +54,9 @@ def run_scan(
     if judge is not None:
         # Acked clusters never spend the call budget; the user already ruled.
         active = [f for f in findings if f.fingerprint not in acked_fps]
-        deep.judge_pairs(world, active, cache, cdir, judge, config.deep.model, max_calls)
+        deep.judge_pairs(
+            world, active, cache, cdir, judge, config.deep.model, max_calls,
+            rewriter=rewriter,
+        )
     findings = deep.apply_verdicts(world, findings, cache, acked_fps)
     return world, findings

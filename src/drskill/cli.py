@@ -144,6 +144,7 @@ def scan(
     home = _home()
     config = _load_effective_config_or_exit(root, home, global_mode)
     judge = None
+    rewriter = None
     budget: int | None = None
     if deep_mode:
         if max_calls == "all":
@@ -163,11 +164,13 @@ def scan(
         deep.load_user_env(home)
         try:
             judge = deep_llm.build_judge(config.deep.model)
+            rewriter = deep_llm.build_rewriter(config.deep.model)
         except deep_llm.DeepUnavailableError as e:
             console.print(f"[red]{escape(str(e))}[/red]")
             raise typer.Exit(1)
     world, findings = run_scan(
-        root, home, global_mode, config, harness=harness, judge=judge, max_calls=budget
+        root, home, global_mode, config, harness=harness, judge=judge,
+        max_calls=budget, rewriter=rewriter,
     )
     active, acked = ledger.filter_findings(findings, config)
     if as_json:
@@ -186,7 +189,9 @@ def scan(
                 spath, [f.fingerprint for f in findings], dt.date.today()
             )
         if deep_mode:
-            last_error = getattr(judge, "last_error", None)
+            last_error = getattr(judge, "last_error", None) or getattr(
+                rewriter, "last_error", None
+            )
             if last_error:
                 flat = " ".join(str(last_error).split())
                 console.print(
@@ -200,6 +205,13 @@ def scan(
                 console.print(
                     f"deep: {remaining} flagged pair{plural} still unjudged; "
                     "raise --max-calls to judge more"
+                )
+            pending = deep.pending_rewrites(world, active, cache)
+            if pending:
+                plural = "s" if pending != 1 else ""
+                console.print(
+                    f"deep: {pending} rewrite proposal{plural} pending; "
+                    "rerun --deep to generate"
                 )
         if detailed:
             console.print()

@@ -167,6 +167,8 @@ Each `--deep` run makes at most 25 model calls. Raise or lower the budget with `
 
 When every pair in an overlap cluster is judged distinct, the warning becomes a note. The note still prints, so the model's decision stays on the record, but it does not fail `--ci` and needs no ack. A skill with an unacknowledged injection finding never earns this downgrade. Its pairs are still judged and the verdicts print as evidence, but the warning stays a warning, because a skill suspected of prompt injection does not get to talk its way out of an overlap warning.
 
+When the judge classes a pair as a description collision, the same run also proposes a fix. A second model call rewrites one of the two descriptions, and the finding shows the proposal as a diff: the current description on a minus line, the proposed one on a plus line, with the model's reason for picking that skill. The proposal is model text headed for your skill file, so read it before pasting. drskill never edits the file itself. A rewrite costs one extra call from the same `--max-calls` budget, and a proposal that failed to generate is retried at the start of the next `--deep` run. Once you apply a rewrite, the description has changed, so the next `--deep` run judges the pair fresh, and a good rewrite comes back distinct.
+
 Two commands manage the cache. `drskill cache stats` prints entry counts by verdict, by model, and the age range. `drskill cache prune` deletes entries that no longer match any flagged pair.
 
 ## The ledger

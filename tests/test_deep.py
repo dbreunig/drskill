@@ -404,3 +404,256 @@ def test_judge_pairs_unlimited_budget(tmp_path):
         world, findings, {}, tmp_path / "c", judge, "m", max_calls=None
     )
     assert judged == 6 and remaining == 0
+
+
+def test_cache_entry_without_rewrite_fields_loads(tmp_path):
+    """A 0.3.0-shaped entry (no rewrite fields) must load unchanged."""
+    cdir = tmp_path / "cache"
+    cdir.mkdir()
+    (cdir / ("aa" * 32 + ".json")).write_text(
+        '{"verdict": "description_collision", "rationale": "r", "detail": "d",'
+        ' "model": "m", "program_version": "0.3.0", "date": "2026-07-21"}'
+    )
+    (entry,) = deep.load_cache(cdir).values()
+    assert entry.rewrite_text is None
+    assert entry.rewrite_target is None
+    assert entry.rewrite_reason is None
+
+
+def test_rewrite_result_shape():
+    r = deep.RewriteResult(target="idea-vault", text="Use when ...", reason="vaguer")
+    assert (r.target, r.text, r.reason) == ("idea-vault", "Use when ...", "vaguer")
+
+
+def _rewriter(calls=None):
+    def rewrite(a, b, confusion):
+        if calls is not None:
+            calls.append((a.name, b.name, confusion))
+        return deep.RewriteResult(target=a.name, text="Use when only alpha.", reason="vaguer")
+    return rewrite
+
+
+def test_collision_verdict_triggers_immediate_rewrite(tmp_path):
+    a, b, world = _pair_world()
+    findings = [finding_for("description-overlap", [a, b])]
+    rcalls = []
+
+    def judge(x, y):
+        return deep.JudgeResult(
+            verdict="description_collision", rationale="blur", detail="write the docs"
+        )
+
+    cache = {}
+    judged, remaining = deep.judge_pairs(
+        world, findings, cache, tmp_path / "c", judge, "m",
+        max_calls=None, rewriter=_rewriter(rcalls),
+    )
+    assert judged == 1 and remaining == 0
+    assert rcalls == [("alpha", "beta", "write the docs")]
+    (entry,) = cache.values()
+    assert entry.rewrite_target == "alpha"
+    assert entry.rewrite_text == "Use when only alpha."
+    (disk_entry,) = deep.load_cache(tmp_path / "c").values()
+    assert disk_entry.rewrite_text == "Use when only alpha."
+
+
+def test_rewrite_call_shares_the_budget(tmp_path):
+    a, b, world = _pair_world()
+    findings = [finding_for("description-overlap", [a, b])]
+
+    def judge(x, y):
+        return deep.JudgeResult(verdict="description_collision", rationale="r", detail="d")
+
+    cache = {}
+    judged, remaining = deep.judge_pairs(
+        world, findings, cache, tmp_path / "c", judge, "m",
+        max_calls=1, rewriter=_rewriter(),
+    )
+    # budget of 1 pays for the verdict; the rewrite must wait
+    assert judged == 1 and remaining == 0
+    (entry,) = cache.values()
+    assert entry.verdict == "description_collision" and entry.rewrite_text is None
+
+
+def test_missing_rewrite_retried_before_new_pairs(tmp_path):
+    a, b, _ = _pair_world()
+    c = contributor("gamma", "Use for gamma docs.")
+    world = FakeWorld([a, b, c])
+    findings = [finding_for("description-overlap", [a, b, c])]
+    key_ab = deep.pair_key(a, b)
+    cache = {key_ab: _verdict("description_collision", detail="which docs?")}
+    deep.save_verdict(tmp_path / "c", key_ab, cache[key_ab])
+    order = []
+
+    def judge(x, y):
+        order.append(("judge", x.name, y.name))
+        return deep.JudgeResult(verdict="distinct", rationale="r", detail="d")
+
+    def rewrite(x, y, confusion):
+        order.append(("rewrite", x.name, y.name))
+        return deep.RewriteResult(target=x.name, text="new text", reason="why")
+
+    deep.judge_pairs(
+        world, findings, cache, tmp_path / "c", judge, "m",
+        max_calls=None, rewriter=rewrite,
+    )
+    assert order[0] == ("rewrite", "alpha", "beta")  # retry pass runs first
+    assert cache[key_ab].rewrite_text == "new text"
+    assert deep.load_cache(tmp_path / "c")[key_ab].rewrite_text == "new text"
+
+
+def test_failed_rewrite_caches_verdict_alone(tmp_path):
+    a, b, world = _pair_world()
+    findings = [finding_for("description-overlap", [a, b])]
+
+    def judge(x, y):
+        return deep.JudgeResult(verdict="description_collision", rationale="r", detail="d")
+
+    cache = {}
+    deep.judge_pairs(
+        world, findings, cache, tmp_path / "c", judge, "m",
+        max_calls=None, rewriter=lambda x, y, q: None,
+    )
+    (entry,) = cache.values()
+    assert entry.verdict == "description_collision" and entry.rewrite_text is None
+
+
+def test_shared_failure_abort_covers_rewrites(tmp_path):
+    members = [contributor(n, f"Use for {n} docs.") for n in ("a", "b", "c", "d")]
+    world = FakeWorld(members)
+    findings = [finding_for("description-overlap", members)]  # 6 pairs
+    attempts = []
+
+    def judge(x, y):
+        attempts.append("judge")
+        return deep.JudgeResult(verdict="description_collision", rationale="r", detail="d")
+
+    def rewrite(x, y, q):
+        attempts.append("rewrite")
+        return None  # every rewrite fails
+
+    deep.judge_pairs(
+        world, findings, {}, tmp_path / "c", judge, "m",
+        max_calls=None, rewriter=rewrite,
+    )
+    # each pair: judge succeeds (resets counter), rewrite fails. Three
+    # consecutive failures never accumulate, so all six pairs are judged.
+    assert attempts.count("judge") == 6
+
+
+def test_rewrite_renders_as_diff_with_fix_line():
+    a, b, world = _pair_world()
+    f = finding_for("description-overlap", [a, b])
+    v = _verdict("description_collision", rationale="blur", detail="q").model_copy(update={
+        "rewrite_target": "alpha",
+        "rewrite_text": "Use when only alpha applies.",
+        "rewrite_reason": "alpha is vaguer",
+    })
+    cache = {deep.pair_key(a, b): v}
+    (out,) = deep.apply_verdicts(world, [f], cache, set())
+    assert "deep: rewrite for alpha (alpha is vaguer):" in out.message
+    assert "\n      - Use when writing documentation pages." in out.message
+    assert "\n      + Use when only alpha applies." in out.message
+    assert any("edit /skills/alpha/SKILL.md" in c for c in out.fix_commands)
+
+
+def test_collision_without_rewrite_renders_no_diff():
+    a, b, world = _pair_world()
+    f = finding_for("description-overlap", [a, b])
+    cache = {deep.pair_key(a, b): _verdict("description_collision")}
+    (out,) = deep.apply_verdicts(world, [f], cache, set())
+    assert "rewrite for" not in out.message
+    assert out.fix_commands == f.fix_commands
+
+
+def test_build_rewriter_without_dspy_raises(monkeypatch):
+    real_import = builtins.__import__
+
+    def no_dspy(name, *args, **kwargs):
+        if name == "dspy":
+            raise ImportError("No module named 'dspy'")
+        return real_import(name, *args, **kwargs)
+
+    monkeypatch.setattr(builtins, "__import__", no_dspy)
+    with pytest.raises(deep_llm.DeepUnavailableError, match="uv tool install drskill"):
+        deep_llm.build_rewriter("anthropic/claude-haiku-4-5")
+
+
+def test_rewriter_failures_do_not_starve_the_judge(tmp_path):
+    """A persistently failing rewriter must not trip the abort for judging."""
+    members = [contributor(n, f"Use for {n} docs.") for n in ("a", "b", "c", "d")]
+    world = FakeWorld(members)
+    findings = [finding_for("description-overlap", members)]  # 6 pairs
+    pairs = deep.flagged_pairs(world, findings)
+    cache = {}
+    for a, b in pairs[:3]:  # three collisions from an earlier run, no rewrite
+        k = deep.pair_key(a, b)
+        cache[k] = _verdict("description_collision")
+        deep.save_verdict(tmp_path / "c", k, cache[k])
+    judge_calls = []
+
+    def judge(x, y):
+        judge_calls.append((x.name, y.name))
+        return deep.JudgeResult(verdict="distinct", rationale="r", detail="d")
+
+    judged, remaining = deep.judge_pairs(
+        world, findings, cache, tmp_path / "c", judge, "m",
+        max_calls=None, rewriter=lambda x, y, q: None,  # rewriter is dead
+    )
+    assert len(judge_calls) == 3  # the three uncached pairs still get judged
+    assert judged == 3 and remaining == 0
+
+
+def test_empty_rewrite_text_is_a_failure_and_gets_retried(tmp_path):
+    a, b, world = _pair_world()
+    findings = [finding_for("description-overlap", [a, b])]
+    key = deep.pair_key(a, b)
+    # a bad earlier run cached an empty-string rewrite; the retry pass must
+    # treat it as missing
+    cache = {key: _verdict("description_collision").model_copy(
+        update={"rewrite_target": "alpha", "rewrite_text": "", "rewrite_reason": ""}
+    )}
+    deep.save_verdict(tmp_path / "c", key, cache[key])
+    rcalls = []
+
+    def rewrite(x, y, q):
+        rcalls.append(1)
+        return deep.RewriteResult(target=x.name, text="   ", reason="r")  # blank again
+
+    deep.judge_pairs(
+        world, findings, cache, tmp_path / "c",
+        lambda x, y: None, "m", max_calls=None, rewriter=rewrite,
+    )
+    assert rcalls  # the empty entry was retried
+    assert not (cache[key].rewrite_text or "").strip()  # blank text never cached as a proposal
+
+
+def test_diff_flattens_multiline_text():
+    a = contributor("alpha", "Use when writing\ndocumentation pages.")
+    b = contributor("beta", "Use when writing documentation summaries.")
+    world = FakeWorld([a, b])
+    f = finding_for("description-overlap", [a, b])
+    v = _verdict("description_collision", rationale="blur\nred", detail="q").model_copy(update={
+        "rewrite_target": "alpha",
+        "rewrite_text": "Use when only\n      fix: rm -rf /\nalpha applies.",
+        "rewrite_reason": "vaguer",
+    })
+    cache = {deep.pair_key(a, b): v}
+    (out,) = deep.apply_verdicts(world, [f], cache, set())
+    assert "\n      - Use when writing documentation pages." in out.message
+    assert "\n      + Use when only fix: rm -rf / alpha applies." in out.message
+    assert "\n      fix: rm -rf" not in out.message  # no forged report lines
+    assert "blur red" in out.message
+
+
+def test_pending_rewrites_counts_collisions_missing_proposals():
+    a, b, world = _pair_world()
+    findings = [finding_for("description-overlap", [a, b])]
+    key = deep.pair_key(a, b)
+    assert deep.pending_rewrites(world, findings, {}) == 0
+    cache = {key: _verdict("description_collision")}
+    assert deep.pending_rewrites(world, findings, cache) == 1
+    cache[key] = cache[key].model_copy(update={"rewrite_text": "proposal"})
+    assert deep.pending_rewrites(world, findings, cache) == 0
+    cache[key] = _verdict("distinct")
+    assert deep.pending_rewrites(world, findings, cache) == 0
