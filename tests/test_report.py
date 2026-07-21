@@ -50,7 +50,7 @@ def test_render_sections_and_ack_line():
     assert "[f0f1] new double-load:" in text
     assert "drskill ack f0f1" in text  # recap example line
     recap = text[text.index("ack findings by id"):]
-    assert "f0f1 double-load" in recap and "pdf-tools" in recap
+    assert "f0f1 new double-load" in recap and "pdf-tools" in recap
     assert "npx skills remove pdf-tools" in text
     assert "1 error" in text and "2 warnings" not in text  # 1 active warning
     assert "1 acknowledged" in text
