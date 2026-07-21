@@ -164,3 +164,72 @@ def test_active_injection_blocks_downgrade_and_ack_unblocks():
         world, [overlap, injection], cache, {injection.fingerprint}
     )
     assert out2.severity == "note"
+
+
+def test_judge_pairs_respects_budget_and_writes_cache(tmp_path):
+    a = contributor("alpha", "Use for alpha docs.")
+    b = contributor("beta", "Use for beta docs.")
+    c = contributor("gamma", "Use for gamma docs.")
+    world = FakeWorld([a, b, c])
+    findings = [finding_for("description-overlap", [a, b, c])]
+    calls = []
+
+    def judge(x, y):
+        calls.append((x.name, y.name))
+        return deep.JudgeResult(verdict="distinct", rationale="r", detail="d")
+
+    cache = {}
+    cdir = tmp_path / "cache"
+    judged, remaining = deep.judge_pairs(world, findings, cache, cdir, judge, "m", max_calls=2)
+    assert judged == 2 and remaining == 1
+    assert calls == [("alpha", "beta"), ("alpha", "gamma")]
+    assert len(deep.load_cache(cdir)) == 2
+    assert all(v.model == "m" for v in cache.values())
+    # a second run continues where the first stopped
+    judged2, remaining2 = deep.judge_pairs(world, findings, cache, cdir, judge, "m", max_calls=2)
+    assert judged2 == 1 and remaining2 == 0
+    assert calls[-1] == ("beta", "gamma")
+
+
+def test_judge_pairs_failed_call_not_cached(tmp_path):
+    a, b, world = _pair_world()
+    findings = [finding_for("description-overlap", [a, b])]
+    cache = {}
+    judged, remaining = deep.judge_pairs(
+        world, findings, cache, tmp_path / "c", lambda x, y: None, "m", max_calls=5
+    )
+    assert judged == 0 and remaining == 1
+    assert cache == {} and deep.load_cache(tmp_path / "c") == {}
+
+
+from drskill.ledger import Config
+from drskill.pipeline import run_scan
+
+PILE_A = "Use when the user asks to write project documentation pages."
+PILE_B = "Use when the user asks to write project documentation summaries."
+
+
+def write_skill(proj, name, description, body):
+    d = proj / ".claude" / "skills" / name
+    d.mkdir(parents=True)
+    (d / "SKILL.md").write_text(
+        f"---\nname: {name}\ndescription: {description}\n---\n{body}\n"
+    )
+
+
+def test_run_scan_judges_and_applies(tmp_path, monkeypatch):
+    monkeypatch.setenv("DRSKILL_HOME", str(tmp_path / "home"))
+    proj, home = tmp_path / "p", tmp_path / "home"
+    write_skill(proj, "doc-a", PILE_A, body="a" * 40)
+    write_skill(proj, "doc-b", PILE_B, body="b" * 40)
+
+    def judge(x, y):
+        return deep.JudgeResult(verdict="distinct", rationale="r", detail="d")
+
+    world, findings = run_scan(proj, home, config=Config(), judge=judge)
+    overlap = [f for f in findings if f.check_id == "description-overlap"]
+    assert [f.severity for f in overlap] == ["note"]
+    # the verdict persisted: a later plain scan applies it with no judge
+    world2, findings2 = run_scan(proj, home, config=Config())
+    overlap2 = [f for f in findings2 if f.check_id == "description-overlap"]
+    assert [f.severity for f in overlap2] == ["note"]

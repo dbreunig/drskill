@@ -2,6 +2,7 @@ from __future__ import annotations
 
 from pathlib import Path
 
+from drskill import deep
 from drskill.checks import run_all
 from drskill.checks.lockfile import load_lockfile
 from drskill.discovery import discover
@@ -17,6 +18,8 @@ def run_scan(
     global_only: bool = False,
     config: Config | None = None,
     harness: str | None = None,
+    judge: deep.JudgeFn | None = None,
+    max_calls: int = 25,
 ) -> tuple[World, list[Finding]]:
     if config is None:
         config = load_config(ledger_path(project_root, home, global_only))
@@ -42,4 +45,11 @@ def run_scan(
                         )
                     }
                 )
-    return world, run_all(world, config)
+    findings = run_all(world, config)
+    cdir = deep.cache_dir(project_root, home, global_only)
+    cache = deep.load_cache(cdir)
+    if judge is not None:
+        deep.judge_pairs(world, findings, cache, cdir, judge, config.deep.model, max_calls)
+    acked_fps = {a.fingerprint for a in config.ack}
+    findings = deep.apply_verdicts(world, findings, cache, acked_fps)
+    return world, findings

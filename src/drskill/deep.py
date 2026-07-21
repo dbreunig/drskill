@@ -92,6 +92,39 @@ def unjudged_count(world, findings: list[Finding], cache: dict[str, Verdict]) ->
     return sum(1 for a, b in flagged_pairs(world, findings) if pair_key(a, b) not in cache)
 
 
+def judge_pairs(
+    world,
+    findings: list[Finding],
+    cache: dict[str, Verdict],
+    cdir: Path,
+    judge: JudgeFn,
+    model_id: str,
+    max_calls: int,
+) -> tuple[int, int]:
+    """Judge uncached flagged pairs under a hard call budget. Each verdict
+    lands in `cache` and on disk immediately, so an interrupted run loses
+    nothing. Returns (judged, remaining unjudged)."""
+    todo = [
+        (a, b) for a, b in flagged_pairs(world, findings) if pair_key(a, b) not in cache
+    ]
+    judged = 0
+    for a, b in todo[:max_calls]:
+        result = judge(a, b)
+        if result is None:  # errored or unparseable call: never cached
+            continue
+        v = Verdict(
+            **result.model_dump(),
+            model=model_id,
+            program_version=PROGRAM_VERSION,
+            date=dt.date.today().isoformat(),
+        )
+        key = pair_key(a, b)
+        cache[key] = v
+        save_verdict(cdir, key, v)
+        judged += 1
+    return judged, len(todo) - judged
+
+
 def apply_verdicts(
     world, findings: list[Finding], cache: dict[str, Verdict], acked_fps: set[str]
 ) -> list[Finding]:
