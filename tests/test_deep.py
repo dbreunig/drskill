@@ -539,3 +539,28 @@ def test_shared_failure_abort_covers_rewrites(tmp_path):
     # each pair: judge succeeds (resets counter), rewrite fails. Three
     # consecutive failures never accumulate, so all six pairs are judged.
     assert attempts.count("judge") == 6
+
+
+def test_rewrite_renders_as_diff_with_fix_line():
+    a, b, world = _pair_world()
+    f = finding_for("description-overlap", [a, b])
+    v = _verdict("description_collision", rationale="blur", detail="q").model_copy(update={
+        "rewrite_target": "alpha",
+        "rewrite_text": "Use when only alpha applies.",
+        "rewrite_reason": "alpha is vaguer",
+    })
+    cache = {deep.pair_key(a, b): v}
+    (out,) = deep.apply_verdicts(world, [f], cache, set())
+    assert "deep: rewrite for alpha (alpha is vaguer):" in out.message
+    assert "\n      - Use when writing documentation pages." in out.message
+    assert "\n      + Use when only alpha applies." in out.message
+    assert any("edit /skills/alpha/SKILL.md" in c for c in out.fix_commands)
+
+
+def test_collision_without_rewrite_renders_no_diff():
+    a, b, world = _pair_world()
+    f = finding_for("description-overlap", [a, b])
+    cache = {deep.pair_key(a, b): _verdict("description_collision")}
+    (out,) = deep.apply_verdicts(world, [f], cache, set())
+    assert "rewrite for" not in out.message
+    assert out.fix_commands == f.fix_commands

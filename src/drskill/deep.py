@@ -271,14 +271,27 @@ def apply_verdicts(
                 "fix_commands": [],
             }))
             continue
+        by_name = {m.name: m for m in members}
         lines = []
+        extra_fixes = []
         for (an, bn), v in judged.items():
             if v.verdict == "distinct":
                 lines.append(f"\n      deep: {an} vs {bn}: distinct; {v.rationale}")
-            else:
+                continue
+            lines.append(
+                f"\n      deep: {an} vs {bn}: {v.verdict}; {v.rationale}; "
+                f"confusion example: '{v.detail}'"
+            )
+            target = by_name.get(v.rewrite_target or "")
+            if v.verdict == "description_collision" and v.rewrite_text and target:
                 lines.append(
-                    f"\n      deep: {an} vs {bn}: {v.verdict}; {v.rationale}; "
-                    f"confusion example: '{v.detail}'"
+                    f"\n      deep: rewrite for {target.name} ({v.rewrite_reason}):"
+                    f"\n      - {target.routing_text}"
+                    f"\n      + {v.rewrite_text}"
+                )
+                extra_fixes.append(
+                    "Review the proposed description above, then edit "
+                    f"{target.id} by hand"
                 )
         missing = len(pairs) - len(judged)
         if missing:
@@ -288,5 +301,8 @@ def apply_verdicts(
                 "\n      deep: judged distinct, but downgrade withheld: "
                 f"active injection findings on {', '.join(blocked)}"
             )
-        out.append(f.model_copy(update={"message": f.message + "".join(lines)}))
+        update: dict = {"message": f.message + "".join(lines)}
+        if extra_fixes:
+            update["fix_commands"] = [*f.fix_commands, *extra_fixes]
+        out.append(f.model_copy(update=update))
     return out
