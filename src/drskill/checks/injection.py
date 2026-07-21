@@ -236,3 +236,42 @@ def injection_encoded_blob(world: World, config: Config) -> list[Finding]:
                 )
             )
     return out
+
+
+_PROSE_KINDS = {"skillmd", "prose"}
+_OVERRIDE = [
+    re.compile(p, re.IGNORECASE)
+    for p in (
+        r"\bignore\b.{0,20}\b(previous|prior|earlier|above|all other)\b.{0,20}\b(instructions?|rules|guidance|guidelines|prompts?)\b",
+        r"\bdisregard\b.{0,30}\b(instructions?|rules|guidance|guidelines|system prompt)\b",
+        r"\bdo not (tell|inform|notify|warn|alert)\b.{0,15}\bthe user\b",
+        r"\bwithout (informing|telling|notifying|alerting)\b.{0,15}\bthe user\b",
+        r"\bhide (this|it) from\b",
+        r"\bdo not reveal\b",
+        r"\byou are no longer (bound|restricted|limited)\b",
+        r"\bforget (everything|all previous)\b",
+        r"\boverride (the )?(system|safety)\b",
+    )
+]
+
+
+@check("injection-override")
+def injection_override(world: World, config: Config) -> list[Finding]:
+    out = []
+    for c in world.contributors.values():
+        hits = find_hits(scan_view(c), _OVERRIDE, _PROSE_KINDS)
+        if hits:
+            out.append(
+                make_finding(
+                    "injection-override", "warning", [c],
+                    evidence_message(
+                        c, "contains instruction-override phrasing", hits
+                    ),
+                    fix_commands=[
+                        "Read the quoted lines; remove the skill if you did not expect them"
+                    ],
+                    extra_key=c.name,
+                    fingerprint_texts=fingerprint_texts(hits),
+                )
+            )
+    return out
