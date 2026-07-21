@@ -1,6 +1,16 @@
-### They Call Me Dr. Skill
+### 🎶 They Call Me Dr. Skill 🎶
 
-drskill is `brew doctor` for your agent's skill loadout. It looks at every coding agent installed on your machine or configured in your repo, works out exactly which skills each one loads, and checks that set for problems: skills that shadow each other, skills loaded twice, duplicate or near-duplicate skills, skills that break the SKILL.md spec, broken symlinks, drift against your lockfile, and skills that burn too many tokens. Every problem it reports ends in a command: a fix command or a command to acknowledge the problem and move on. drskill only reads your files. It never installs, edits, or deletes a skill, and it makes zero calls to an LLM unless you explicitly opt in with `scan --deep`.
+`drskill` is `brew doctor` for your agent's skill loadout. It looks at every coding agent installed on your machine or configured in your repo, works out exactly which skills each one loads, and checks that set for problems: 
+
+1. Skills that shadow each other
+2. Skills loaded twice
+3. Duplicate or near-duplicate skills
+4. Skills that break the SKILL.md spec
+5. Broken symlinks
+6. Drift against your lockfile
+7. Skills that burn too many tokens. 
+
+Every problem it reports ends in a command: a fix command or a command to acknowledge the problem and move on. `drskill` only reads your files. It never installs, edits, or deletes a skill, and it makes zero calls to an LLM unless you explicitly opt in with `scan --deep`.
 
 ## Install
 
@@ -24,10 +34,13 @@ Write a starter ledger file with default budgets and thresholds:
 drskill init
 ```
 
-Acknowledge a finding so it stops showing up until the skill's content changes:
+Acknowledge a finding so it stops showing up until the skill's content changes. There are four forms:
 
 ```
-drskill ack near-duplicate docx-report documentation-writer
+drskill ack fe5b                     # one finding, by the id shown in the report
+drskill ack near-duplicate docx-report documentation-writer   # one finding, named in full
+drskill ack injection-egress         # every finding of one check
+drskill ack --all                    # every active finding
 ```
 
 Walk the findings one at a time and decide each with one keypress:
