@@ -13,6 +13,9 @@ dependencies = [
     "tiktoken>=0.7",
 ]
 
+[project.optional-dependencies]
+deep = ["dspy>=3"]
+
 [project.scripts]
 drskill = "drskill.cli:app"
 

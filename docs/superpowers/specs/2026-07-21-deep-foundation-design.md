@@ -20,12 +20,12 @@ The ledger gains a `[deep]` section with one key:
 
 ```toml
 [deep]
-model = "anthropic/claude-sonnet-5"
+model = "anthropic/claude-haiku-4-5"
 ```
 
-The value is a LiteLLM model id. The default, used when the section is absent, is `anthropic/claude-sonnet-5`. The setting is project local, like budgets and thresholds, because the cache is a team artifact and the verdicts in it should come from a model the team chose together. Global mode reads the machine ledger's `[deep]` section.
+The value is a LiteLLM model id. The default, used when the section is absent, is `anthropic/claude-haiku-4-5`. The setting is project local, like budgets and thresholds, because the cache is a team artifact and the verdicts in it should come from a model the team chose together. Global mode reads the machine ledger's `[deep]` section.
 
-API keys come only from the environment, through the standard LiteLLM variables such as `ANTHROPIC_API_KEY`. drskill never stores or writes a key. Two auth notes for the record. Anthropic's `ant auth login` OAuth profiles are a sanctioned keyless way to bill an API account, and wiring their short lived bearer tokens through LiteLLM is a possible follow-up, but it is out of scope this cycle. Consumer Claude subscription credentials are not an option at all. A Pro or Max plan covers Anthropic's own clients, and its terms do not permit third party tools to spend it through the API.
+API keys come from the environment, through the standard LiteLLM variables such as `ANTHROPIC_API_KEY`. For persistence, drskill follows the AWS credentials file pattern. Before a `--deep` run it reads `~/.drskill/env`, a plain KEY=value file the user creates and owns, and loads any variable the shell has not already set. The shell always wins over the file. drskill never writes a key anywhere, and it never reads an env file from a project directory, because a scanned repo is untrusted content and a repo-supplied variable such as a base URL override could redirect the user's key to an attacker. The missing-key error names the exact variable, mentions the env file, and links to the provider's key console. Two auth notes for the record. Anthropic's `ant auth login` OAuth profiles are a sanctioned keyless way to bill an API account, and wiring their short lived bearer tokens through LiteLLM is a possible follow-up, but it is out of scope this cycle. Consumer Claude subscription credentials are not an option at all. A Pro or Max plan covers Anthropic's own clients, and its terms do not permit third party tools to spend it through the API.
 
 Two failure modes stop the run before any scan work:
 
@@ -62,7 +62,7 @@ Each entry stores the class, the rationale, the distinguisher or confusion examp
 
 Verdicts change how the existing description-overlap findings print. The check logic, the finding fingerprints, and the ack semantics do not change, so existing acks stay valid.
 
-- If every pair in a cluster has a cached `distinct` verdict, the cluster's warning becomes a short informational note, e.g. "overlap flagged, judged distinct by anthropic/claude-sonnet-5, 2026-07-21". The note does not fail `--ci` and needs no ack. It still prints, so the downgrade is never invisible.
+- If every pair in a cluster has a cached `distinct` verdict, the cluster's warning becomes a short informational note, e.g. "overlap flagged, judged distinct by anthropic/claude-haiku-4-5, 2026-07-21". The note does not fail `--ci` and needs no ack. It still prints, so the downgrade is never invisible.
 - Any other state keeps the warning. A `description_collision` or `scope_overlap` verdict adds the class, the rationale, and the confusion example to the finding's evidence. A pair with no verdict adds a note saying it is unjudged, or that its verdict was unavailable.
 
 Model output is text from outside drskill. It is escaped for rich markup and passed through the report sanitizer, the same as skill text.
@@ -74,6 +74,8 @@ The descriptions sent to the judge are attacker controlled. A hostile skill coul
 - The judge prompt delimits the descriptions as data and instructs the model to treat them as text under analysis, not as instructions. This limits the attack but cannot eliminate it.
 - A skill with any active Tier 3 injection finding is not eligible for the downgrade. Active means not acknowledged. An injection finding the user has acked reflects the user's own judgment, so it does not block the downgrade. For an ineligible skill, its pairs are still judged and the verdicts still print as evidence, but the warning stays a warning, with a line saying why. A skill that is currently suspected of injection does not get to talk its way out of an overlap warning.
 - The downgrade is never invisible. The informational note keeps the model's decision on the record in every report.
+
+The committed cache is trusted the same way the committed ack ledger is trusted. Neither file is signed, because the repo holds no secret to sign with, so anyone who can commit to the repo can silence a warning through either one. Review a change to `.drskill/cache/` the way you review a change to `drskill.toml`. A forged entry still leaves a visible note in every report, naming the model and date it claims.
 
 ## Testing
 

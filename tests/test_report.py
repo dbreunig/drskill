@@ -359,3 +359,16 @@ def test_render_collapses_full_harness_list(tmp_path):
     text = console.export_text()
     assert "all 2 harnesses (h2?)" in text
     assert "harnesses: h1\n" in text
+
+
+def test_note_severity_renders_in_notes_section():
+    note = sample_finding(check="description-overlap", severity="note")
+    note = note.model_copy(update={
+        "message": "overlap flagged (a, b); judged distinct by m, 2026-07-21",
+        "fix_commands": [],
+    })
+    text = render_to_text(world_with(), [note], [])
+    assert "NOTES" in text
+    assert "judged distinct" in text
+    assert "1 note" in text
+    assert "0 errors, 0 warnings" in text

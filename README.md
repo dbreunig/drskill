@@ -1,6 +1,6 @@
 ### They Call Me Dr. Skill
 
-drskill is `brew doctor` for your agent's skill loadout. It looks at every coding agent installed on your machine or configured in your repo, works out exactly which skills each one loads, and checks that set for problems: skills that shadow each other, skills loaded twice, duplicate or near-duplicate skills, skills that break the SKILL.md spec, broken symlinks, drift against your lockfile, and skills that burn too many tokens. Every problem it reports ends in a command: a fix command or a command to acknowledge the problem and move on. drskill only reads your files. It never installs, edits, or deletes a skill, and it makes zero calls to an LLM.
+drskill is `brew doctor` for your agent's skill loadout. It looks at every coding agent installed on your machine or configured in your repo, works out exactly which skills each one loads, and checks that set for problems: skills that shadow each other, skills loaded twice, duplicate or near-duplicate skills, skills that break the SKILL.md spec, broken symlinks, drift against your lockfile, and skills that burn too many tokens. Every problem it reports ends in a command: a fix command or a command to acknowledge the problem and move on. drskill only reads your files. It never installs, edits, or deletes a skill, and it makes zero calls to an LLM unless you explicitly opt in with `scan --deep`.
 
 ## Install
 
@@ -109,6 +109,35 @@ Without `--ci`, warnings alone exit 0. This lets you run `drskill scan` locally 
 | `injection-egress` | warning | A bundled script calls the network, e.g. `curl` or `requests.post`. The finding quotes each call so you can check the destination. |
 | `injection-encoded-blob` | warning | Skill text or a bundled file contains a long base64 or hex run that a reviewer cannot read. |
 | `injection-remote-fetch` | warning | Skill text tells the agent to fetch remote content and act on it, e.g. `curl` piped to a shell or "download X and follow the instructions". |
+
+## Deep checks
+
+The description-overlap check compares text, so some of its warnings are false alarms. `drskill scan --deep` sends each flagged pair of skills to a language model, which judges whether the two skills are distinct, whether their descriptions collide, or whether their scopes genuinely overlap. Deep mode needs an extra install, `pip install 'drskill[deep]'`, and a provider API key, e.g. `ANTHROPIC_API_KEY`. drskill sends only skill names and descriptions to the model, and it sends nothing at all unless you pass `--deep`.
+
+The key comes from your environment. To set it once per machine, put it in `~/.drskill/env`:
+
+```
+ANTHROPIC_API_KEY=sk-ant-...
+```
+
+drskill reads this file before a deep run and loads any variable your shell has not already set. The shell always wins. drskill never writes a key, and it never reads an env file from inside a project, because a scanned repo is untrusted content.
+
+The judge model is set in the ledger and defaults to a current Anthropic model:
+
+```toml
+[deep]
+model = "anthropic/claude-haiku-4-5"
+```
+
+Verdicts are stored in `.drskill/cache/`, one small JSON file per judged pair. Commit this directory. Every scan reads it, with or without `--deep`, so one person runs the judgments and every teammate and CI run gets the verdicts for free. A verdict lasts until either description changes, and then the pair is judged again.
+
+The cache carries the same trust as the ack ledger. Neither file is signed, so anyone who can commit to the repo can silence a warning through either one. Review a change to `.drskill/cache/` the way you review a change to `drskill.toml`.
+
+Each `--deep` run makes at most 25 model calls. Raise or lower the budget with `--max-calls`. When the budget runs out, the report says how many pairs are still unjudged.
+
+When every pair in an overlap cluster is judged distinct, the warning becomes a note. The note still prints, so the model's decision stays on the record, but it does not fail `--ci` and needs no ack. A skill with an unacknowledged injection finding never earns this downgrade. Its pairs are still judged and the verdicts print as evidence, but the warning stays a warning, because a skill suspected of prompt injection does not get to talk its way out of an overlap warning.
+
+Two commands manage the cache. `drskill cache stats` prints entry counts by verdict, by model, and the age range. `drskill cache prune` deletes entries that no longer match any flagged pair.
 
 ## The ledger
 

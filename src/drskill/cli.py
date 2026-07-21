@@ -2,13 +2,14 @@ from __future__ import annotations
 
 import datetime as dt
 import os
+from collections import Counter
 from pathlib import Path
 
 import typer
 from rich.console import Console
 from rich.markup import escape
 
-from drskill import interactive, ledger, report, state
+from drskill import deep, interactive, ledger, report, state
 from drskill.ledger import Ack
 from drskill.pipeline import run_scan
 
@@ -135,12 +136,26 @@ def scan(
     detailed: bool = typer.Option(False, "--detailed", help="also print each harness's skill table"),
     show_all: bool = typer.Option(False, "--all", help="with --detailed, include harnesses with no skills"),
     harness: str | None = typer.Option(None, "--harness", help="scope the scan to one harness"),
+    deep_mode: bool = typer.Option(False, "--deep", help="judge flagged pairs with the configured model"),
+    max_calls: int = typer.Option(25, "--max-calls", help="hard budget of model calls per --deep run"),
 ) -> None:
     """Analyze every detected harness's skill set and report findings."""
     _validate_harness(harness)
     home = _home()
     config = _load_effective_config_or_exit(root, home, global_mode)
-    world, findings = run_scan(root, home, global_mode, config, harness=harness)
+    judge = None
+    if deep_mode:
+        from drskill import deep_llm
+
+        deep.load_user_env(home)
+        try:
+            judge = deep_llm.build_judge(config.deep.model)
+        except deep_llm.DeepUnavailableError as e:
+            console.print(f"[red]{escape(str(e))}[/red]")
+            raise typer.Exit(1)
+    world, findings = run_scan(
+        root, home, global_mode, config, harness=harness, judge=judge, max_calls=max_calls
+    )
     active, acked = ledger.filter_findings(findings, config)
     if as_json:
         print(report.to_json(active))
@@ -157,6 +172,22 @@ def scan(
             state.mark_seen(
                 spath, [f.fingerprint for f in findings], dt.date.today()
             )
+        if deep_mode:
+            last_error = getattr(judge, "last_error", None)
+            if last_error:
+                flat = " ".join(str(last_error).split())
+                console.print(
+                    f"[yellow]deep: model calls are failing; last error: "
+                    f"{escape(flat)}[/yellow]"
+                )
+            cache = deep.load_cache(deep.cache_dir(root, home, global_mode))
+            remaining = deep.unjudged_count(world, active, cache)
+            if remaining:
+                plural = "s" if remaining != 1 else ""
+                console.print(
+                    f"deep: {remaining} flagged pair{plural} still unjudged; "
+                    "raise --max-calls to judge more"
+                )
         if detailed:
             console.print()
             report.render_harness_tables(
@@ -201,6 +232,9 @@ def ack(
     config = _load_effective_config_or_exit(root, home, global_mode)
     world, findings = run_scan(root, home, global_mode, config)
     active, _ = ledger.filter_findings(findings, config)
+    # Notes need no ack; sweeping them into the ledger would hide them and
+    # leave a stale ack behind if the verdict cache is ever pruned.
+    active = [f for f in active if f.severity != "note"]
     from drskill.checks import REGISTRY
 
     refs = refs or []
@@ -300,6 +334,7 @@ def review(
     config = _load_effective_config_or_exit(root, home, global_mode)
     world, findings = run_scan(root, home, global_mode, config, harness=harness)
     active, _ = ledger.filter_findings(findings, config)
+    active = [f for f in active if f.severity != "note"]
     if not active:
         console.print("[green]No findings to review.[/green]")
         return
@@ -419,6 +454,47 @@ def list_cmd(
     report.render_harness_tables(
         world, console, tokens=tokens, harness=harness, show_all=show_all
     )
+
+
+@app.command()
+def cache(
+    action: str = typer.Argument(..., help="stats or prune"),
+    root: Path = typer.Option(Path("."), "--root", hidden=True),
+    global_mode: bool = typer.Option(False, "--global", help="use the machine cache"),
+) -> None:
+    """Inspect or prune the committed deep verdict cache."""
+    home = _home()
+    cdir = deep.cache_dir(root, home, global_mode)
+    entries = deep.load_cache(cdir)
+    if action == "stats":
+        console.print(f"{len(entries)} cached verdicts in {escape(str(cdir))}")
+        if not entries:
+            return
+        for name, count in sorted(Counter(v.verdict for v in entries.values()).items()):
+            console.print(f"  {escape(name)}: {count}")
+        for name, count in sorted(Counter(v.model for v in entries.values()).items()):
+            console.print(f"  {escape(name)}: {count}")
+        dates = sorted(v.date for v in entries.values())
+        console.print(f"  oldest {escape(dates[0])}, newest {escape(dates[-1])}")
+    elif action == "prune":
+        config = _load_effective_config_or_exit(root, home, global_mode)
+        world, findings = run_scan(root, home, global_mode, config)
+        valid = {deep.pair_key(a, b) for a, b in deep.flagged_pairs(world, findings)}
+        # Walk the files, not the parsed entries, so corrupt files (which
+        # load_cache skips) are pruned instead of lingering forever.
+        removed = kept = 0
+        for p in sorted(cdir.glob("*.json")) if cdir.is_dir() else []:
+            if p.stem in valid and p.stem in entries:
+                kept += 1
+            else:
+                p.unlink()
+                removed += 1
+        console.print(f"removed {removed} stale verdicts, kept {kept}")
+    else:
+        console.print(
+            f"[red]Unknown action:[/red] {escape(action)} (use stats or prune)"
+        )
+        raise typer.Exit(1)
 
 
 @app.command()

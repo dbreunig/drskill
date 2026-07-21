@@ -2,11 +2,12 @@ from __future__ import annotations
 
 from pathlib import Path
 
+from drskill import deep
 from drskill.checks import run_all
 from drskill.checks.lockfile import load_lockfile
 from drskill.discovery import discover
 from drskill.harnesses import detect_harnesses, load_harnesses
-from drskill.ledger import Config, ledger_path, load_config
+from drskill.ledger import Config, load_effective_config
 from drskill.models import Finding, Provenance
 from drskill.resolution import World, build_world
 
@@ -17,9 +18,12 @@ def run_scan(
     global_only: bool = False,
     config: Config | None = None,
     harness: str | None = None,
+    judge: deep.JudgeFn | None = None,
+    max_calls: int = 25,
 ) -> tuple[World, list[Finding]]:
     if config is None:
-        config = load_config(ledger_path(project_root, home, global_only))
+        # Same merge the CLI uses: machine-level acks are honored everywhere.
+        config = load_effective_config(project_root, home, global_only)
     if harness is None:
         harnesses = detect_harnesses(project_root, home, global_only)
     else:
@@ -42,4 +46,13 @@ def run_scan(
                         )
                     }
                 )
-    return world, run_all(world, config)
+    findings = run_all(world, config)
+    cdir = deep.cache_dir(project_root, home, global_only)
+    cache = deep.load_cache(cdir)
+    acked_fps = {a.fingerprint for a in config.ack}
+    if judge is not None:
+        # Acked clusters never spend the call budget; the user already ruled.
+        active = [f for f in findings if f.fingerprint not in acked_fps]
+        deep.judge_pairs(world, active, cache, cdir, judge, config.deep.model, max_calls)
+    findings = deep.apply_verdicts(world, findings, cache, acked_fps)
+    return world, findings

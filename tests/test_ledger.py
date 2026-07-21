@@ -140,3 +140,14 @@ def test_ack_destination_routes_by_scope(tmp_path):
     assert ack_destination(world, mixed, proj, home, False, force_global=True) == home / ".drskill.toml"
     assert ack_destination(world, global_only, proj, home, False, force_local=True) == proj / "drskill.toml"
     assert ack_destination(world, global_only, proj, home, True) == home / ".drskill.toml"
+
+
+def test_deep_section_defaults(tmp_path):
+    cfg = load_config(tmp_path / "missing.toml")
+    assert cfg.deep.model == "anthropic/claude-haiku-4-5"
+
+
+def test_deep_section_parses(tmp_path):
+    p = tmp_path / "drskill.toml"
+    p.write_text('[deep]\nmodel = "openai/gpt-5"\n')
+    assert load_config(p).deep.model == "openai/gpt-5"
