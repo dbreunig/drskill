@@ -111,3 +111,51 @@ def test_plain_scan_never_touches_deep_llm(tmp_path, monkeypatch):
     monkeypatch.setattr(deep_llm, "build_judge", boom)
     r = runner.invoke(app, ["scan", "--root", str(proj)], env=env_for(tmp_path))
     assert r.exit_code == 0
+
+
+def seed_cache(cdir, key, verdict="distinct", model="m", date="2026-07-21"):
+    deep.save_verdict(cdir, key, deep.Verdict(
+        verdict=verdict, rationale="r", detail="d",
+        model=model, program_version="v", date=date,
+    ))
+
+
+def test_cache_stats(tmp_path):
+    proj = tmp_path / "proj"
+    proj.mkdir()
+    cdir = proj / ".drskill" / "cache"
+    seed_cache(cdir, "aa" * 32, verdict="distinct")
+    seed_cache(cdir, "bb" * 32, verdict="scope_overlap", date="2026-07-20")
+    r = runner.invoke(app, ["cache", "stats", "--root", str(proj)], env=env_for(tmp_path))
+    assert r.exit_code == 0
+    assert "2 cached verdicts" in r.output
+    assert "distinct: 1" in r.output
+    assert "scope_overlap: 1" in r.output
+    assert "oldest 2026-07-20, newest 2026-07-21" in r.output
+
+
+def test_cache_prune_drops_stale_keeps_flagged(tmp_path):
+    proj = overlap_project(tmp_path)
+    # find the currently flagged pair's key by scanning
+    from drskill.ledger import Config
+    from drskill.pipeline import run_scan
+
+    home = tmp_path / "home"
+    world, findings = run_scan(proj, home, config=Config())
+    (pair,) = deep.flagged_pairs(world, findings)
+    live_key = deep.pair_key(*pair)
+    cdir = proj / ".drskill" / "cache"
+    seed_cache(cdir, live_key)
+    seed_cache(cdir, "ee" * 32)  # stale: no such pair anymore
+    r = runner.invoke(app, ["cache", "prune", "--root", str(proj)], env=env_for(tmp_path))
+    assert r.exit_code == 0
+    assert "removed 1" in r.output and "kept 1" in r.output
+    assert set(deep.load_cache(cdir)) == {live_key}
+
+
+def test_cache_unknown_action(tmp_path):
+    proj = tmp_path / "proj"
+    proj.mkdir()
+    r = runner.invoke(app, ["cache", "flush", "--root", str(proj)], env=env_for(tmp_path))
+    assert r.exit_code == 1
+    assert "stats or prune" in r.output

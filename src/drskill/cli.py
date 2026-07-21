@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import datetime as dt
 import os
+from collections import Counter
 from pathlib import Path
 
 import typer
@@ -442,6 +443,43 @@ def list_cmd(
     report.render_harness_tables(
         world, console, tokens=tokens, harness=harness, show_all=show_all
     )
+
+
+@app.command()
+def cache(
+    action: str = typer.Argument(..., help="stats or prune"),
+    root: Path = typer.Option(Path("."), "--root", hidden=True),
+    global_mode: bool = typer.Option(False, "--global", help="use the machine cache"),
+) -> None:
+    """Inspect or prune the committed deep verdict cache."""
+    home = _home()
+    cdir = deep.cache_dir(root, home, global_mode)
+    entries = deep.load_cache(cdir)
+    if action == "stats":
+        console.print(f"{len(entries)} cached verdicts in {escape(str(cdir))}")
+        if not entries:
+            return
+        for name, count in sorted(Counter(v.verdict for v in entries.values()).items()):
+            console.print(f"  {escape(name)}: {count}")
+        for name, count in sorted(Counter(v.model for v in entries.values()).items()):
+            console.print(f"  {escape(name)}: {count}")
+        dates = sorted(v.date for v in entries.values())
+        console.print(f"  oldest {escape(dates[0])}, newest {escape(dates[-1])}")
+    elif action == "prune":
+        config = _load_effective_config_or_exit(root, home, global_mode)
+        world, findings = run_scan(root, home, global_mode, config)
+        valid = {deep.pair_key(a, b) for a, b in deep.flagged_pairs(world, findings)}
+        removed = [k for k in entries if k not in valid]
+        for k in removed:
+            (cdir / f"{k}.json").unlink()
+        console.print(
+            f"removed {len(removed)} stale verdicts, kept {len(entries) - len(removed)}"
+        )
+    else:
+        console.print(
+            f"[red]Unknown action:[/red] {escape(action)} (use stats or prune)"
+        )
+        raise typer.Exit(1)
 
 
 @app.command()
