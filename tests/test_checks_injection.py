@@ -137,3 +137,24 @@ def test_unicode_flags_bom_mid_file(tmp_path):
     world = make_world(tmp_path)
     (f,) = run_check("injection-unicode", world)
     assert "ZERO WIDTH NO-BREAK SPACE" in f.message
+
+
+# ---- injection-encoded-blob ----
+
+def test_blob_flags_long_base64_run(tmp_path):
+    blob = "QUJD" * 40  # 160 base64 chars
+    write_skill(tmp_path, "blobby", f"Decode this:\n{blob}")
+    world = make_world(tmp_path)
+    (f,) = run_check("injection-encoded-blob", world)
+    assert f.severity == "warning"
+    assert "SKILL.md:" in f.message
+
+
+def test_blob_ignores_sha256_and_urls(tmp_path):
+    body = (
+        "hash: 3f786850e387550fdab836ed7e6dc881de23001b271a4c4a2f2f2f2f2f2f2f2f\n"
+        "see https://example.com/" + "a" * 150 + "\n"
+    )
+    write_skill(tmp_path, "hashes", body)
+    world = make_world(tmp_path)
+    assert run_check("injection-encoded-blob", world) == []

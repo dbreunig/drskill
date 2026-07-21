@@ -201,3 +201,38 @@ def injection_unicode(world: World, config: Config) -> list[Finding]:
                 )
             )
     return out
+
+
+# URLs share the base64 alphabet plus "/" and easily reach 120 characters, so
+# they are stripped before matching. The hex floor sits above sha256's 64 and
+# sha512's 128 hex digits, the digest lengths lockfiles and docs quote.
+_URL = re.compile(r"https?://\S+")
+_B64_RUN = re.compile(r"[A-Za-z0-9+/=]{120,}")
+_HEX_RUN = re.compile(r"\b[0-9a-fA-F]{129,}\b")
+
+
+@check("injection-encoded-blob")
+def injection_encoded_blob(world: World, config: Config) -> list[Finding]:
+    out = []
+    for c in world.contributors.values():
+        hits: list[Hit] = []
+        for s in scan_view(c):
+            for i, line in enumerate(s.lines, start=1):
+                stripped = _URL.sub("", line)
+                if _B64_RUN.search(stripped) or _HEX_RUN.search(stripped):
+                    hits.append((s, i, line))
+        if hits:
+            out.append(
+                make_finding(
+                    "injection-encoded-blob", "warning", [c],
+                    evidence_message(
+                        c, "contains long encoded blobs a reviewer cannot read", hits
+                    ),
+                    fix_commands=[
+                        "Decode the blob yourself before trusting the skill, or remove it"
+                    ],
+                    extra_key=c.name,
+                    fingerprint_texts=fingerprint_texts(hits),
+                )
+            )
+    return out
