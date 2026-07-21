@@ -1,0 +1,70 @@
+"""The deep tier's pure logic: pair keys, the committed verdict cache, and
+how cached verdicts reshape findings. Nothing here imports dspy; everything
+that touches the LLM lives in deep_llm.py behind a lazy import."""
+
+from __future__ import annotations
+
+import datetime as dt
+import hashlib
+import json
+from collections.abc import Callable
+from importlib import metadata
+from itertools import combinations
+from pathlib import Path
+from typing import Literal
+
+from pydantic import BaseModel
+
+from drskill.models import Contributor, Finding
+
+VerdictClass = Literal["distinct", "description_collision", "scope_overlap"]
+
+try:
+    PROGRAM_VERSION = metadata.version("drskill")
+except metadata.PackageNotFoundError:
+    PROGRAM_VERSION = "unknown"
+
+
+class JudgeResult(BaseModel):
+    verdict: VerdictClass
+    rationale: str
+    detail: str  # distinguisher when distinct, else a confusion example
+
+
+class Verdict(BaseModel):
+    verdict: VerdictClass
+    rationale: str
+    detail: str
+    model: str
+    program_version: str
+    date: str  # ISO date of the judgment
+
+
+JudgeFn = Callable[[Contributor, Contributor], "JudgeResult | None"]
+
+
+def cache_dir(project_root: Path, home: Path, global_mode: bool) -> Path:
+    base = home if global_mode else project_root
+    return base / ".drskill" / "cache"
+
+
+def pair_key(a: Contributor, b: Contributor) -> str:
+    parts = sorted(f"{c.name}\n{c.routing_text}" for c in (a, b))
+    return hashlib.sha256("\x00".join(parts).encode()).hexdigest()
+
+
+def load_cache(cdir: Path) -> dict[str, Verdict]:
+    out: dict[str, Verdict] = {}
+    if not cdir.is_dir():
+        return out
+    for p in sorted(cdir.glob("*.json")):
+        try:
+            out[p.stem] = Verdict(**json.loads(p.read_text()))
+        except Exception:  # a corrupt entry is skipped, never fatal
+            continue
+    return out
+
+
+def save_verdict(cdir: Path, key: str, v: Verdict) -> None:
+    cdir.mkdir(parents=True, exist_ok=True)
+    (cdir / f"{key}.json").write_text(v.model_dump_json(indent=2) + "\n")
