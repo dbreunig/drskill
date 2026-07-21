@@ -564,3 +564,16 @@ def test_collision_without_rewrite_renders_no_diff():
     (out,) = deep.apply_verdicts(world, [f], cache, set())
     assert "rewrite for" not in out.message
     assert out.fix_commands == f.fix_commands
+
+
+def test_build_rewriter_without_dspy_raises(monkeypatch):
+    real_import = builtins.__import__
+
+    def no_dspy(name, *args, **kwargs):
+        if name == "dspy":
+            raise ImportError("No module named 'dspy'")
+        return real_import(name, *args, **kwargs)
+
+    monkeypatch.setattr(builtins, "__import__", no_dspy)
+    with pytest.raises(deep_llm.DeepUnavailableError, match="uv tool install drskill"):
+        deep_llm.build_rewriter("anthropic/claude-haiku-4-5")
