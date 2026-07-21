@@ -8,7 +8,15 @@ from pydantic import BaseModel, Field
 
 from drskill import tokens
 from drskill.harnesses import HarnessDef
-from drskill.models import BrokenSymlink, Contributor, Deployment, Provenance, RawInstance, TokenCost
+from drskill.models import (
+    BrokenSymlink,
+    BundledFile,
+    Contributor,
+    Deployment,
+    Provenance,
+    RawInstance,
+    TokenCost,
+)
 
 # Frontmatter keys `gh skill` writes for provenance (repo, ref, tree SHA).
 # Verify against a real `gh skill` install during Task 10 and adjust if the
@@ -50,6 +58,51 @@ def _in_agents_store(path: Path) -> bool:
     return any(
         p.name == "skills" and p.parent.name == ".agents" for p in [path, *path.parents]
     )
+
+
+SCAN_CAP_BYTES = 1_048_576  # bundled files above 1 MiB are recorded, not scanned
+_SNIFF_BYTES = 8192
+
+
+def collect_bundled_files(skill_file: Path) -> tuple[list[BundledFile], list[str]]:
+    """Walk the skill directory and record every file except SKILL.md itself.
+
+    Returns (files sorted by relpath, unreadable paths). Attackers do not
+    follow directory conventions, so the whole tree is covered."""
+    from drskill.discovery import _walk_dirs
+
+    base = skill_file.parent
+    out: list[BundledFile] = []
+    unreadable: list[str] = []
+    for dirpath, _dirnames, filenames in _walk_dirs(base):
+        for fname in filenames:
+            if dirpath == base and fname == skill_file.name:
+                continue
+            p = dirpath / fname
+            if not p.is_file():  # dangling symlink; broken-symlink covers it
+                continue
+            digest = hashlib.sha256()
+            head = b""
+            try:
+                size = p.stat().st_size
+                with open(p, "rb") as fh:
+                    while chunk := fh.read(65536):
+                        if not head:
+                            head = chunk[:_SNIFF_BYTES]
+                        digest.update(chunk)
+            except OSError:
+                unreadable.append(str(p))
+                continue
+            out.append(
+                BundledFile(
+                    relpath=p.relative_to(base).as_posix(),
+                    size=size,
+                    content_hash="sha256:" + digest.hexdigest(),
+                    is_text=b"\x00" not in head,
+                    oversize=size > SCAN_CAP_BYTES,
+                )
+            )
+    return sorted(out, key=lambda f: f.relpath), sorted(unreadable)
 
 
 def content_hash(text: str) -> str:
@@ -115,11 +168,16 @@ def build_world(
                 provenance = Provenance(kind="gh-skill", source=fm.get("source"))
             elif _in_agents_store(real):
                 provenance = Provenance(kind="linked")
+            bundled: list[BundledFile] = []
+            if real.name == "SKILL.md":
+                bundled, unreadable_files = collect_bundled_files(real)
+                world.unreadable += [(inst.harness, p) for p in unreadable_files]
             c = Contributor(
                 id=cid,
                 name=name,
                 scope=inst.scope,
                 source=provenance,
+                bundled_files=bundled,
                 routing_text=description,
                 body=body,
                 token_cost=TokenCost(
