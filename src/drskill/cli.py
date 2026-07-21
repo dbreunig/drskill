@@ -177,9 +177,11 @@ def scan(
         )
 
     try:
-        # A live one-line spinner for the slow paths (connecting to servers,
-        # or a model call per pair). Silent for --json and non-slow scans.
-        if (mcp_connect or deep_mode) and not as_json:
+        # A live one-line spinner naming the current step. It matters most
+        # on the slow paths (connecting to servers, a model call per pair)
+        # and on large loadouts, and clears before the report. Silent for
+        # --json so machine output is never touched.
+        if not as_json:
             with console.status("[bold]starting[/bold]", spinner="dots") as status:
                 world, findings = _do_scan(
                     lambda m: status.update(f"[bold]{escape(m)}[/bold]")

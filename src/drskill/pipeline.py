@@ -63,6 +63,8 @@ def run_scan(
     if config is None:
         # Same merge the CLI uses: machine-level acks are honored everywhere.
         config = load_effective_config(project_root, home, global_only)
+    if progress:
+        progress("discovering skills")
     if harness is None:
         harnesses = detect_harnesses(project_root, home, global_only)
     else:
@@ -85,6 +87,8 @@ def run_scan(
                         )
                     }
                 )
+    if progress:
+        progress("reading MCP configs")
     world.mcp_servers, world.mcp_config_errors = mcp.discover_servers(
         world.harnesses, project_root, home, global_only
     )
@@ -96,7 +100,7 @@ def run_scan(
             world.mcp_servers, sdir, progress=progress
         )
     _add_tool_contributors(world, mcpc.load_snapshots(sdir))
-    findings = run_all(world, config)
+    findings = run_all(world, config, progress=progress)
     cdir = deep.cache_dir(project_root, home, global_only)
     cache = deep.load_cache(cdir)
     acked_fps = {a.fingerprint for a in config.ack}
