@@ -190,3 +190,14 @@ def test_ack_note_by_check_id_refused(tmp_path):
     )
     assert r.exit_code == 1
     assert not (proj / "drskill.toml").exists()
+
+
+def test_cache_prune_removes_corrupt_files(tmp_path):
+    proj = overlap_project(tmp_path)
+    cdir = proj / ".drskill" / "cache"
+    cdir.mkdir(parents=True)
+    (cdir / ("dd" * 32 + ".json")).write_text("{truncated")
+    r = runner.invoke(app, ["cache", "prune", "--root", str(proj)], env=env_for(tmp_path))
+    assert r.exit_code == 0
+    assert "removed 1" in r.output
+    assert list(cdir.glob("*.json")) == []

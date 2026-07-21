@@ -472,12 +472,16 @@ def cache(
         config = _load_effective_config_or_exit(root, home, global_mode)
         world, findings = run_scan(root, home, global_mode, config)
         valid = {deep.pair_key(a, b) for a, b in deep.flagged_pairs(world, findings)}
-        removed = [k for k in entries if k not in valid]
-        for k in removed:
-            (cdir / f"{k}.json").unlink()
-        console.print(
-            f"removed {len(removed)} stale verdicts, kept {len(entries) - len(removed)}"
-        )
+        # Walk the files, not the parsed entries, so corrupt files (which
+        # load_cache skips) are pruned instead of lingering forever.
+        removed = kept = 0
+        for p in sorted(cdir.glob("*.json")) if cdir.is_dir() else []:
+            if p.stem in valid and p.stem in entries:
+                kept += 1
+            else:
+                p.unlink()
+                removed += 1
+        console.print(f"removed {removed} stale verdicts, kept {kept}")
     else:
         console.print(
             f"[red]Unknown action:[/red] {escape(action)} (use stats or prune)"
