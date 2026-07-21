@@ -256,11 +256,13 @@ def render(
         console.print(
             "[dim]? = drskill has not verified this harness's skill-loading rules[/dim]"
         )
-    if active:
-        example = " ".join(short_id(f) for f in ordered[:2])
+    # Notes need no ack, so the recap only lists error and warning findings.
+    ackable = [f for f in ordered if f.severity != "note"]
+    if ackable:
+        example = " ".join(short_id(f) for f in ackable[:2])
         console.print(f"\nack findings by id, e.g. `drskill ack {escape(example)}`:")
-        width = max(len(f.check_id) for f in ordered)
-        for f in ordered:
+        width = max(len(f.check_id) for f in ackable)
+        for f in ackable:
             names = ", ".join(f.contributor_names)
             tag = " [bold cyan]new[/bold cyan]" if f.fingerprint not in seen else "    "
             console.print(

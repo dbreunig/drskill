@@ -8,7 +8,7 @@ import typer
 from rich.console import Console
 from rich.markup import escape
 
-from drskill import interactive, ledger, report, state
+from drskill import deep, interactive, ledger, report, state
 from drskill.ledger import Ack
 from drskill.pipeline import run_scan
 
@@ -135,12 +135,25 @@ def scan(
     detailed: bool = typer.Option(False, "--detailed", help="also print each harness's skill table"),
     show_all: bool = typer.Option(False, "--all", help="with --detailed, include harnesses with no skills"),
     harness: str | None = typer.Option(None, "--harness", help="scope the scan to one harness"),
+    deep_mode: bool = typer.Option(False, "--deep", help="judge flagged pairs with the configured model"),
+    max_calls: int = typer.Option(25, "--max-calls", help="hard budget of model calls per --deep run"),
 ) -> None:
     """Analyze every detected harness's skill set and report findings."""
     _validate_harness(harness)
     home = _home()
     config = _load_effective_config_or_exit(root, home, global_mode)
-    world, findings = run_scan(root, home, global_mode, config, harness=harness)
+    judge = None
+    if deep_mode:
+        from drskill import deep_llm
+
+        try:
+            judge = deep_llm.build_judge(config.deep.model)
+        except deep_llm.DeepUnavailableError as e:
+            console.print(f"[red]{escape(str(e))}[/red]")
+            raise typer.Exit(1)
+    world, findings = run_scan(
+        root, home, global_mode, config, harness=harness, judge=judge, max_calls=max_calls
+    )
     active, acked = ledger.filter_findings(findings, config)
     if as_json:
         print(report.to_json(active))
@@ -157,6 +170,15 @@ def scan(
             state.mark_seen(
                 spath, [f.fingerprint for f in findings], dt.date.today()
             )
+        if deep_mode:
+            cache = deep.load_cache(deep.cache_dir(root, home, global_mode))
+            remaining = deep.unjudged_count(world, findings, cache)
+            if remaining:
+                plural = "s" if remaining != 1 else ""
+                console.print(
+                    f"deep: {remaining} flagged pair{plural} still unjudged; "
+                    "raise --max-calls to judge more"
+                )
         if detailed:
             console.print()
             report.render_harness_tables(
