@@ -12,6 +12,8 @@ ConflictJudge classifies a flagged pair three ways. The `description_collision` 
 
 This follows the published Microsoft recipe the design doc named: rewrite a single description, and use the confusion query to carve an exclusive "use when" condition into it.
 
+A note from the live corpus gate: the loop can take two rounds. After the first rewrite sharpened one description, the judge still called the pair a collision, because the untouched description stayed vague enough to absorb the sharpened one's queries, and it proposed a rewrite for the other skill. Applying that second proposal produced the distinct verdict and the downgrade. This is correct behavior, not a defect. One rewrite per run keeps each proposal reviewable, and the loop converges.
+
 ## The DescriptionRewrite program
 
 A second hand written DSPy signature beside ConflictJudge in `deep_llm.py`, behind the same lazy import and the same `[deep]` model. Its inputs are the names and descriptions of both skills and the confusion example the judge produced. Its outputs are three fields:
