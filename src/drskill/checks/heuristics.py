@@ -218,7 +218,17 @@ def description_overlap(world: World, config: Config) -> list[Finding]:
         # Same-name members collapse to one representative above, so names
         # inside a cluster are unique and need no path disambiguation.
         names = ", ".join(m.name for m in members)
-        member_lines = "".join(f"\n        {m.name}: {m.id}" for m in members)
+        srv_by_cfg = {s.config_hash: s.name for s in world.mcp_servers}
+
+        def _member_line(m: Contributor) -> str:
+            if m.kind == "mcp_tool":
+                srv = srv_by_cfg.get(m.id.split(":", 1)[0], "?")
+                where = f"MCP tool, server '{srv}'"
+            else:
+                where = f"skill, {m.id}"
+            return f"\n        {m.name} ({where}): {text.one_line(m.routing_text)}"
+
+        member_lines = "".join(_member_line(m) for m in members)
         noun = (
             "skills" if all(m.kind == "skill" for m in members)
             else "routing targets"

@@ -49,6 +49,13 @@ GENERIC_VOCAB: frozenset[str] = frozenset(
 )
 
 
+def one_line(s: str, limit: int = 100) -> str:
+    """Collapse text to a single line and truncate it. MCP tool
+    descriptions can run to paragraphs; a report line needs one clause."""
+    flat = " ".join(s.split())
+    return flat if len(flat) <= limit else flat[: limit - 1].rstrip() + "…"
+
+
 def tokenize(text: str) -> list[str]:
     return _WORD.findall(text.lower())
 

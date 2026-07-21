@@ -239,3 +239,46 @@ def test_raw_server_env_reads_project_scope_claude_json(tmp_path):
                     source=str(home / ".claude.json"), transport="stdio",
                     command="x", config_hash="c")
     assert raw_server_env(srv) == {"BASE_URL": "https://api.example.com"}
+
+
+def test_unreviewed_message_truncates_and_explains(tmp_path, monkeypatch):
+    monkeypatch.setenv("DRSKILL_HOME", str(tmp_path / "home"))
+    proj, home = _mcp_project(tmp_path, {"srv": {"command": "srv-bin"}})
+    from drskill.mcp import discover_servers
+    from drskill.harnesses import load_harnesses
+    servers, _ = discover_servers({h.id: h for h in load_harnesses()}, proj, home)
+    wall = "Runs JavaScript. " + "Very long paragraph. " * 60
+    save_snapshot(snapshot_dir(proj, home, False), ServerSnapshot(
+        server="srv", config_hash=servers[0].config_hash, date="2026-07-21",
+        tools=[ToolInfo(name="js", description=wall, schema_tokens=4)]))
+    _, findings = run_scan(proj, home, config=Config())
+    (f,) = [x for x in findings if x.check_id == "mcp-tools-unreviewed"]
+    # the wall is truncated: the message line for js is short
+    js_line = next(ln for ln in f.message.splitlines() if ln.strip().startswith("js:"))
+    assert len(js_line) < 140
+    assert "…" in js_line
+    # the framing explains what acking does, not that the user failed
+    assert "baseline" in f.message and "changes" in f.message
+
+
+def test_overlap_member_labels_tool_and_server(tmp_path, monkeypatch):
+    monkeypatch.setenv("DRSKILL_HOME", str(tmp_path / "home"))
+    proj, home = _mcp_project(tmp_path, {"memory": {"command": "mem-bin"}})
+    from drskill.mcp import discover_servers
+    from drskill.harnesses import load_harnesses
+    servers, _ = discover_servers({h.id: h for h in load_harnesses()}, proj, home)
+    save_snapshot(snapshot_dir(proj, home, False), ServerSnapshot(
+        server="memory", config_hash=servers[0].config_hash, date="2026-07-21",
+        tools=[
+            ToolInfo(name="delete_entities",
+                     description="Delete multiple entities from the knowledge graph.", schema_tokens=4),
+            ToolInfo(name="delete_relations",
+                     description="Delete multiple relations from the knowledge graph.", schema_tokens=4),
+        ]))
+    cfg = Config()
+    cfg.thresholds.description_overlap = 0.3
+    _, findings = run_scan(proj, home, config=cfg)
+    (f,) = [x for x in findings if x.check_id == "description-overlap"]
+    assert "MCP tool" in f.message and "memory" in f.message
+    # the actual descriptions are shown so the overlap is legible
+    assert "knowledge graph" in f.message

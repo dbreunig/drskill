@@ -6,6 +6,7 @@ from __future__ import annotations
 import hashlib
 from collections import defaultdict
 
+from drskill import text
 from drskill.checks import check
 from drskill.ledger import Config
 from drskill.models import Contributor, Finding
@@ -78,21 +79,27 @@ def tools_unreviewed(world: World, config: Config) -> list[Finding]:
             continue
         server = servers[0]
         harnesses = sorted({s.harness for s in servers})
+        # The fingerprint still hashes the full descriptions, so a later
+        # edit to any of them resurfaces the finding. The displayed line is
+        # truncated to one clause per tool so the report stays readable.
         pairs = sorted(f"{c.name}\n{c.routing_text}" for c in tools)
         lines = "".join(
-            f"\n        {c.name}: {c.routing_text}"
+            f"\n        {c.name}: {text.one_line(c.routing_text)}"
             for c in sorted(tools, key=lambda c: c.name)
         )
         date = world.mcp_snapshot_dates.get(cfg, "unknown")
+        n = len(tools)
         out.append(Finding(
             check_id="mcp-tools-unreviewed", severity="warning",
             contributors=sorted({s.source for s in servers}),
             contributor_names=[server.name],
             harnesses=harnesses,
             message=(
-                f"server '{server.name}' exposes {len(tools)} unreviewed "
-                f"tool{'s' if len(tools) != 1 else ''} (as of {date}); ack to "
-                f"approve this exact tool set{lines}"
+                f"server '{server.name}' ({', '.join(harnesses)}) has "
+                f"{n} tool{'s' if n != 1 else ''} drskill has not recorded yet "
+                f"(seen {date}). Acking saves this set as your approved "
+                f"baseline, so drskill can flag it if the server later changes "
+                f"a tool's description.{lines}"
             ),
             fix_commands=[f"drskill ack mcp-tools-unreviewed {server.name}"],
             fingerprint=_fp("mcp-tools-unreviewed", [server.name, cfg, *pairs]),
