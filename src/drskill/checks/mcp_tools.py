@@ -69,11 +69,15 @@ def tools_unreviewed(world: World, config: Config) -> list[Finding]:
     by_cfg: dict[str, list[Contributor]] = defaultdict(list)
     for c in _tools(world):
         by_cfg[c.id.split(":", 1)[0]].append(c)
-    servers_by_cfg = {s.config_hash: s for s in world.mcp_servers}
+    servers_by_cfg: dict[str, list] = defaultdict(list)
+    for s in world.mcp_servers:
+        servers_by_cfg[s.config_hash].append(s)
     for cfg, tools in sorted(by_cfg.items()):
-        server = servers_by_cfg.get(cfg)
-        if server is None:
+        servers = servers_by_cfg.get(cfg)
+        if not servers:
             continue
+        server = servers[0]
+        harnesses = sorted({s.harness for s in servers})
         pairs = sorted(f"{c.name}\n{c.routing_text}" for c in tools)
         lines = "".join(
             f"\n        {c.name}: {c.routing_text}"
@@ -82,8 +86,9 @@ def tools_unreviewed(world: World, config: Config) -> list[Finding]:
         date = world.mcp_snapshot_dates.get(cfg, "unknown")
         out.append(Finding(
             check_id="mcp-tools-unreviewed", severity="warning",
-            contributors=[server.source], contributor_names=[server.name],
-            harnesses=[server.harness],
+            contributors=sorted({s.source for s in servers}),
+            contributor_names=[server.name],
+            harnesses=harnesses,
             message=(
                 f"server '{server.name}' exposes {len(tools)} unreviewed "
                 f"tool{'s' if len(tools) != 1 else ''} (as of {date}); ack to "

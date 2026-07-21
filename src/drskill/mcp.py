@@ -168,10 +168,17 @@ def raw_server_env(server: MCPServer) -> dict[str, str]:
             table = (data.get("mcp_servers") or {}).get(server.name) or {}
         else:
             data = json.loads(Path(server.source).read_text())
-            table = (
-                (data.get("mcpServers") or data.get("servers") or {}).get(server.name)
-                or {}
-            )
+            top = data.get("mcpServers") or data.get("servers") or {}
+            table = top.get(server.name)
+            if table is None:
+                # claude-user-json keeps project-scope servers under
+                # projects[<root>].mcpServers; find the name in any project.
+                for entry in (data.get("projects") or {}).values():
+                    cand = (entry.get("mcpServers") or {}).get(server.name)
+                    if cand is not None:
+                        table = cand
+                        break
+            table = table or {}
         env = table.get("env") or {}
         return {str(k): str(v) for k, v in env.items()} if isinstance(env, dict) else {}
     except Exception:

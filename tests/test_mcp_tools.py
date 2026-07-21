@@ -184,3 +184,58 @@ def test_mcp_connect_without_extra_errors(tmp_path, monkeypatch):
     r = _runner.invoke(app, ["scan", "--root", str(proj), "--mcp-connect"],
                        env={"DRSKILL_HOME": str(home)})
     assert r.exit_code == 1 and "connect extra" in r.output
+
+
+def test_tool_does_not_leak_into_skill_checks_via_lockfile_or_double_load(tmp_path, monkeypatch):
+    # a skill and an MCP tool share the name 'search' with identical content
+    s = skill("search", "Use when the user wants to search the web.", "/skills/search/SKILL.md")
+    t = tool("search", "Use when the user wants to search the web.", "cfg:search")
+    w = world_of(s, t)
+    w.lockfile = {"search": {"computedHash": "sha256:deadbeef"}}
+    findings = run_all(w, Config())
+    # the tool must not masquerade as the lockfile skill or as a double-load
+    ld = [f for f in findings if f.check_id == "lockfile-drift"]
+    assert all("cfg:search" not in c for f in ld for c in f.contributors)
+    assert not any(f.check_id == "double-load" for f in findings)
+    # the same-name tool-vs-skill pair IS a routing collision we must surface
+    assert any(
+        f.check_id == "description-overlap" and {"search"} == set(f.contributor_names)
+        for f in findings
+    ) or any(
+        f.check_id == "description-overlap" and "search" in f.contributor_names
+        for f in findings
+    )
+
+
+def test_n_skills_header_excludes_tools(tmp_path, monkeypatch):
+    monkeypatch.setenv("DRSKILL_HOME", str(tmp_path / "home"))
+    proj, home = _mcp_project(tmp_path, {"srv": {"command": "srv-bin"}})
+    from drskill.mcp import discover_servers
+    from drskill.harnesses import load_harnesses
+    servers, _ = discover_servers({h.id: h for h in load_harnesses()}, proj, home)
+    save_snapshot(snapshot_dir(proj, home, False), ServerSnapshot(
+        server="srv", config_hash=servers[0].config_hash, date="2026-07-21",
+        tools=[ToolInfo(name="echo", description="Echo.", schema_tokens=4),
+               ToolInfo(name="ping", description="Ping.", schema_tokens=4)]))
+    r = _runner.invoke(app, ["scan", "--root", str(proj)],
+                       env={"DRSKILL_HOME": str(home), "COLUMNS": "200"})
+    # the project has zero skills; the two tools must not be counted as skills
+    assert "0 skills" in r.output
+
+
+def test_raw_server_env_reads_project_scope_claude_json(tmp_path):
+    import json as _json
+    from drskill.mcp import MCPServer, raw_server_env
+    proj = tmp_path / "proj"
+    proj.mkdir()
+    home = tmp_path / "home"
+    home.mkdir()
+    (home / ".claude.json").write_text(_json.dumps({
+        "projects": {str(proj.resolve()): {"mcpServers": {
+            "srv": {"command": "x", "env": {"BASE_URL": "https://api.example.com"}},
+        }}},
+    }))
+    srv = MCPServer(name="srv", harness="claude-code", scope="project",
+                    source=str(home / ".claude.json"), transport="stdio",
+                    command="x", config_hash="c")
+    assert raw_server_env(srv) == {"BASE_URL": "https://api.example.com"}

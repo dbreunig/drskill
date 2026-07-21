@@ -32,10 +32,16 @@ def _add_tool_contributors(world: World, snapshots) -> None:
         ]
         for t in snap.tools:
             cid = f"{cfg}:{t.name}"
+            # What the model actually sees per tool: name + description +
+            # the input schema. Approximate name/description at ~4 chars per
+            # token, matching the schema-token estimate from the handshake.
+            text_tokens = max(0, (len(t.name) + len(t.description)) // 4)
             world.contributors[cid] = Contributor(
                 id=cid, name=t.name, kind="mcp_tool",
                 scope=servers[0].scope, routing_text=t.description,
-                token_cost=TokenCost(catalog_tokens=t.schema_tokens, body_tokens=0),
+                token_cost=TokenCost(
+                    catalog_tokens=t.schema_tokens + text_tokens, body_tokens=0
+                ),
                 content_hash="sha256:"
                 + hashlib.sha256(f"{t.name}\n{t.description}".encode()).hexdigest(),
                 deployments=deployments,

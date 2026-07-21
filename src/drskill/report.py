@@ -61,6 +61,8 @@ def render_harness_tables(
         table.add_column("notes")
         cat_total = body_total = 0
         for c, d in world.harness_loads(hid):
+            if c.kind != "skill":
+                continue  # MCP tools are shown by `list --mcp`, not here
             notes = []
             if d.shadowed_by:
                 notes.append("shadowed")
@@ -199,7 +201,7 @@ def render(
 ) -> None:
     populated = [hid for hid in world.harnesses if world.effective(hid)]
     empty = len(world.harnesses) - len(populated)
-    n_skills = len(world.contributors)
+    n_skills = sum(1 for c in world.contributors.values() if c.kind == "skill")
     plural = "es" if len(populated) != 1 else ""
     header = f"[bold]drskill scan[/bold] — {len(populated)} harness{plural}"
     if empty:

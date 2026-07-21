@@ -311,9 +311,14 @@ def apply_verdicts(
                     f"\n      - {_flat(target.routing_text)}"
                     f"\n      + {_flat(v.rewrite_text)}"
                 )
+                if target.kind == "mcp_tool":
+                    where = (
+                        f"the '{target.name}' tool's description on its MCP server"
+                    )
+                else:
+                    where = f"{target.id} by hand"
                 extra_fixes.append(
-                    "Review the proposed description above, then edit "
-                    f"{target.id} by hand"
+                    f"Review the proposed description above, then edit {where}"
                 )
         missing = len(pairs) - len(judged)
         if missing:

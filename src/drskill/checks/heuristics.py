@@ -175,7 +175,13 @@ def description_overlap(world: World, config: Config) -> list[Finding]:
     for a, b in combinations(cs, 2):
         # Same-name pairs are diverged-copies territory; duplicate pairs are
         # exact/near-duplicate territory. Both collapse to one representative.
-        if a.name == b.name or _is_duplicate_pair(
+        # But a same-name skill-vs-tool (or tool-vs-tool) pair is a real
+        # routing collision, not a diverged copy, so it must reach the
+        # clustering below instead of collapsing away.
+        same_name_skills = (
+            a.name == b.name and a.kind == "skill" and b.kind == "skill"
+        )
+        if same_name_skills or _is_duplicate_pair(
             a, b, config.thresholds.near_duplicate, sigs
         ):
             rep_parent[rep_find(a.id)] = rep_find(b.id)
@@ -213,10 +219,14 @@ def description_overlap(world: World, config: Config) -> list[Finding]:
         # inside a cluster are unique and need no path disambiguation.
         names = ", ".join(m.name for m in members)
         member_lines = "".join(f"\n        {m.name}: {m.id}" for m in members)
+        noun = (
+            "skills" if all(m.kind == "skill" for m in members)
+            else "routing targets"
+        )
         out.append(
             make_finding(
                 "description-overlap", "warning", members,
-                f"{len(members)} skills ({names}){claim}; "
+                f"{len(members)} {noun} ({names}){claim}; "
                 "none states an exclusive condition, so routing between them "
                 f"is a coin flip{member_lines}",
                 fix_commands=[
