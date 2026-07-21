@@ -62,3 +62,33 @@ def test_description_overlap_sees_tool_vs_skill():
     findings = run_all(world_of(s, t), Config())
     overlaps = [f for f in findings if f.check_id == "description-overlap"]
     assert overlaps and {"web-search", "search"} <= set(overlaps[0].contributor_names)
+
+
+import json
+from drskill.mcp_connect import ServerSnapshot, ToolInfo, save_snapshot, snapshot_dir
+from drskill.pipeline import run_scan
+
+
+def _mcp_project(tmp_path, servers: dict):
+    proj, home = tmp_path / "proj", tmp_path / "home"
+    (proj / ".claude" / "skills").mkdir(parents=True)
+    (proj / ".mcp.json").write_text(json.dumps({"mcpServers": servers}))
+    return proj, home
+
+
+def test_snapshot_builds_tool_contributors(tmp_path, monkeypatch):
+    monkeypatch.setenv("DRSKILL_HOME", str(tmp_path / "home"))
+    proj, home = _mcp_project(tmp_path, {"srv": {"command": "srv-bin"}})
+    from drskill.mcp import discover_servers
+    from drskill.harnesses import load_harnesses
+    servers, _ = discover_servers({h.id: h for h in load_harnesses()}, proj, home)
+    cfg = next(s.config_hash for s in servers if s.name == "srv")
+    save_snapshot(snapshot_dir(proj, home, False), ServerSnapshot(
+        server="srv", config_hash=cfg, date="2026-07-21",
+        tools=[ToolInfo(name="echo", description="Echo it.", schema_tokens=4)],
+    ))
+    world, _ = run_scan(proj, home, config=Config())
+    tools = [c for c in world.contributors.values() if c.kind == "mcp_tool"]
+    assert [c.name for c in tools] == ["echo"]
+    assert tools[0].routing_text == "Echo it."
+    assert tools[0].deployments[0].harness == "claude-code"

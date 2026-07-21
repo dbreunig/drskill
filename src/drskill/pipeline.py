@@ -12,6 +12,36 @@ from drskill.models import Finding, Provenance
 from drskill.resolution import World, build_world
 
 
+def _add_tool_contributors(world: World, snapshots) -> None:
+    import hashlib
+
+    from drskill.models import Contributor, Deployment, TokenCost
+
+    by_hash: dict[str, list] = {}
+    for s in world.mcp_servers:
+        by_hash.setdefault(s.config_hash, []).append(s)
+    for cfg, snap in snapshots.items():
+        servers = by_hash.get(cfg)
+        if not servers:
+            continue  # stale snapshot: no current server
+        world.mcp_snapshot_dates[cfg] = snap.date
+        deployments = [
+            Deployment(harness=s.harness, path=s.source, scope=s.scope,
+                       via_symlink=False, order=1_000_000)
+            for s in servers
+        ]
+        for t in snap.tools:
+            cid = f"{cfg}:{t.name}"
+            world.contributors[cid] = Contributor(
+                id=cid, name=t.name, kind="mcp_tool",
+                scope=servers[0].scope, routing_text=t.description,
+                token_cost=TokenCost(catalog_tokens=t.schema_tokens, body_tokens=0),
+                content_hash="sha256:"
+                + hashlib.sha256(f"{t.name}\n{t.description}".encode()).hexdigest(),
+                deployments=deployments,
+            )
+
+
 def run_scan(
     project_root: Path,
     home: Path,
@@ -21,6 +51,7 @@ def run_scan(
     judge: deep.JudgeFn | None = None,
     max_calls: int | None = 25,
     rewriter: deep.RewriteFn | None = None,
+    mcp_connect: bool = False,
 ) -> tuple[World, list[Finding]]:
     if config is None:
         # Same merge the CLI uses: machine-level acks are honored everywhere.
@@ -50,6 +81,12 @@ def run_scan(
     world.mcp_servers, world.mcp_config_errors = mcp.discover_servers(
         world.harnesses, project_root, home, global_only
     )
+    from drskill import mcp_connect as mcpc
+
+    sdir = mcpc.snapshot_dir(project_root, home, global_only)
+    if mcp_connect:
+        _, world.mcp_connect_failures = mcpc.run_handshakes(world.mcp_servers, sdir)
+    _add_tool_contributors(world, mcpc.load_snapshots(sdir))
     findings = run_all(world, config)
     cdir = deep.cache_dir(project_root, home, global_only)
     cache = deep.load_cache(cdir)
