@@ -7,6 +7,20 @@ from drskill.cli import app
 
 runner = CliRunner()
 
+import pytest
+
+
+@pytest.fixture(autouse=True)
+def _stub_rewriter(monkeypatch):
+    """--deep builds both programs; tests that only care about the judge get
+    a rewriter that never fires (their fixtures return distinct verdicts)."""
+    def build_rewriter(model_id):
+        def rewrite(a, b, confusion):
+            return None
+        rewrite.last_error = None
+        return rewrite
+    monkeypatch.setattr(deep_llm, "build_rewriter", build_rewriter)
+
 PILE_A = "Use when the user asks to write project documentation pages."
 PILE_B = "Use when the user asks to write project documentation summaries."
 
@@ -263,3 +277,53 @@ def test_max_calls_rejects_garbage(tmp_path):
     )
     assert r.exit_code == 1
     assert "--max-calls" in r.output
+
+
+def test_deep_scan_shows_rewrite_diff(tmp_path, monkeypatch):
+    proj = overlap_project(tmp_path)
+    monkeypatch.setattr(
+        deep_llm, "build_judge",
+        fake_builder(deep.JudgeResult(
+            verdict="description_collision", rationale="blur", detail="which docs?"
+        )),
+    )
+
+    def build_rewriter(model_id):
+        def rewrite(a, b, confusion):
+            return deep.RewriteResult(
+                target=a.name,
+                text="Use when the user asks for [red]docs pages[/red] only.",
+                reason="vaguer of the two",
+            )
+        rewrite.last_error = None
+        return rewrite
+
+    monkeypatch.setattr(deep_llm, "build_rewriter", build_rewriter)
+    r = runner.invoke(app, ["scan", "--root", str(proj), "--deep"], env=env_for(tmp_path))
+    assert r.exit_code == 0, r.output
+    assert "rewrite for doc-a (vaguer of the two):" in r.output
+    assert "+ Use when the user asks for [red]docs pages[/red] only." in r.output
+    assert "\x1b[31m" not in r.output  # hostile markup renders as text
+    assert "then edit" in r.output  # the fix line names the file
+
+
+def test_deep_scan_reports_rewriter_error(tmp_path, monkeypatch):
+    proj = overlap_project(tmp_path)
+    monkeypatch.setattr(
+        deep_llm, "build_judge",
+        fake_builder(deep.JudgeResult(
+            verdict="description_collision", rationale="r", detail="d"
+        )),
+    )
+
+    def build_rewriter(model_id):
+        def rewrite(a, b, confusion):
+            rewrite.last_error = "RateLimitError: slow down"
+            return None
+        rewrite.last_error = None
+        return rewrite
+
+    monkeypatch.setattr(deep_llm, "build_rewriter", build_rewriter)
+    r = runner.invoke(app, ["scan", "--root", str(proj), "--deep"], env=env_for(tmp_path))
+    assert "model calls are failing" in r.output
+    assert "RateLimitError" in r.output
