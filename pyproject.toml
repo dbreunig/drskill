@@ -15,6 +15,7 @@ dependencies = [
 
 [project.optional-dependencies]
 deep = ["dspy>=3"]
+connect = ["mcp>=1.2"]
 
 [project.scripts]
 drskill = "drskill.cli:app"

@@ -170,6 +170,7 @@ def judge_pairs(
     model_id: str,
     max_calls: int | None,
     rewriter: RewriteFn | None = None,
+    progress=None,
 ) -> tuple[int, int]:
     """Judge uncached flagged pairs under a hard call budget; None means no
     limit. A description_collision verdict immediately spends one more call
@@ -220,6 +221,8 @@ def judge_pairs(
     for key, a, b in todo:
         if not budget_left() or judge_failures >= 3:
             break
+        if progress:
+            progress(f"judging {a.name} vs {b.name}")
         calls += 1
         result = judge(a, b)
         if result is None:  # errored or unparseable call: never cached
@@ -311,9 +314,14 @@ def apply_verdicts(
                     f"\n      - {_flat(target.routing_text)}"
                     f"\n      + {_flat(v.rewrite_text)}"
                 )
+                if target.kind == "mcp_tool":
+                    where = (
+                        f"the '{target.name}' tool's description on its MCP server"
+                    )
+                else:
+                    where = f"{target.id} by hand"
                 extra_fixes.append(
-                    "Review the proposed description above, then edit "
-                    f"{target.id} by hand"
+                    f"Review the proposed description above, then edit {where}"
                 )
         missing = len(pairs) - len(judged)
         if missing:

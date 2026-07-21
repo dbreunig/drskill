@@ -61,6 +61,8 @@ def render_harness_tables(
         table.add_column("notes")
         cat_total = body_total = 0
         for c, d in world.harness_loads(hid):
+            if c.kind != "skill":
+                continue  # MCP tools are shown by `list --mcp`, not here
             notes = []
             if d.shadowed_by:
                 notes.append("shadowed")
@@ -108,6 +110,22 @@ def _all_system(world: World, f: Finding) -> bool:
     cs = [world.contributors.get(cid) for cid in f.contributors]
     cs = [c for c in cs if c is not None]
     return bool(cs) and all(c.system for c in cs)
+
+
+def _context_bill(world: World):
+    best = None
+    for hid in world.harnesses:
+        skill_tok = tool_tok = 0
+        for c in world.effective(hid):
+            if c.kind == "mcp_tool":
+                tool_tok += c.token_cost.catalog_tokens
+            else:
+                skill_tok += c.token_cost.catalog_tokens
+        if tool_tok == 0:
+            continue
+        if best is None or skill_tok + tool_tok > best[1] + best[2]:
+            best = (hid, skill_tok, tool_tok)
+    return best
 
 
 def sort_findings(
@@ -183,7 +201,7 @@ def render(
 ) -> None:
     populated = [hid for hid in world.harnesses if world.effective(hid)]
     empty = len(world.harnesses) - len(populated)
-    n_skills = len(world.contributors)
+    n_skills = sum(1 for c in world.contributors.values() if c.kind == "skill")
     plural = "es" if len(populated) != 1 else ""
     header = f"[bold]drskill scan[/bold] — {len(populated)} harness{plural}"
     if empty:
@@ -237,6 +255,14 @@ def render(
         summary += f" ({', '.join(extras)})"
     summary += " · token counts are approximate"
     console.print(summary)
+    bill = _context_bill(world)
+    if bill:
+        hid, skill_tok, tool_tok = bill
+        console.print(
+            f"largest context bill: {escape(hid)}, about {skill_tok + tool_tok} "
+            f"tokens ({skill_tok} skill catalog + {tool_tok} MCP tool "
+            f"definitions), approximate"
+        )
     binary = oversize = 0
     affected = 0
     for c in world.contributors.values():

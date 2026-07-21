@@ -63,7 +63,11 @@ def _body_start(lines: list[str]) -> int:
 
 
 def scan_view(c: Contributor) -> list[Source]:
-    """All scannable text of a skill, each file read once per content state."""
+    """All scannable text of a skill, each file read once per content state.
+    MCP tools have no files to scan and are never skill-shaped, so they get
+    an empty view: the injection checks skip them entirely."""
+    if c.kind != "skill":
+        return []
     key = _cache_key(c)
     if key in _VIEW_CACHE:
         return _VIEW_CACHE[key]

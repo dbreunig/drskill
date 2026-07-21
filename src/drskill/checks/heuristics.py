@@ -18,7 +18,18 @@ def _skill_md(world: World) -> list[Contributor]:
     return [
         c
         for c in world.contributors.values()
-        if Path(c.id).name == "SKILL.md" and c.frontmatter_valid
+        if c.kind == "skill" and Path(c.id).name == "SKILL.md" and c.frontmatter_valid
+    ]
+
+
+def _routing_contributors(world: World) -> list[Contributor]:
+    """Contributors that inject a routing description: skills and MCP tools.
+    description-overlap runs over both so a tool can collide with a skill."""
+    return [
+        c
+        for c in world.contributors.values()
+        if (c.kind == "skill" and Path(c.id).name == "SKILL.md" and c.frontmatter_valid)
+        or c.kind == "mcp_tool"
     ]
 
 
@@ -144,7 +155,7 @@ def _is_duplicate_pair(
 
 @check("description-overlap")
 def description_overlap(world: World, config: Config) -> list[Finding]:
-    cs = [c for c in _skill_md(world) if c.routing_text.strip()]
+    cs = [c for c in _routing_contributors(world) if c.routing_text.strip()]
     vecs = {c.id: text.shingle_vector(c.routing_text) for c in cs}
     sigs = {c.id: signature(shingles(f"{c.routing_text}\n{c.body}")) for c in cs}
 
@@ -164,7 +175,13 @@ def description_overlap(world: World, config: Config) -> list[Finding]:
     for a, b in combinations(cs, 2):
         # Same-name pairs are diverged-copies territory; duplicate pairs are
         # exact/near-duplicate territory. Both collapse to one representative.
-        if a.name == b.name or _is_duplicate_pair(
+        # But a same-name skill-vs-tool (or tool-vs-tool) pair is a real
+        # routing collision, not a diverged copy, so it must reach the
+        # clustering below instead of collapsing away.
+        same_name_skills = (
+            a.name == b.name and a.kind == "skill" and b.kind == "skill"
+        )
+        if same_name_skills or _is_duplicate_pair(
             a, b, config.thresholds.near_duplicate, sigs
         ):
             rep_parent[rep_find(a.id)] = rep_find(b.id)
@@ -194,20 +211,36 @@ def description_overlap(world: World, config: Config) -> list[Finding]:
         members = sorted(members, key=lambda c: c.name)
         phrases = text.shared_phrases([m.routing_text for m in members])[:3]
         if phrases:
-            quoted = ", ".join(f"'{p}'" for p in phrases)
-            claim = f" all claim {quoted}"
+            quoted = ", ".join(f'"{p}"' for p in phrases)
+            claim = f" share the wording {quoted}"
         else:
             claim = " have near-identical descriptions"
         # Same-name members collapse to one representative above, so names
         # inside a cluster are unique and need no path disambiguation.
         names = ", ".join(m.name for m in members)
-        member_lines = "".join(f"\n        {m.name}: {m.id}" for m in members)
+        srv_by_cfg = {s.config_hash: s.name for s in world.mcp_servers}
+
+        def _member_line(m: Contributor) -> str:
+            if m.kind == "mcp_tool":
+                srv = srv_by_cfg.get(m.id.split(":", 1)[0], "?")
+                where = f"MCP tool, server '{srv}'"
+            else:
+                where = f"skill, {m.id}"
+            return f"\n        {m.name} ({where}): {text.one_line(m.routing_text)}"
+
+        member_lines = "".join(_member_line(m) for m in members)
+        noun = (
+            "skills" if all(m.kind == "skill" for m in members)
+            else "routing targets"
+        )
         out.append(
             make_finding(
                 "description-overlap", "warning", members,
-                f"{len(members)} skills ({names}){claim}; "
-                "none states an exclusive condition, so routing between them "
-                f"is a coin flip{member_lines}",
+                f"{len(members)} {noun} ({names}){claim}, and none names a "
+                "condition that excludes the others, so a router may not "
+                f"reliably choose between them:{member_lines}\n      "
+                "run scan --deep to have a model judge whether they are "
+                "actually distinct",
                 fix_commands=[
                     "Give each description an exclusive 'use when' condition the others lack"
                 ],

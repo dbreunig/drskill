@@ -47,6 +47,8 @@ def double_load(world: World, config: Config) -> list[Finding]:
         # instead of looking like two distinct copies.
         by_hash: dict[str, dict[str, tuple]] = {}
         for c, d in world.harness_loads(hid):
+            if c.kind != "skill":
+                continue
             if d.shadowed_by is None:
                 by_hash.setdefault(c.content_hash, {}).setdefault(c.id, (c, d))
         for loads in by_hash.values():

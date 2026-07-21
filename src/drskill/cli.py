@@ -9,7 +9,7 @@ import typer
 from rich.console import Console
 from rich.markup import escape
 
-from drskill import deep, interactive, ledger, report, state
+from drskill import deep, interactive, ledger, mcp_connect as mcp_connect_mod, report, state
 from drskill.ledger import Ack
 from drskill.pipeline import run_scan
 
@@ -138,6 +138,7 @@ def scan(
     harness: str | None = typer.Option(None, "--harness", help="scope the scan to one harness"),
     deep_mode: bool = typer.Option(False, "--deep", help="judge flagged pairs with the configured model"),
     max_calls: str = typer.Option("25", "--max-calls", help="model calls per --deep run: a number, or 'all' for no limit"),
+    mcp_connect: bool = typer.Option(False, "--mcp-connect", help="connect to configured MCP servers and enumerate their tools"),
 ) -> None:
     """Analyze every detected harness's skill set and report findings."""
     _validate_harness(harness)
@@ -168,10 +169,28 @@ def scan(
         except deep_llm.DeepUnavailableError as e:
             console.print(f"[red]{escape(str(e))}[/red]")
             raise typer.Exit(1)
-    world, findings = run_scan(
-        root, home, global_mode, config, harness=harness, judge=judge,
-        max_calls=budget, rewriter=rewriter,
-    )
+    def _do_scan(progress):
+        return run_scan(
+            root, home, global_mode, config, harness=harness, judge=judge,
+            max_calls=budget, rewriter=rewriter, mcp_connect=mcp_connect,
+            progress=progress,
+        )
+
+    try:
+        # A live one-line spinner naming the current step. It matters most
+        # on the slow paths (connecting to servers, a model call per pair)
+        # and on large loadouts, and clears before the report. Silent for
+        # --json so machine output is never touched.
+        if not as_json:
+            with console.status("[bold]starting[/bold]", spinner="dots") as status:
+                world, findings = _do_scan(
+                    lambda m: status.update(f"[bold]{escape(m)}[/bold]")
+                )
+        else:
+            world, findings = _do_scan(None)
+    except mcp_connect_mod.ConnectUnavailableError as e:
+        console.print(f"[red]{escape(str(e))}[/red]")
+        raise typer.Exit(1)
     active, acked = ledger.filter_findings(findings, config)
     if as_json:
         print(report.to_json(active))
@@ -257,9 +276,16 @@ def ack(
     config = _load_effective_config_or_exit(root, home, global_mode)
     world, findings = run_scan(root, home, global_mode, config)
     active, _ = ledger.filter_findings(findings, config)
-    # Notes need no ack; sweeping them into the ledger would hide them and
-    # leave a stale ack behind if the verdict cache is ever pruned.
-    active = [f for f in active if f.severity != "note"]
+    # Most notes must not be acked: a deep "judged distinct" note shares a
+    # fingerprint with the warning it would revert to if the verdict cache
+    # is pruned, so acking it would silently pre-silence that warning. An
+    # MCP tool baseline is the exception: acking it is the whole point, and
+    # a later tool change produces a new fingerprint the ack cannot cover.
+    _ACKABLE_NOTE_CHECKS = {"mcp-tools-unreviewed"}
+    active = [
+        f for f in active
+        if f.severity != "note" or f.check_id in _ACKABLE_NOTE_CHECKS
+    ]
     from drskill.checks import REGISTRY
 
     refs = refs or []
@@ -532,6 +558,21 @@ def cache(
                 p.unlink()
                 removed += 1
         console.print(f"removed {removed} stale verdicts, kept {kept}")
+        from drskill import mcp_connect as mcpc
+
+        sdir = mcpc.snapshot_dir(root, home, global_mode)
+        live_cfgs = {s.config_hash for s in world.mcp_servers}
+        snap_removed = snap_kept = 0
+        for p in sorted(sdir.glob("*.json")) if sdir.is_dir() else []:
+            if p.stem in live_cfgs:
+                snap_kept += 1
+            else:
+                p.unlink()
+                snap_removed += 1
+        if snap_removed or snap_kept:
+            console.print(
+                f"removed {snap_removed} stale tool snapshots, kept {snap_kept}"
+            )
     else:
         console.print(
             f"[red]Unknown action:[/red] {escape(action)} (use stats or prune)"

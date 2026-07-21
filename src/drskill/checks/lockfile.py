@@ -65,7 +65,9 @@ def _entry_hash(entry: dict) -> str | None:
 def lockfile_drift(world: World, config: Config) -> list[Finding]:
     if not world.lockfile:
         return []
-    by_name = {c.name: c for c in world.contributors.values()}
+    by_name = {
+        c.name: c for c in world.contributors.values() if c.kind == "skill"
+    }
     out = []
     matches: list[str] = []
     mismatches: list[tuple[str, object]] = []

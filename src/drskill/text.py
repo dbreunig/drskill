@@ -49,6 +49,13 @@ GENERIC_VOCAB: frozenset[str] = frozenset(
 )
 
 
+def one_line(s: str, limit: int = 100) -> str:
+    """Collapse text to a single line and truncate it. MCP tool
+    descriptions can run to paragraphs; a report line needs one clause."""
+    flat = " ".join(s.split())
+    return flat if len(flat) <= limit else flat[: limit - 1].rstrip() + "…"
+
+
 def tokenize(text: str) -> list[str]:
     return _WORD.findall(text.lower())
 
@@ -83,10 +90,14 @@ def cosine(a: dict[str, int], b: dict[str, int]) -> float:
     return min(1.0, num / den)
 
 
-def shared_phrases(texts: list[str], max_n: int = 3) -> list[str]:
-    """Longest word n-grams (content tokens) common to every text, longest
-    first, substrings of already-kept phrases dropped."""
-    token_lists = [content_tokens(t) for t in texts]
+def shared_phrases(texts: list[str], max_n: int = 6) -> list[str]:
+    """Longest word n-grams common to every text, longest first, substrings
+    of already-kept phrases dropped. Extraction runs over the raw tokens,
+    stopwords included, so a phrase is a verbatim shared substring that
+    reads as real text ('relations from the knowledge graph', not the
+    stopword-stripped 'relations knowledge graph'). A phrase made entirely
+    of stopwords is noise and is dropped."""
+    token_lists = [tokenize(t) for t in texts]
     if not token_lists or any(not tl for tl in token_lists):
         return []
     kept: list[str] = []
@@ -98,6 +109,8 @@ def shared_phrases(texts: list[str], max_n: int = 3) -> list[str]:
                 continue
             gram_sets.append({" ".join(tl[i : i + n]) for i in range(len(tl) - n + 1)})
         for phrase in sorted(set.intersection(*gram_sets)):
+            if all(w in STOPWORDS for w in phrase.split()):
+                continue  # a run of only stopwords is not a meaningful claim
             # Word-boundary containment: "document" is not part of the kept
             # phrase "write project documentation" even though it is a raw
             # substring of it.

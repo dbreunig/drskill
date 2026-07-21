@@ -146,6 +146,9 @@ Without `--ci`, warnings alone exit 0. This lets you run `drskill scan` locally 
 | `mcp-unpinned-server` | warning | A server runs an unpinned package, e.g. `npx -y pkg` or `pkg@latest`. Whatever publishes next runs next. |
 | `mcp-insecure-url` | warning | A remote MCP server uses plaintext `http://`. Localhost is excluded. |
 | `mcp-dead-server` | error | A stdio server's command is not on PATH or its absolute path does not exist. |
+| `mcp-connect-failed` | warning | A `--mcp-connect` handshake to a server did not connect, timed out, or errored. |
+| `mcp-tool-collision` | warning | Two servers expose the same tool name into one harness's set. Which one the agent gets is client dependent. |
+| `mcp-tools-unreviewed` | warning | A server's enumerated tool set has not been acknowledged. Acking approves that exact set; any later tool-description change resurfaces the finding. |
 
 ## Deep checks
 
@@ -190,7 +193,19 @@ See every configured server in one table:
 drskill list --mcp
 ```
 
-A second MCP cycle will add an opt-in connection mode that enumerates each server's tools, measures their real token cost, and checks tool descriptions for the same routing conflicts skills get checked for today.
+### Connecting to servers
+
+The checks above read config files. To see what tools a server actually exposes, drskill has to ask the server:
+
+```
+drskill scan --mcp-connect
+```
+
+This connects to every configured server, runs the MCP handshake, and reads its tool list. drskill only enumerates. It never calls a tool, and it never reads a server's resources or prompts. Each server gets 15 seconds, and one that hangs is killed. A server that fails to connect becomes an `mcp-connect-failed` warning, and the scan moves on. Connecting needs the full install, since it uses the MCP SDK; a minimal `drskill-core` install leaves it out.
+
+Each successful handshake writes a snapshot of the server's tools into `.drskill/cache/mcp-tools/`. The snapshot holds tool names, descriptions, and token counts. It holds no secret. Commit this directory. Every later scan reads the snapshots, so tool findings, the token bill, and the conflict checks work for the whole team without anyone connecting again, labeled "as of" the snapshot date.
+
+Once tools are known, three things happen. Their descriptions flow through the same `description-overlap` and deep checks as skills, so a tool that collides with another tool or with a skill is flagged. The scan header gains the context bill: the size of the largest harness's starting context, split between its skill catalog and its MCP tool definitions. And `mcp-tools-unreviewed` asks you to approve each server's tool set once. Acking it records that exact set. If a server later rewrites a tool description, the finding comes back and names the changed tool. That is drskill catching a server that changed its tools after you trusted it.
 
 ## The ledger
 

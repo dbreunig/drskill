@@ -15,7 +15,10 @@ DESCRIPTION_MAX = 1024
 
 
 def _skill_md_contributors(world: World):
-    return [c for c in world.contributors.values() if Path(c.id).name == "SKILL.md"]
+    return [
+        c for c in world.contributors.values()
+        if c.kind == "skill" and Path(c.id).name == "SKILL.md"
+    ]
 
 
 @check("spec-invalid-frontmatter")

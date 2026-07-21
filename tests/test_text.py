@@ -45,14 +45,33 @@ def test_cosine_partial_overlap():
     assert 0.0 < cosine(a, b) < 1.0
 
 
+def test_shared_phrases_are_real_substrings_not_stripped():
+    # Phrases must be verbatim shared text, including stopwords, so they read
+    # as real English and can be honestly quoted.
+    a = "Delete multiple entities and their associated relations from the knowledge graph"
+    b = "Delete multiple relations from the knowledge graph"
+    phrases = shared_phrases([a, b])
+    assert "relations from the knowledge graph" in phrases  # not "relations knowledge graph"
+    assert "delete multiple" in phrases
+
+
 def test_shared_phrases_longest_first_no_substrings():
     texts = [
         "Use when writing project documentation pages",
         "Use when writing project documentation summaries",
     ]
     phrases = shared_phrases(texts)
-    assert phrases[0] == "writing project documentation"
-    assert "project documentation" not in phrases  # substring of a kept longer phrase
+    assert phrases[0] == "use when writing project documentation"
+    assert "writing project documentation" not in phrases  # substring of a kept phrase
+
+
+def test_shared_phrases_drops_pure_stopword_phrases():
+    # a shared run of only stopwords is noise and must not be quoted
+    phrases = shared_phrases([
+        "from the archive of old logs",
+        "from the vault of new keys",
+    ])
+    assert all(p not in ("from the", "from", "the") for p in phrases)
 
 
 def test_shared_phrases_empty_when_nothing_common():
