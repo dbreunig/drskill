@@ -46,7 +46,8 @@ def test_render_sections_and_ack_line():
     warn = sample_finding(check="near-duplicate", severity="warning")
     text = render_to_text(world_with(), [err, warn], [sample_finding(check="name-shadow", severity="warning")])
     assert "ERRORS" in text and "WARNINGS" in text
-    assert "[f0f1] double-load:" in text  # header leads with the id
+    # header leads with the id; with no seen state everything is tagged new
+    assert "[f0f1] new double-load:" in text
     assert "drskill ack f0f1" in text  # recap example line
     recap = text[text.index("ack findings by id"):]
     assert "f0f1 double-load" in recap and "pdf-tools" in recap
@@ -253,3 +254,108 @@ def test_render_sanitizes_bidi_in_messages():
     text = console.export_text()
     assert "\u202e" not in text
     assert text.count("\\u202e") >= 3  # message, fix command, recap names
+
+
+def _mini_world(tmp_path, harness_defs=None, system_vendor=True):
+    from drskill.discovery import discover
+    from drskill.harnesses import HarnessDef
+    from drskill.resolution import build_world
+
+    base = tmp_path / ".claude" / "skills"
+    (base / "mine").mkdir(parents=True)
+    (base / "mine" / "SKILL.md").write_text(
+        "---\nname: mine\ndescription: Use when testing.\n---\nBody.\n"
+    )
+    vdir = base / (".system" if system_vendor else "other") / "vendor"
+    vdir.mkdir(parents=True)
+    (vdir / "SKILL.md").write_text(
+        "---\nname: vendor\ndescription: Use when vending.\n---\nBody.\n"
+    )
+    if harness_defs is None:
+        harness_defs = [
+            HarnessDef(
+                id="t3", display_name="T3",
+                paths_verified=True, precedence_verified=True,
+                project_paths=[".claude/skills"], recursive=True,
+            )
+        ]
+    instances, broken = [], []
+    for h in harness_defs:
+        i, b = discover(h, tmp_path, tmp_path / "no-home")
+        instances += i
+        broken += b
+    return build_world(instances, {h.id: h for h in harness_defs}, broken)
+
+
+def _finding(check, names, fingerprint, contributors, harnesses):
+    from drskill.models import Finding
+
+    return Finding(
+        check_id=check, severity="warning", contributors=contributors,
+        contributor_names=names, harnesses=harnesses,
+        message=f"{check} on {', '.join(names)}", fingerprint=fingerprint,
+    )
+
+
+def test_render_orders_new_then_user_then_system(tmp_path):
+    from rich.console import Console
+
+    from drskill.report import render
+
+    world = _mini_world(tmp_path)
+    by_name = {c.name: c.id for c in world.contributors.values()}
+    f_seen_user = _finding("aaa-check", ["mine"], "sha256:1111aaaa", [by_name["mine"]], ["t3"])
+    f_new_system = _finding("bbb-check", ["vendor"], "sha256:2222bbbb", [by_name["vendor"]], ["t3"])
+    f_new_user = _finding("ccc-check", ["mine"], "sha256:3333cccc", [by_name["mine"]], ["t3"])
+    console = Console(record=True, width=200)
+    render(world, [f_seen_user, f_new_system, f_new_user], [], console,
+           seen={"sha256:1111aaaa"})
+    text = console.export_text()
+    assert text.index("ccc-check") < text.index("bbb-check") < text.index("aaa-check")
+    assert "2 new" in text
+    assert "[system skill]" in text
+
+
+def test_render_new_tag_only_on_new_findings(tmp_path):
+    from rich.console import Console
+
+    from drskill.report import render
+
+    world = _mini_world(tmp_path)
+    by_name = {c.name: c.id for c in world.contributors.values()}
+    f_new = _finding("aaa-check", ["mine"], "sha256:aaaa1111", [by_name["mine"]], ["t3"])
+    f_seen = _finding("bbb-check", ["mine"], "sha256:bbbb2222", [by_name["mine"]], ["t3"])
+    console = Console(record=True, width=200)
+    render(world, [f_new, f_seen], [], console, seen={"sha256:bbbb2222"})
+    text = console.export_text()
+    assert "new aaa-check" in text
+    assert "new bbb-check" not in text
+
+
+def test_render_collapses_full_harness_list(tmp_path):
+    from rich.console import Console
+
+    from drskill.harnesses import HarnessDef
+    from drskill.report import render
+
+    defs = [
+        HarnessDef(
+            id="h1", display_name="H1",
+            paths_verified=True, precedence_verified=True,
+            project_paths=[".claude/skills"], recursive=True,
+        ),
+        HarnessDef(
+            id="h2", display_name="H2",
+            paths_verified=False, precedence_verified=False,
+            project_paths=[".claude/skills"], recursive=True,
+        ),
+    ]
+    world = _mini_world(tmp_path, harness_defs=defs)
+    by_name = {c.name: c.id for c in world.contributors.values()}
+    f_all = _finding("aaa-check", ["mine"], "sha256:cccc3333", [by_name["mine"]], ["h1", "h2"])
+    f_one = _finding("bbb-check", ["mine"], "sha256:dddd4444", [by_name["mine"]], ["h1"])
+    console = Console(record=True, width=200)
+    render(world, [f_all, f_one], [], console)
+    text = console.export_text()
+    assert "all 2 harnesses (h2?)" in text
+    assert "harnesses: h1\n" in text
