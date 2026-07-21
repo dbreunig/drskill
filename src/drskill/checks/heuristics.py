@@ -211,8 +211,8 @@ def description_overlap(world: World, config: Config) -> list[Finding]:
         members = sorted(members, key=lambda c: c.name)
         phrases = text.shared_phrases([m.routing_text for m in members])[:3]
         if phrases:
-            quoted = ", ".join(f"'{p}'" for p in phrases)
-            claim = f" all claim {quoted}"
+            quoted = ", ".join(f'"{p}"' for p in phrases)
+            claim = f" share the wording {quoted}"
         else:
             claim = " have near-identical descriptions"
         # Same-name members collapse to one representative above, so names
@@ -236,9 +236,11 @@ def description_overlap(world: World, config: Config) -> list[Finding]:
         out.append(
             make_finding(
                 "description-overlap", "warning", members,
-                f"{len(members)} {noun} ({names}){claim}; "
-                "none states an exclusive condition, so routing between them "
-                f"is a coin flip{member_lines}",
+                f"{len(members)} {noun} ({names}){claim}, and none names a "
+                "condition that excludes the others, so a router may not "
+                f"reliably choose between them:{member_lines}\n      "
+                "run scan --deep to have a model judge whether they are "
+                "actually distinct",
                 fix_commands=[
                     "Give each description an exclusive 'use when' condition the others lack"
                 ],
