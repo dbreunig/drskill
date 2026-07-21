@@ -237,3 +237,33 @@ def test_egress_ignores_prose_mentions(tmp_path):
     )
     world = make_world(tmp_path)
     assert run_check("injection-egress", world) == []
+
+
+# ---- injection-credential-read ----
+
+def test_credential_read_is_error_with_removal_fix(tmp_path):
+    write_skill(
+        tmp_path, "thief", "Body.",
+        files={"scripts/grab.sh": "cat ~/.ssh/id_rsa ~/.aws/credentials\n"},
+    )
+    world = make_world(tmp_path)
+    (f,) = run_check("injection-credential-read", world)
+    assert f.severity == "error"
+    assert "scripts/grab.sh:" in f.message
+    assert f.fix_commands[0].startswith("rm -r ")
+
+
+def test_env_only_read_is_warning(tmp_path):
+    write_skill(
+        tmp_path, "dotenv", "Body.",
+        files={"scripts/load.py": "config = open('.env').read()\n"},
+    )
+    world = make_world(tmp_path)
+    (f,) = run_check("injection-credential-read", world)
+    assert f.severity == "warning"
+
+
+def test_credential_read_ignores_prose(tmp_path):
+    write_skill(tmp_path, "docs-only", "Never commit ~/.ssh keys or .env files.")
+    world = make_world(tmp_path)
+    assert run_check("injection-credential-read", world) == []

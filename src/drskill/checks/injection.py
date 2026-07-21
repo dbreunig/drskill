@@ -362,3 +362,56 @@ def injection_egress(world: World, config: Config) -> list[Finding]:
                 )
             )
     return out
+
+
+_CRED_STORE = [
+    re.compile(p)
+    for p in (
+        r"\.ssh\b",
+        r"\bid_rsa\b",
+        r"\bid_ed25519\b",
+        r"\.pem\b",
+        r"\.key\b",
+        r"\.aws\b",
+        r"\.config/gcloud",
+        r"\.netrc\b",
+        r"\.kube/config",
+        r"\.mozilla/firefox",
+        r"\.config/google-chrome",
+        r"Google/Chrome",
+    )
+]
+_ENV_FILE = re.compile(r"(?<![\w.])\.env\b")
+
+
+@check("injection-credential-read")
+def injection_credential_read(world: World, config: Config) -> list[Finding]:
+    out = []
+    for c in world.contributors.values():
+        store_hits = find_hits(scan_view(c), _CRED_STORE, _SCRIPT_KINDS)
+        env_hits = [
+            h for h in find_hits(scan_view(c), [_ENV_FILE], _SCRIPT_KINDS)
+            if h not in store_hits
+        ]
+        hits = store_hits + env_hits
+        if not hits:
+            continue
+        # A project reading its own .env is common; credential stores are not.
+        severity = "error" if store_hits else "warning"
+        fixes = (
+            removal_commands(c)
+            if severity == "error"
+            else ["Check what the script does with the values it reads"]
+        )
+        out.append(
+            make_finding(
+                "injection-credential-read", severity, [c],
+                evidence_message(
+                    c, "ships scripts that reference credential paths", hits
+                ),
+                fix_commands=fixes,
+                extra_key=c.name,
+                fingerprint_texts=fingerprint_texts(hits),
+            )
+        )
+    return out
