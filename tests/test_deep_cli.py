@@ -343,3 +343,16 @@ def test_deferred_rewrite_reports_pending(tmp_path, monkeypatch):
         env=env_for(tmp_path),
     )
     assert "1 rewrite proposal pending" in r.output
+
+
+def test_cache_prune_removes_stale_tool_snapshots(tmp_path):
+    proj = overlap_project(tmp_path)
+    from drskill.mcp_connect import ServerSnapshot, ToolInfo, save_snapshot, snapshot_dir
+    sd = snapshot_dir(proj, tmp_path / "home", False)
+    # no MCP server is configured for this project, so this snapshot is stale
+    save_snapshot(sd, ServerSnapshot(server="ghost", config_hash="deadbeef",
+                                     date="2026-07-21", tools=[ToolInfo(name="t", description="d", schema_tokens=1)]))
+    r = runner.invoke(app, ["cache", "prune", "--root", str(proj)], env=env_for(tmp_path))
+    assert r.exit_code == 0
+    assert "removed 1 stale tool snapshots" in r.output
+    assert list(sd.glob("*.json")) == []

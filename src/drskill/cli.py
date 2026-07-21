@@ -537,6 +537,21 @@ def cache(
                 p.unlink()
                 removed += 1
         console.print(f"removed {removed} stale verdicts, kept {kept}")
+        from drskill import mcp_connect as mcpc
+
+        sdir = mcpc.snapshot_dir(root, home, global_mode)
+        live_cfgs = {s.config_hash for s in world.mcp_servers}
+        snap_removed = snap_kept = 0
+        for p in sorted(sdir.glob("*.json")) if sdir.is_dir() else []:
+            if p.stem in live_cfgs:
+                snap_kept += 1
+            else:
+                p.unlink()
+                snap_removed += 1
+        if snap_removed or snap_kept:
+            console.print(
+                f"removed {snap_removed} stale tool snapshots, kept {snap_kept}"
+            )
     else:
         console.print(
             f"[red]Unknown action:[/red] {escape(action)} (use stats or prune)"
