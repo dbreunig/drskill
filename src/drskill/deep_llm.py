@@ -28,8 +28,15 @@ def build_judge(model_id: str) -> JudgeFn:
         env = litellm.validate_environment(model_id)
         if not env.get("keys_in_environment"):
             missing = ", ".join(env.get("missing_keys") or ["an API key"])
+            key_urls = {
+                "anthropic": "https://console.anthropic.com/settings/keys",
+                "openai": "https://platform.openai.com/api-keys",
+            }
+            hint = key_urls.get(provider)
+            where = f" (create a key at {hint})" if hint else ""
             raise DeepUnavailableError(
-                f"no usable key for {model_id}: set {missing} in the environment"
+                f"no usable key for {model_id}: export {missing} in your "
+                f"shell, or put {missing}=... in ~/.drskill/env{where}"
             )
 
     class ConflictJudge(dspy.Signature):

@@ -217,3 +217,23 @@ def test_deep_scan_surfaces_last_call_error(tmp_path, monkeypatch):
     r = runner.invoke(app, ["scan", "--root", str(proj), "--deep"], env=env_for(tmp_path))
     assert "deep: model calls are failing" in r.output
     assert "AuthenticationError" in r.output
+
+
+def test_deep_scan_loads_global_env_file(tmp_path, monkeypatch):
+    proj = overlap_project(tmp_path)
+    env = env_for(tmp_path)
+    home = Path(env["DRSKILL_HOME"])
+    (home / ".drskill").mkdir(parents=True, exist_ok=True)
+    (home / ".drskill" / "env").write_text("DRSKILL_TEST_KEY=from-file\n")
+    monkeypatch.delenv("DRSKILL_TEST_KEY", raising=False)
+    seen = {}
+
+    def build_judge(model_id):
+        import os
+        seen["key"] = os.environ.get("DRSKILL_TEST_KEY")
+        return lambda a, b: deep.JudgeResult(verdict="distinct", rationale="r", detail="d")
+
+    monkeypatch.setattr(deep_llm, "build_judge", build_judge)
+    r = runner.invoke(app, ["scan", "--root", str(proj), "--deep"], env=env)
+    assert r.exit_code == 0, r.output
+    assert seen["key"] == "from-file"

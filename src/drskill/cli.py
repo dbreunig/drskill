@@ -147,6 +147,7 @@ def scan(
     if deep_mode:
         from drskill import deep_llm
 
+        deep.load_user_env(home)
         try:
             judge = deep_llm.build_judge(config.deep.model)
         except deep_llm.DeepUnavailableError as e:

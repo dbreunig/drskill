@@ -112,7 +112,15 @@ Without `--ci`, warnings alone exit 0. This lets you run `drskill scan` locally 
 
 ## Deep checks
 
-The description-overlap check compares text, so some of its warnings are false alarms. `drskill scan --deep` sends each flagged pair of skills to a language model, which judges whether the two skills are distinct, whether their descriptions collide, or whether their scopes genuinely overlap. Deep mode needs an extra install, `pip install 'drskill[deep]'`, and a provider API key in your environment, e.g. `ANTHROPIC_API_KEY`. drskill sends only skill names and descriptions to the model, and it sends nothing at all unless you pass `--deep`.
+The description-overlap check compares text, so some of its warnings are false alarms. `drskill scan --deep` sends each flagged pair of skills to a language model, which judges whether the two skills are distinct, whether their descriptions collide, or whether their scopes genuinely overlap. Deep mode needs an extra install, `pip install 'drskill[deep]'`, and a provider API key, e.g. `ANTHROPIC_API_KEY`. drskill sends only skill names and descriptions to the model, and it sends nothing at all unless you pass `--deep`.
+
+The key comes from your environment. To set it once per machine, put it in `~/.drskill/env`:
+
+```
+ANTHROPIC_API_KEY=sk-ant-...
+```
+
+drskill reads this file before a deep run and loads any variable your shell has not already set. The shell always wins. drskill never writes a key, and it never reads an env file from inside a project, because a scanned repo is untrusted content.
 
 The judge model is set in the ledger and defaults to a current Anthropic model:
 

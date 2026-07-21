@@ -349,3 +349,44 @@ def test_build_judge_allows_ambient_auth_providers(monkeypatch):
     )
     judge = deep_llm.build_judge("bedrock/anthropic.claude-sonnet-5")
     assert callable(judge)
+
+
+def test_load_user_env_parses_and_never_overrides(tmp_path, monkeypatch):
+    home = tmp_path / "home"
+    (home / ".drskill").mkdir(parents=True)
+    (home / ".drskill" / "env").write_text(
+        "# deep tier keys\n"
+        "\n"
+        "ANTHROPIC_API_KEY=sk-ant-from-file\n"
+        "export OPENAI_API_KEY='sk-openai-quoted'\n"
+        "ALREADY_SET=from-file\n"
+        "not a valid line\n"
+    )
+    monkeypatch.delenv("ANTHROPIC_API_KEY", raising=False)
+    monkeypatch.delenv("OPENAI_API_KEY", raising=False)
+    monkeypatch.setenv("ALREADY_SET", "from-shell")
+    loaded = deep.load_user_env(home)
+    assert sorted(loaded) == ["ANTHROPIC_API_KEY", "OPENAI_API_KEY"]
+    import os
+    assert os.environ["ANTHROPIC_API_KEY"] == "sk-ant-from-file"
+    assert os.environ["OPENAI_API_KEY"] == "sk-openai-quoted"
+    assert os.environ["ALREADY_SET"] == "from-shell"  # the shell always wins
+
+
+def test_load_user_env_missing_file_is_noop(tmp_path):
+    assert deep.load_user_env(tmp_path / "nohome") == []
+
+
+def test_build_judge_missing_key_message_names_env_file_and_console(monkeypatch):
+    import litellm
+
+    monkeypatch.setattr(
+        litellm, "validate_environment",
+        lambda model: {"keys_in_environment": False, "missing_keys": ["ANTHROPIC_API_KEY"]},
+    )
+    with pytest.raises(deep_llm.DeepUnavailableError) as e:
+        deep_llm.build_judge("anthropic/claude-sonnet-5")
+    msg = str(e.value)
+    assert "ANTHROPIC_API_KEY" in msg
+    assert "~/.drskill/env" in msg
+    assert "console.anthropic.com" in msg

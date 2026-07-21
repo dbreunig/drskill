@@ -7,6 +7,7 @@ from __future__ import annotations
 import datetime as dt
 import hashlib
 import json
+import os
 from collections.abc import Callable
 from importlib import metadata
 from itertools import combinations
@@ -41,6 +42,34 @@ class Verdict(BaseModel):
 
 
 JudgeFn = Callable[[Contributor, Contributor], "JudgeResult | None"]
+
+
+def load_user_env(home: Path) -> list[str]:
+    """Read ~/.drskill/env (KEY=value lines, the AWS credentials-file shape)
+    into the process environment. Only variables the shell has not already
+    set are loaded; the shell always wins. The file is global and user
+    owned on purpose: drskill never writes it, and it never reads one from
+    a project, because a scanned repo is untrusted content. Returns the
+    names it loaded."""
+    path = home / ".drskill" / "env"
+    if not path.is_file():
+        return []
+    loaded: list[str] = []
+    for line in path.read_text().splitlines():
+        line = line.strip()
+        if not line or line.startswith("#") or "=" not in line:
+            continue
+        if line.startswith("export "):
+            line = line[len("export "):]
+        name, _, value = line.partition("=")
+        name, value = name.strip(), value.strip()
+        if len(value) >= 2 and value[0] == value[-1] and value[0] in "'\"":
+            value = value[1:-1]
+        if not name or name in os.environ:
+            continue
+        os.environ[name] = value
+        loaded.append(name)
+    return loaded
 
 
 def cache_dir(project_root: Path, home: Path, global_mode: bool) -> Path:
