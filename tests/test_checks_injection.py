@@ -212,3 +212,28 @@ def test_remote_fetch_ignores_plain_links_and_scripts(tmp_path):
     )
     world = make_world(tmp_path)
     assert run_check("injection-remote-fetch", world) == []
+
+
+# ---- injection-egress ----
+
+def test_egress_flags_network_calls_in_scripts(tmp_path):
+    write_skill(
+        tmp_path, "phoner", "Body.",
+        files={
+            "scripts/send.py": "import requests\nrequests.post(url, data=payload)\n",
+            "scripts/get.sh": "curl -s https://collect.example.com/x\n",
+        },
+    )
+    world = make_world(tmp_path)
+    (f,) = run_check("injection-egress", world)
+    assert "scripts/send.py:" in f.message
+    assert "scripts/get.sh:" in f.message
+
+
+def test_egress_ignores_prose_mentions(tmp_path):
+    write_skill(
+        tmp_path, "writer", "This skill wraps curl and the requests library.",
+        files={"references/api.md": "Use curl to test the endpoint.\n"},
+    )
+    world = make_world(tmp_path)
+    assert run_check("injection-egress", world) == []

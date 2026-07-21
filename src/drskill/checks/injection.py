@@ -316,3 +316,49 @@ def injection_remote_fetch(world: World, config: Config) -> list[Finding]:
                 )
             )
     return out
+
+
+_SCRIPT_KINDS = {"script"}
+_EGRESS = [
+    re.compile(p)
+    for p in (
+        r"\bcurl\b",
+        r"\bwget\b",
+        r"\bnc\b",
+        r"\bInvoke-WebRequest\b",
+        r"\bInvoke-RestMethod\b",
+        r"\brequests\.",
+        r"\burllib\b",
+        r"\bhttpx\b",
+        r"\baiohttp\b",
+        r"\bsocket\.",
+        r"\bfetch\s*\(",
+        r"\baxios\b",
+        r"\bXMLHttpRequest\b",
+        r"\bNet::HTTP\b",
+        r"\bhttps?\.(request|get)\b",
+    )
+]
+
+
+@check("injection-egress")
+def injection_egress(world: World, config: Config) -> list[Finding]:
+    out = []
+    for c in world.contributors.values():
+        hits = find_hits(scan_view(c), _EGRESS, _SCRIPT_KINDS)
+        if hits:
+            out.append(
+                make_finding(
+                    "injection-egress", "warning", [c],
+                    evidence_message(
+                        c, "ships scripts that talk to the network", hits
+                    ),
+                    fix_commands=[
+                        "Check each call's destination; a skill script can send"
+                        " your files or context anywhere"
+                    ],
+                    extra_key=c.name,
+                    fingerprint_texts=fingerprint_texts(hits),
+                )
+            )
+    return out
