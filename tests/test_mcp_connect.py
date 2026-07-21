@@ -76,3 +76,10 @@ def test_run_handshakes_writes_snapshots_and_collects_failures(tmp_path):
     assert [f[0] for f in failures] == ["broken"]
     saved = mc.load_snapshots(tmp_path / "snaps")
     assert "good" in saved and {t.name for t in saved["good"].tools} == {"echo", "ping"}
+
+
+def test_run_handshakes_reports_progress(tmp_path):
+    seen = []
+    mc.run_handshakes([stdio_server(config_hash="p1")], tmp_path / "s",
+                      timeout=5.0, progress=seen.append)
+    assert any("fake" in m for m in seen)

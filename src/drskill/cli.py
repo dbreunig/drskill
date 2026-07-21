@@ -169,11 +169,23 @@ def scan(
         except deep_llm.DeepUnavailableError as e:
             console.print(f"[red]{escape(str(e))}[/red]")
             raise typer.Exit(1)
-    try:
-        world, findings = run_scan(
+    def _do_scan(progress):
+        return run_scan(
             root, home, global_mode, config, harness=harness, judge=judge,
             max_calls=budget, rewriter=rewriter, mcp_connect=mcp_connect,
+            progress=progress,
         )
+
+    try:
+        # A live one-line spinner for the slow paths (connecting to servers,
+        # or a model call per pair). Silent for --json and non-slow scans.
+        if (mcp_connect or deep_mode) and not as_json:
+            with console.status("[bold]starting[/bold]", spinner="dots") as status:
+                world, findings = _do_scan(
+                    lambda m: status.update(f"[bold]{escape(m)}[/bold]")
+                )
+        else:
+            world, findings = _do_scan(None)
     except mcp_connect_mod.ConnectUnavailableError as e:
         console.print(f"[red]{escape(str(e))}[/red]")
         raise typer.Exit(1)

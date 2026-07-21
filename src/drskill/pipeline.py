@@ -58,6 +58,7 @@ def run_scan(
     max_calls: int | None = 25,
     rewriter: deep.RewriteFn | None = None,
     mcp_connect: bool = False,
+    progress=None,
 ) -> tuple[World, list[Finding]]:
     if config is None:
         # Same merge the CLI uses: machine-level acks are honored everywhere.
@@ -91,7 +92,9 @@ def run_scan(
 
     sdir = mcpc.snapshot_dir(project_root, home, global_only)
     if mcp_connect:
-        _, world.mcp_connect_failures = mcpc.run_handshakes(world.mcp_servers, sdir)
+        _, world.mcp_connect_failures = mcpc.run_handshakes(
+            world.mcp_servers, sdir, progress=progress
+        )
     _add_tool_contributors(world, mcpc.load_snapshots(sdir))
     findings = run_all(world, config)
     cdir = deep.cache_dir(project_root, home, global_only)
@@ -102,7 +105,7 @@ def run_scan(
         active = [f for f in findings if f.fingerprint not in acked_fps]
         deep.judge_pairs(
             world, active, cache, cdir, judge, config.deep.model, max_calls,
-            rewriter=rewriter,
+            rewriter=rewriter, progress=progress,
         )
     findings = deep.apply_verdicts(world, findings, cache, acked_fps)
     return world, findings

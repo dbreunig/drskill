@@ -657,3 +657,15 @@ def test_pending_rewrites_counts_collisions_missing_proposals():
     assert deep.pending_rewrites(world, findings, cache) == 0
     cache[key] = _verdict("distinct")
     assert deep.pending_rewrites(world, findings, cache) == 0
+
+
+def test_judge_pairs_reports_progress(tmp_path):
+    a, b, world = _pair_world()
+    findings = [finding_for("description-overlap", [a, b])]
+    seen = []
+    deep.judge_pairs(
+        world, findings, {}, tmp_path / "c",
+        lambda x, y: deep.JudgeResult(verdict="distinct", rationale="r", detail="d"),
+        "m", max_calls=None, progress=seen.append,
+    )
+    assert any("alpha" in m and "beta" in m for m in seen)

@@ -140,11 +140,13 @@ def connect_server(server: MCPServer, timeout: float = 15.0) -> ServerSnapshot:
 
 
 def run_handshakes(
-    servers: list[MCPServer], sdir: Path, timeout: float = 15.0
+    servers: list[MCPServer], sdir: Path, timeout: float = 15.0, progress=None
 ) -> tuple[int, list[tuple[str, str, str]]]:
     connected = 0
     failures: list[tuple[str, str, str]] = []
     for server in servers:
+        if progress:
+            progress(f"connecting to MCP server '{server.name}' ({server.harness})")
         try:
             snap = connect_server(server, timeout)
         except ConnectError as e:
