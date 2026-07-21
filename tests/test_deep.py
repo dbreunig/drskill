@@ -233,3 +233,23 @@ def test_run_scan_judges_and_applies(tmp_path, monkeypatch):
     world2, findings2 = run_scan(proj, home, config=Config())
     overlap2 = [f for f in findings2 if f.check_id == "description-overlap"]
     assert [f.severity for f in overlap2] == ["note"]
+
+
+import builtins
+
+import pytest
+
+from drskill import deep_llm
+
+
+def test_build_judge_without_dspy_raises(monkeypatch):
+    real_import = builtins.__import__
+
+    def no_dspy(name, *args, **kwargs):
+        if name == "dspy":
+            raise ImportError("No module named 'dspy'")
+        return real_import(name, *args, **kwargs)
+
+    monkeypatch.setattr(builtins, "__import__", no_dspy)
+    with pytest.raises(deep_llm.DeepUnavailableError, match=r"drskill\[deep\]"):
+        deep_llm.build_judge("anthropic/claude-sonnet-5")
