@@ -152,3 +152,35 @@ def test_connect_failed_finding():
     findings = run_all(w, Config())
     (f,) = [x for x in findings if x.check_id == "mcp-connect-failed"]
     assert "broken" in f.message and "timed out" in f.message
+
+
+from typer.testing import CliRunner
+from drskill.cli import app
+
+_runner = CliRunner()
+
+
+def test_context_bill_line(tmp_path, monkeypatch):
+    monkeypatch.setenv("DRSKILL_HOME", str(tmp_path / "home"))
+    proj, home = _mcp_project(tmp_path, {"srv": {"command": "srv-bin"}})
+    from drskill.mcp import discover_servers
+    from drskill.harnesses import load_harnesses
+    servers, _ = discover_servers({h.id: h for h in load_harnesses()}, proj, home)
+    save_snapshot(snapshot_dir(proj, home, False), ServerSnapshot(
+        server="srv", config_hash=servers[0].config_hash, date="2026-07-21",
+        tools=[ToolInfo(name="echo", description="Echo.", schema_tokens=800)]))
+    r = _runner.invoke(app, ["scan", "--root", str(proj)],
+                       env={"DRSKILL_HOME": str(home), "COLUMNS": "200"})
+    assert "context bill" in r.output and "MCP tool" in r.output
+
+
+def test_mcp_connect_without_extra_errors(tmp_path, monkeypatch):
+    monkeypatch.setenv("DRSKILL_HOME", str(tmp_path / "home"))
+    proj, home = _mcp_project(tmp_path, {"srv": {"command": "srv-bin"}})
+    import drskill.mcp_connect as mcpc
+    def boom(*a, **k):
+        raise mcpc.ConnectUnavailableError("--mcp-connect needs the connect extra")
+    monkeypatch.setattr(mcpc, "run_handshakes", boom)
+    r = _runner.invoke(app, ["scan", "--root", str(proj), "--mcp-connect"],
+                       env={"DRSKILL_HOME": str(home)})
+    assert r.exit_code == 1 and "connect extra" in r.output

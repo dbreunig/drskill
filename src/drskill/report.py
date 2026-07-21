@@ -110,6 +110,22 @@ def _all_system(world: World, f: Finding) -> bool:
     return bool(cs) and all(c.system for c in cs)
 
 
+def _context_bill(world: World):
+    best = None
+    for hid in world.harnesses:
+        skill_tok = tool_tok = 0
+        for c in world.effective(hid):
+            if c.kind == "mcp_tool":
+                tool_tok += c.token_cost.catalog_tokens
+            else:
+                skill_tok += c.token_cost.catalog_tokens
+        if tool_tok == 0:
+            continue
+        if best is None or skill_tok + tool_tok > best[1] + best[2]:
+            best = (hid, skill_tok, tool_tok)
+    return best
+
+
 def sort_findings(
     world: World, findings: list[Finding], seen: set[str]
 ) -> list[Finding]:
@@ -237,6 +253,14 @@ def render(
         summary += f" ({', '.join(extras)})"
     summary += " · token counts are approximate"
     console.print(summary)
+    bill = _context_bill(world)
+    if bill:
+        hid, skill_tok, tool_tok = bill
+        console.print(
+            f"largest context bill: {escape(hid)}, about {skill_tok + tool_tok} "
+            f"tokens ({skill_tok} skill catalog + {tool_tok} MCP tool "
+            f"definitions), approximate"
+        )
     binary = oversize = 0
     affected = 0
     for c in world.contributors.values():

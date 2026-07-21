@@ -9,7 +9,7 @@ import typer
 from rich.console import Console
 from rich.markup import escape
 
-from drskill import deep, interactive, ledger, report, state
+from drskill import deep, interactive, ledger, mcp_connect as mcp_connect_mod, report, state
 from drskill.ledger import Ack
 from drskill.pipeline import run_scan
 
@@ -138,6 +138,7 @@ def scan(
     harness: str | None = typer.Option(None, "--harness", help="scope the scan to one harness"),
     deep_mode: bool = typer.Option(False, "--deep", help="judge flagged pairs with the configured model"),
     max_calls: str = typer.Option("25", "--max-calls", help="model calls per --deep run: a number, or 'all' for no limit"),
+    mcp_connect: bool = typer.Option(False, "--mcp-connect", help="connect to configured MCP servers and enumerate their tools"),
 ) -> None:
     """Analyze every detected harness's skill set and report findings."""
     _validate_harness(harness)
@@ -168,10 +169,14 @@ def scan(
         except deep_llm.DeepUnavailableError as e:
             console.print(f"[red]{escape(str(e))}[/red]")
             raise typer.Exit(1)
-    world, findings = run_scan(
-        root, home, global_mode, config, harness=harness, judge=judge,
-        max_calls=budget, rewriter=rewriter,
-    )
+    try:
+        world, findings = run_scan(
+            root, home, global_mode, config, harness=harness, judge=judge,
+            max_calls=budget, rewriter=rewriter, mcp_connect=mcp_connect,
+        )
+    except mcp_connect_mod.ConnectUnavailableError as e:
+        console.print(f"[red]{escape(str(e))}[/red]")
+        raise typer.Exit(1)
     active, acked = ledger.filter_findings(findings, config)
     if as_json:
         print(report.to_json(active))
