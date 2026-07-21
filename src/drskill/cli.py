@@ -8,7 +8,7 @@ import typer
 from rich.console import Console
 from rich.markup import escape
 
-from drskill import ledger, report
+from drskill import ledger, report, state
 from drskill.ledger import Ack
 from drskill.pipeline import run_scan
 
@@ -97,7 +97,12 @@ def scan(
         print(report.to_json(active))
     else:
         _warn_if_undetected(harness, root, home, global_mode)
-        report.render(world, active, acked, console)
+        spath = state.state_path(root, home, global_mode)
+        report.render(
+            world, active, acked, console, seen=set(state.load_seen(spath))
+        )
+        # active plus acked, so an acked finding stays seen if later un-acked
+        state.mark_seen(spath, [f.fingerprint for f in findings], dt.date.today())
         if detailed:
             console.print()
             report.render_harness_tables(
