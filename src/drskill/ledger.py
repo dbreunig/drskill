@@ -29,7 +29,7 @@ class Thresholds(BaseModel):
 
 
 class Deep(BaseModel):
-    model: str = "anthropic/claude-sonnet-5"
+    model: str = "anthropic/claude-haiku-4-5"
 
 
 class Ack(BaseModel):

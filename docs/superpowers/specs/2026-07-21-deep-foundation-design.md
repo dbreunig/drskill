@@ -20,10 +20,10 @@ The ledger gains a `[deep]` section with one key:
 
 ```toml
 [deep]
-model = "anthropic/claude-sonnet-5"
+model = "anthropic/claude-haiku-4-5"
 ```
 
-The value is a LiteLLM model id. The default, used when the section is absent, is `anthropic/claude-sonnet-5`. The setting is project local, like budgets and thresholds, because the cache is a team artifact and the verdicts in it should come from a model the team chose together. Global mode reads the machine ledger's `[deep]` section.
+The value is a LiteLLM model id. The default, used when the section is absent, is `anthropic/claude-haiku-4-5`. The setting is project local, like budgets and thresholds, because the cache is a team artifact and the verdicts in it should come from a model the team chose together. Global mode reads the machine ledger's `[deep]` section.
 
 API keys come from the environment, through the standard LiteLLM variables such as `ANTHROPIC_API_KEY`. For persistence, drskill follows the AWS credentials file pattern. Before a `--deep` run it reads `~/.drskill/env`, a plain KEY=value file the user creates and owns, and loads any variable the shell has not already set. The shell always wins over the file. drskill never writes a key anywhere, and it never reads an env file from a project directory, because a scanned repo is untrusted content and a repo-supplied variable such as a base URL override could redirect the user's key to an attacker. The missing-key error names the exact variable, mentions the env file, and links to the provider's key console. Two auth notes for the record. Anthropic's `ant auth login` OAuth profiles are a sanctioned keyless way to bill an API account, and wiring their short lived bearer tokens through LiteLLM is a possible follow-up, but it is out of scope this cycle. Consumer Claude subscription credentials are not an option at all. A Pro or Max plan covers Anthropic's own clients, and its terms do not permit third party tools to spend it through the API.
 
@@ -62,7 +62,7 @@ Each entry stores the class, the rationale, the distinguisher or confusion examp
 
 Verdicts change how the existing description-overlap findings print. The check logic, the finding fingerprints, and the ack semantics do not change, so existing acks stay valid.
 
-- If every pair in a cluster has a cached `distinct` verdict, the cluster's warning becomes a short informational note, e.g. "overlap flagged, judged distinct by anthropic/claude-sonnet-5, 2026-07-21". The note does not fail `--ci` and needs no ack. It still prints, so the downgrade is never invisible.
+- If every pair in a cluster has a cached `distinct` verdict, the cluster's warning becomes a short informational note, e.g. "overlap flagged, judged distinct by anthropic/claude-haiku-4-5, 2026-07-21". The note does not fail `--ci` and needs no ack. It still prints, so the downgrade is never invisible.
 - Any other state keeps the warning. A `description_collision` or `scope_overlap` verdict adds the class, the rationale, and the confusion example to the finding's evidence. A pair with no verdict adds a note saying it is unjudged, or that its verdict was unavailable.
 
 Model output is text from outside drskill. It is escaped for rich markup and passed through the report sanitizer, the same as skill text.

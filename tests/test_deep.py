@@ -32,7 +32,7 @@ def test_pair_key_changes_when_a_description_changes():
 def test_cache_round_trip(tmp_path):
     v = deep.Verdict(
         verdict="distinct", rationale="different targets", detail="pages vs notes",
-        model="anthropic/claude-sonnet-5", program_version="0.2.0", date="2026-07-21",
+        model="anthropic/claude-haiku-4-5", program_version="0.2.0", date="2026-07-21",
     )
     deep.save_verdict(tmp_path / "cache", "ab" * 32, v)
     loaded = deep.load_cache(tmp_path / "cache")
@@ -252,7 +252,7 @@ def test_build_judge_without_dspy_raises(monkeypatch):
 
     monkeypatch.setattr(builtins, "__import__", no_dspy)
     with pytest.raises(deep_llm.DeepUnavailableError, match=r"drskill\[deep\]"):
-        deep_llm.build_judge("anthropic/claude-sonnet-5")
+        deep_llm.build_judge("anthropic/claude-haiku-4-5")
 
 
 def test_pair_key_immune_to_newline_in_names():
@@ -385,7 +385,7 @@ def test_build_judge_missing_key_message_names_env_file_and_console(monkeypatch)
         lambda model: {"keys_in_environment": False, "missing_keys": ["ANTHROPIC_API_KEY"]},
     )
     with pytest.raises(deep_llm.DeepUnavailableError) as e:
-        deep_llm.build_judge("anthropic/claude-sonnet-5")
+        deep_llm.build_judge("anthropic/claude-haiku-4-5")
     msg = str(e.value)
     assert "ANTHROPIC_API_KEY" in msg
     assert "~/.drskill/env" in msg

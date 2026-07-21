@@ -1,6 +1,6 @@
 ### They Call Me Dr. Skill
 
-drskill is `brew doctor` for your agent's skill loadout. It looks at every coding agent installed on your machine or configured in your repo, works out exactly which skills each one loads, and checks that set for problems: skills that shadow each other, skills loaded twice, duplicate or near-duplicate skills, skills that break the SKILL.md spec, broken symlinks, drift against your lockfile, and skills that burn too many tokens. Every problem it reports ends in a command: a fix command or a command to acknowledge the problem and move on. drskill only reads your files. It never installs, edits, or deletes a skill, and it makes zero calls to an LLM.
+drskill is `brew doctor` for your agent's skill loadout. It looks at every coding agent installed on your machine or configured in your repo, works out exactly which skills each one loads, and checks that set for problems: skills that shadow each other, skills loaded twice, duplicate or near-duplicate skills, skills that break the SKILL.md spec, broken symlinks, drift against your lockfile, and skills that burn too many tokens. Every problem it reports ends in a command: a fix command or a command to acknowledge the problem and move on. drskill only reads your files. It never installs, edits, or deletes a skill, and it makes zero calls to an LLM unless you explicitly opt in with `scan --deep`.
 
 ## Install
 
@@ -126,7 +126,7 @@ The judge model is set in the ledger and defaults to a current Anthropic model:
 
 ```toml
 [deep]
-model = "anthropic/claude-sonnet-5"
+model = "anthropic/claude-haiku-4-5"
 ```
 
 Verdicts are stored in `.drskill/cache/`, one small JSON file per judged pair. Commit this directory. Every scan reads it, with or without `--deep`, so one person runs the judgments and every teammate and CI run gets the verdicts for free. A verdict lasts until either description changes, and then the pair is judged again.

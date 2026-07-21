@@ -144,7 +144,7 @@ def test_ack_destination_routes_by_scope(tmp_path):
 
 def test_deep_section_defaults(tmp_path):
     cfg = load_config(tmp_path / "missing.toml")
-    assert cfg.deep.model == "anthropic/claude-sonnet-5"
+    assert cfg.deep.model == "anthropic/claude-haiku-4-5"
 
 
 def test_deep_section_parses(tmp_path):
