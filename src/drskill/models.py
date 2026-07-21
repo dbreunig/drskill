@@ -65,7 +65,7 @@ class Contributor(BaseModel):
 
 class Finding(BaseModel):
     check_id: str
-    severity: Literal["error", "warning"]
+    severity: Literal["error", "warning", "note"]
     contributors: list[str]  # contributor ids
     contributor_names: list[str]
     harnesses: list[str]

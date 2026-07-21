@@ -300,6 +300,7 @@ def review(
     config = _load_effective_config_or_exit(root, home, global_mode)
     world, findings = run_scan(root, home, global_mode, config, harness=harness)
     active, _ = ledger.filter_findings(findings, config)
+    active = [f for f in active if f.severity != "note"]
     if not active:
         console.print("[green]No findings to review.[/green]")
         return

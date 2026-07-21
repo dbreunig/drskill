@@ -191,6 +191,7 @@ def render(
     ordered = sort_findings(world, active, set(seen))
     errors = [f for f in ordered if f.severity == "error"]
     warnings = [f for f in ordered if f.severity == "warning"]
+    notes = [f for f in ordered if f.severity == "note"]
     new_count = sum(1 for f in ordered if f.fingerprint not in seen)
     if not active:
         console.print("\n[green]No findings.[/green]", end="")
@@ -209,10 +210,19 @@ def render(
                 _print_finding(world, f, console, new=f.fingerprint not in seen)
                 or any_marked
             )
+    if notes:
+        console.print("\n[dim bold]NOTES[/dim bold]")
+        for f in notes:
+            any_marked = (
+                _print_finding(world, f, console, new=f.fingerprint not in seen)
+                or any_marked
+            )
     summary = (
         f"\n{len(errors)} error{'s' if len(errors) != 1 else ''}, "
         f"{len(warnings)} warning{'s' if len(warnings) != 1 else ''}"
     )
+    if notes:
+        summary += f", {len(notes)} note{'s' if len(notes) != 1 else ''}"
     extras = []
     if new_count:
         extras.append(f"{new_count} new")
