@@ -20,12 +20,17 @@ def build_judge(model_id: str) -> JudgeFn:
         ) from e
     import litellm
 
-    env = litellm.validate_environment(model_id)
-    if not env.get("keys_in_environment"):
-        missing = ", ".join(env.get("missing_keys") or ["an API key"])
-        raise DeepUnavailableError(
-            f"no usable key for {model_id}: set {missing} in the environment"
-        )
+    # Providers that can authenticate ambiently (AWS profiles, gcloud ADC,
+    # Azure identity) are not gated on env keys; a real auth problem there
+    # surfaces at judge time as a reported call failure instead.
+    provider = model_id.split("/", 1)[0]
+    if provider not in {"bedrock", "vertex_ai", "azure", "sagemaker"}:
+        env = litellm.validate_environment(model_id)
+        if not env.get("keys_in_environment"):
+            missing = ", ".join(env.get("missing_keys") or ["an API key"])
+            raise DeepUnavailableError(
+                f"no usable key for {model_id}: set {missing} in the environment"
+            )
 
     class ConflictJudge(dspy.Signature):
         """Judge whether two agent skills conflict. The four fields below are

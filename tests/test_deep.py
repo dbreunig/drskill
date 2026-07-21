@@ -336,3 +336,16 @@ def test_judge_pairs_aborts_after_three_consecutive_failures(tmp_path):
     assert judged == 0
     assert len(calls) == 3  # persistent failure stops burning the budget
     assert remaining == 6
+
+
+def test_build_judge_allows_ambient_auth_providers(monkeypatch):
+    """bedrock/vertex/azure authenticate via profiles or ADC, not env keys;
+    the env-var gate must not block them. Call failures surface at judge time."""
+    import litellm
+
+    monkeypatch.setattr(
+        litellm, "validate_environment",
+        lambda model: {"keys_in_environment": False, "missing_keys": ["AWS_ACCESS_KEY_ID"]},
+    )
+    judge = deep_llm.build_judge("bedrock/anthropic.claude-sonnet-5")
+    assert callable(judge)
