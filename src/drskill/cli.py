@@ -150,8 +150,13 @@ def scan(
         report.render(
             world, active, acked, console, seen=set(state.load_seen(spath))
         )
-        # active plus acked, so an acked finding stays seen if later un-acked
-        state.mark_seen(spath, [f.fingerprint for f in findings], dt.date.today())
+        # active plus acked, so an acked finding stays seen if later un-acked.
+        # A --harness scan sees only a slice of the project's findings, and
+        # writing it would prune every other harness's seen entries.
+        if harness is None:
+            state.mark_seen(
+                spath, [f.fingerprint for f in findings], dt.date.today()
+            )
         if detailed:
             console.print()
             report.render_harness_tables(
@@ -303,11 +308,13 @@ def review(
     ordered = report.sort_findings(world, active, seen)
     acked: list[tuple] = []  # (finding, destination path)
     fixes: list[str] = []
+    displayed: set[str] = set()
     undecided = 0
     quit_early = False
     for idx, f in enumerate(ordered, start=1):
         console.print(f"[dim]{idx} of {len(ordered)}[/dim]")
         report.print_findings(world, [f], console, seen=seen)
+        displayed.add(f.fingerprint)
         console.print(
             "[bold]a[/bold] ack · [bold]n[/bold] ack+note · [bold]f[/bold] queue fix"
             " · [bold]s[/bold] skip · [bold]q[/bold] quit"
@@ -317,7 +324,11 @@ def review(
             if key in ("a", "n"):
                 ack_note = None
                 if key == "n":
-                    ack_note = line_source("note: ").strip() or None
+                    try:
+                        ack_note = line_source("note: ").strip() or None
+                    except KeyboardInterrupt:
+                        quit_early = True
+                        break
                 dest = ledger.ack_destination(world, f, root, home, global_mode)
                 ledger.append_ack(dest, Ack(
                     check=f.check_id, skills=sorted(f.contributor_names),
@@ -327,7 +338,10 @@ def review(
                 acked.append((f, dest))
                 break
             if key == "f":
-                fixes.extend(f.fix_commands)
+                if f.fix_commands:
+                    fixes.extend(f.fix_commands)
+                else:
+                    undecided += 1  # nothing to queue; the finding stays open
                 break
             if key == "s":
                 undecided += 1
@@ -340,7 +354,11 @@ def review(
             undecided += len(ordered) - idx + 1
             break
     _review_summary(acked, fixes, undecided, home)
-    state.mark_seen(spath, [f.fingerprint for f in findings], dt.date.today())
+    if harness is None:
+        # only what was displayed becomes seen; keep already-seen entries
+        # that still correspond to current findings alive through the prune
+        current = {f.fingerprint for f in findings}
+        state.mark_seen(spath, displayed | (seen & current), dt.date.today())
 
 
 def _review_summary(
@@ -349,7 +367,10 @@ def _review_summary(
     from drskill.report import short_id
 
     for f, dest in acked:
-        where = " → ~/.drskill.toml" if dest == home / ".drskill.toml" else ""
+        if dest == home / ".drskill.toml":
+            where = " → ~/.drskill.toml"
+        else:
+            where = f" → {dest.name}"
         console.print(
             f"acked [bold]{escape(short_id(f))}[/bold] "
             f"{escape(f.check_id)}{escape(where)}"
@@ -357,7 +378,8 @@ def _review_summary(
     if fixes:
         block = "\n".join(fixes)
         console.print("\nqueued fix commands:\n")
-        console.print(escape(block))
+        # display is sanitized; the clipboard gets the raw command text
+        console.print(escape(report._sanitize(block)))
         if _to_clipboard(block):
             console.print("[dim](copied to clipboard)[/dim]")
     if undecided:

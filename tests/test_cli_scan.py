@@ -168,7 +168,16 @@ def test_scan_marks_seen_and_second_scan_shows_no_new(tmp_path):
     state_dir = tmp_path / "home" / ".drskill" / "state"
     assert list(state_dir.glob("*.json"))
     r2 = scan(tmp_path)
-    assert "new" not in r2.output
+    assert "1 new" not in r2.output and " new " not in r2.output
+
+
+def test_harness_scoped_scan_preserves_seen_state(tmp_path):
+    proj = tmp_path / "proj"
+    write(proj, "no-cond", "---\nname: no-cond\ndescription: Formats code.\n---\nb\n")
+    scan(tmp_path)  # full scan marks everything seen
+    scan(tmp_path, "--harness", "claude-code")  # scoped scan must not prune
+    r = scan(tmp_path)
+    assert "1 new" not in r.output
 
 
 def test_json_scan_does_not_touch_state(tmp_path):

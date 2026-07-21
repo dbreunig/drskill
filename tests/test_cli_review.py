@@ -124,3 +124,37 @@ def test_review_quit_preserves_progress(tmp_path, monkeypatch):
     assert "1 finding left undecided" in r.output
     data = tomllib.loads((proj / "drskill.toml").read_text())
     assert len(data["ack"]) == 1
+
+
+def test_review_quit_leaves_undisplayed_findings_new(tmp_path, monkeypatch):
+    proj = tmp_path / "proj"
+    proj.mkdir(exist_ok=True)
+    # two findings: generic-description and missing-activation on 'vague'
+    write_project_skill(proj, "vague", "Helps with various tasks.")
+    allow_interactive(monkeypatch)
+    monkeypatch.setattr(cli, "key_source", keys("q"))  # quit at finding 1
+    r = invoke(tmp_path, "review")
+    assert r.exit_code == 0
+    r2 = invoke(tmp_path, "scan")
+    # the displayed finding is seen; the never-displayed one is still new
+    assert "1 new" in r2.output
+
+
+def test_review_routes_to_both_ledgers_in_one_session(tmp_path, monkeypatch):
+    proj = tmp_path / "proj"
+    proj.mkdir(exist_ok=True)
+    (tmp_path / "home").mkdir(exist_ok=True)
+    # machine-level finding: global skill missing activation
+    write_global_skill(tmp_path, "gskill", "Formats code.")
+    # project finding with activation phrasing but no distinctive words,
+    # so only generic-description fires and stays project-scoped
+    write_project_skill(proj, "vague", "Use when needed.")
+    allow_interactive(monkeypatch)
+    monkeypatch.setattr(cli, "key_source", keys("a", "a"))
+    r = invoke(tmp_path, "review")
+    assert r.exit_code == 0
+    proj_ledger = (proj / "drskill.toml").read_text()
+    home_ledger = (tmp_path / "home" / ".drskill.toml").read_text()
+    assert "generic-description" in proj_ledger
+    assert "missing-activation" in home_ledger
+    assert "drskill.toml" in r.output and "~/.drskill.toml" in r.output
