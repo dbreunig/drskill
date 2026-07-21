@@ -105,3 +105,35 @@ def test_removal_commands_quote_paths(tmp_path):
     (cmd,) = injection.removal_commands(c)
     assert cmd.startswith("rm -r ")
     assert "'" in cmd  # space in path forces shell quoting
+
+
+# ---- injection-unicode ----
+
+def test_unicode_flags_bidi_and_zero_width(tmp_path):
+    write_skill(
+        tmp_path, "sneaky", "Normal line.\nHidden​word and ‮flipped.",
+    )
+    world = make_world(tmp_path)
+    (f,) = run_check("injection-unicode", world)
+    assert f.severity == "error"
+    assert "ZERO WIDTH SPACE" in f.message
+    assert "RIGHT-TO-LEFT OVERRIDE" in f.message
+    assert "SKILL.md:" in f.message
+    assert f.fix_commands and f.fix_commands[0].startswith("rm -r ")
+
+
+def test_unicode_ignores_emoji_joiners_and_leading_bom(tmp_path):
+    d = write_skill(
+        tmp_path, "benign",
+        "Family: \U0001f469‍\U0001f469‍\U0001f466.",
+    )
+    (d / "notes.txt").write_text("﻿BOM at start is fine.\n")
+    world = make_world(tmp_path)
+    assert run_check("injection-unicode", world) == []
+
+
+def test_unicode_flags_bom_mid_file(tmp_path):
+    write_skill(tmp_path, "bommed", "line one\nmid﻿file bom")
+    world = make_world(tmp_path)
+    (f,) = run_check("injection-unicode", world)
+    assert "ZERO WIDTH NO-BREAK SPACE" in f.message

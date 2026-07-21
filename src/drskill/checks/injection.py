@@ -6,13 +6,16 @@ the user's escape hatch."""
 
 from __future__ import annotations
 
+import re
 import shlex
 import unicodedata
 from dataclasses import dataclass
 from pathlib import Path
 
-from drskill.models import Contributor
-from drskill.resolution import normalize_content
+from drskill.checks import check, make_finding
+from drskill.ledger import Config
+from drskill.models import Contributor, Finding
+from drskill.resolution import World, normalize_content
 
 SCRIPT_EXTS = frozenset(
     {".py", ".sh", ".bash", ".zsh", ".js", ".mjs", ".ts", ".rb", ".pl", ".ps1"}
@@ -153,3 +156,48 @@ def removal_commands(c: Contributor) -> list[str]:
     if skill_file.name == "SKILL.md":
         return [f"rm -r {shlex.quote(str(skill_file.parent))}"]
     return [f"rm {shlex.quote(str(skill_file))}"]
+
+
+# ---- the checks ----
+
+# Bidi controls and zero width space have no business in a skill file. The
+# zero width joiner and non joiner are excluded outright: emoji sequences and
+# several writing systems use them. A byte order mark is legitimate only as
+# the first character of a file.
+_SUSPECT_CHARS = frozenset(
+    "​﻿‪‫‬‭‮⁦⁧⁨⁩"
+)
+_ALL_KINDS = {"skillmd", "script", "prose"}
+
+
+@check("injection-unicode")
+def injection_unicode(world: World, config: Config) -> list[Finding]:
+    out = []
+    for c in world.contributors.values():
+        hits: list[Hit] = []
+        names: set[str] = set()
+        for s in scan_view(c):
+            for i, line in enumerate(s.lines, start=1):
+                scanned = line[1:] if i == 1 and line.startswith("\ufeff") else line
+                found = [ch for ch in scanned if ch in _SUSPECT_CHARS]
+                if found:
+                    hits.append((s, i, line))
+                    names.update(
+                        unicodedata.name(ch, f"U+{ord(ch):04X}") for ch in found
+                    )
+        if hits:
+            out.append(
+                make_finding(
+                    "injection-unicode", "error", [c],
+                    evidence_message(
+                        c,
+                        "contains invisible or bidirectional control characters",
+                        hits,
+                        note="characters: " + ", ".join(sorted(names)),
+                    ),
+                    fix_commands=removal_commands(c),
+                    extra_key=c.name,
+                    fingerprint_texts=fingerprint_texts(hits),
+                )
+            )
+    return out
