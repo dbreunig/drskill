@@ -253,3 +253,11 @@ def test_build_judge_without_dspy_raises(monkeypatch):
     monkeypatch.setattr(builtins, "__import__", no_dspy)
     with pytest.raises(deep_llm.DeepUnavailableError, match=r"drskill\[deep\]"):
         deep_llm.build_judge("anthropic/claude-sonnet-5")
+
+
+def test_pair_key_immune_to_newline_in_names():
+    # (name="a", routing="b\nX") must not collide with (name="a\nb", routing="X")
+    z = contributor("zeta", "Use for zeta docs.")
+    crafted1 = contributor("a", "b\nX", cid="/skills/crafted1/SKILL.md")
+    crafted2 = contributor("a\nb", "X", cid="/skills/crafted2/SKILL.md")
+    assert deep.pair_key(z, crafted1) != deep.pair_key(z, crafted2)

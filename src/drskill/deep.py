@@ -49,8 +49,15 @@ def cache_dir(project_root: Path, home: Path, global_mode: bool) -> Path:
 
 
 def pair_key(a: Contributor, b: Contributor) -> str:
-    parts = sorted(f"{c.name}\n{c.routing_text}" for c in (a, b))
-    return hashlib.sha256("\x00".join(parts).encode()).hexdigest()
+    # Each field is hashed on its own before joining, so no character a
+    # skill can put in its name or description can shift the field
+    # boundary and collide two different pairs onto one key.
+    parts = sorted(
+        hashlib.sha256(c.name.encode()).hexdigest()
+        + hashlib.sha256(c.routing_text.encode()).hexdigest()
+        for c in (a, b)
+    )
+    return hashlib.sha256("|".join(parts).encode()).hexdigest()
 
 
 def load_cache(cdir: Path) -> dict[str, Verdict]:
