@@ -25,7 +25,7 @@ model = "anthropic/claude-sonnet-5"
 
 The value is a LiteLLM model id. The default, used when the section is absent, is `anthropic/claude-sonnet-5`. The setting is project local, like budgets and thresholds, because the cache is a team artifact and the verdicts in it should come from a model the team chose together. Global mode reads the machine ledger's `[deep]` section.
 
-API keys come only from the environment, through the standard LiteLLM variables such as `ANTHROPIC_API_KEY`. drskill never stores or writes a key.
+API keys come only from the environment, through the standard LiteLLM variables such as `ANTHROPIC_API_KEY`. drskill never stores or writes a key. Two auth notes for the record. Anthropic's `ant auth login` OAuth profiles are a sanctioned keyless way to bill an API account, and wiring their short lived bearer tokens through LiteLLM is a possible follow-up, but it is out of scope this cycle. Consumer Claude subscription credentials are not an option at all. A Pro or Max plan covers Anthropic's own clients, and its terms do not permit third party tools to spend it through the API.
 
 Two failure modes stop the run before any scan work:
 
