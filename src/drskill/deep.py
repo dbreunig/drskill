@@ -42,9 +42,21 @@ class Verdict(BaseModel):
     model: str
     program_version: str
     date: str  # ISO date of the judgment
+    # Rewrite proposal, present only on description_collision entries and
+    # only once the rewrite call has succeeded. 0.3.0 entries lack all three.
+    rewrite_target: str | None = None
+    rewrite_text: str | None = None
+    rewrite_reason: str | None = None
+
+
+class RewriteResult(BaseModel):
+    target: str  # name of the skill whose description should change
+    text: str  # the proposed description
+    reason: str  # one sentence on why that skill was picked
 
 
 JudgeFn = Callable[[Contributor, Contributor], "JudgeResult | None"]
+RewriteFn = Callable[[Contributor, Contributor, str], "RewriteResult | None"]
 
 
 def load_user_env(home: Path) -> list[str]:

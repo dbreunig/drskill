@@ -404,3 +404,22 @@ def test_judge_pairs_unlimited_budget(tmp_path):
         world, findings, {}, tmp_path / "c", judge, "m", max_calls=None
     )
     assert judged == 6 and remaining == 0
+
+
+def test_cache_entry_without_rewrite_fields_loads(tmp_path):
+    """A 0.3.0-shaped entry (no rewrite fields) must load unchanged."""
+    cdir = tmp_path / "cache"
+    cdir.mkdir()
+    (cdir / ("aa" * 32 + ".json")).write_text(
+        '{"verdict": "description_collision", "rationale": "r", "detail": "d",'
+        ' "model": "m", "program_version": "0.3.0", "date": "2026-07-21"}'
+    )
+    (entry,) = deep.load_cache(cdir).values()
+    assert entry.rewrite_text is None
+    assert entry.rewrite_target is None
+    assert entry.rewrite_reason is None
+
+
+def test_rewrite_result_shape():
+    r = deep.RewriteResult(target="idea-vault", text="Use when ...", reason="vaguer")
+    assert (r.target, r.text, r.reason) == ("idea-vault", "Use when ...", "vaguer")
