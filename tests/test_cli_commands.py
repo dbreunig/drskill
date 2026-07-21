@@ -224,3 +224,38 @@ def test_bare_check_id_acks_whole_class(tmp_path):
     for name in ("one", "two", "three"):
         assert name in r.output
     assert invoke(tmp_path, "scan", "--ci").exit_code == 0
+
+
+def _mk_global(tmp_path, name, description):
+    home = tmp_path / "home"
+    d = home / ".claude" / "skills" / name
+    d.mkdir(parents=True)
+    (d / "SKILL.md").write_text(
+        f"---\nname: {name}\ndescription: {description}\n---\nbody\n"
+    )
+
+
+def test_machine_level_finding_acks_globally(tmp_path):
+    proj = tmp_path / "proj"
+    proj.mkdir()
+    (tmp_path / "home").mkdir(exist_ok=True)
+    _mk_global(tmp_path, "gskill", "Formats code.")  # missing-activation, user scope
+    r = invoke(tmp_path, "ack", "missing-activation")
+    assert r.exit_code == 0
+    assert "machine-level" in r.output
+    home_ledger = tmp_path / "home" / ".drskill.toml"
+    assert home_ledger.exists() and "missing-activation" in home_ledger.read_text()
+    assert not (proj / "drskill.toml").exists()
+    # the merged config silences the finding on the next project scan
+    assert invoke(tmp_path, "scan", "--ci").exit_code == 0
+
+
+def test_local_flag_forces_project_ledger(tmp_path):
+    proj = tmp_path / "proj"
+    proj.mkdir()
+    (tmp_path / "home").mkdir(exist_ok=True)
+    _mk_global(tmp_path, "gskill", "Formats code.")
+    r = invoke(tmp_path, "ack", "missing-activation", "--local")
+    assert r.exit_code == 0
+    assert (proj / "drskill.toml").exists()
+    assert not (tmp_path / "home" / ".drskill.toml").exists()

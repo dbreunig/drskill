@@ -72,6 +72,16 @@ def _load_config_or_exit(path: Path) -> ledger.Config:
         raise typer.Exit(1)
 
 
+def _load_effective_config_or_exit(
+    root: Path, home: Path, global_mode: bool
+) -> ledger.Config:
+    try:
+        return ledger.load_effective_config(root, home, global_mode)
+    except ledger.LedgerError as e:
+        console.print(f"[red]error:[/red] {escape(str(e))}")
+        raise typer.Exit(1)
+
+
 @app.callback()
 def main() -> None:
     pass
@@ -90,7 +100,7 @@ def scan(
     """Analyze every detected harness's skill set and report findings."""
     _validate_harness(harness)
     home = _home()
-    config = _load_config_or_exit(ledger.ledger_path(root, home, global_mode))
+    config = _load_effective_config_or_exit(root, home, global_mode)
     world, findings = run_scan(root, home, global_mode, config, harness=harness)
     active, acked = ledger.filter_findings(findings, config)
     if as_json:
@@ -125,16 +135,27 @@ def ack(
         help="ack every active finding, or every finding of the named check",
     ),
     note: str | None = typer.Option(None, "--note"),
+    force_local: bool = typer.Option(
+        False, "--local", help="record in the project ledger regardless of scope"
+    ),
+    force_global: bool = typer.Option(
+        False, "--global-ack", help="record in the machine ledger (~/.drskill.toml)"
+    ),
     root: Path = typer.Option(Path("."), "--root", hidden=True),
     global_mode: bool = typer.Option(False, "--global"),
 ) -> None:
     """Acknowledge findings so they stay silent until the content changes."""
     import re
 
+    if force_local and force_global:
+        console.print("[red]--local and --global-ack are mutually exclusive[/red]")
+        raise typer.Exit(1)
+    if global_mode and (force_local or force_global):
+        console.print("[red]--global mode already writes the machine ledger[/red]")
+        raise typer.Exit(1)
     home = _home()
-    path = ledger.ledger_path(root, home, global_mode)
-    config = _load_config_or_exit(path)
-    _world, findings = run_scan(root, home, global_mode, config)
+    config = _load_effective_config_or_exit(root, home, global_mode)
+    world, findings = run_scan(root, home, global_mode, config)
     active, _ = ledger.filter_findings(findings, config)
     from drskill.checks import REGISTRY
 
@@ -189,15 +210,26 @@ def ack(
         )
         raise typer.Exit(1)
 
+    global_ledger = ledger.ledger_path(root, home, True)
+    dest_counts: dict[Path, int] = {}
     for f in targets:
+        dest = ledger.ack_destination(
+            world, f, root, home, global_mode,
+            force_local=force_local, force_global=force_global,
+        )
         ledger.append_ack(
-            path,
+            dest,
             Ack(check=f.check_id, skills=sorted(f.contributor_names),
                 fingerprint=f.fingerprint, note=note, date=dt.date.today()),
         )
+        dest_counts[dest] = dest_counts.get(dest, 0) + 1
         label = f"{f.check_id} " + ", ".join(f.contributor_names) if f.contributor_names else f.check_id
-        console.print(f"Acknowledged [bold]{escape(label)}[/bold]")
-    console.print(f"{len(targets)} finding{'s' if len(targets) != 1 else ''} → {escape(str(path))}")
+        suffix = ""
+        if dest == global_ledger and not global_mode:
+            suffix = " → ~/.drskill.toml (machine-level skills)"
+        console.print(f"Acknowledged [bold]{escape(label)}[/bold]{escape(suffix)}")
+    for dest, n in dest_counts.items():
+        console.print(f"{n} finding{'s' if n != 1 else ''} → {escape(str(dest))}")
 
 
 @app.command("list")
@@ -211,7 +243,7 @@ def list_cmd(
     """Show each harness's effective skill set."""
     _validate_harness(harness)
     home = _home()
-    config = _load_config_or_exit(ledger.ledger_path(root, home, global_mode))
+    config = _load_effective_config_or_exit(root, home, global_mode)
     world, _findings = run_scan(root, home, global_mode, config, harness=harness)
     _warn_if_undetected(harness, root, home, global_mode)
     report.render_harness_tables(

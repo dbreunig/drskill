@@ -65,6 +65,44 @@ def load_config(path: Path) -> Config:
         raise LedgerError(f"{path}: {_validation_one_liner(e)}") from e
 
 
+def load_effective_config(project_root: Path, home: Path, global_mode: bool) -> Config:
+    """The config that governs a scan. In project mode, decisions merge from
+    both ledgers (a machine-level ack is honored in every project); budgets
+    and thresholds stay with the mode's own ledger."""
+    cfg = load_config(ledger_path(project_root, home, global_mode))
+    if not global_mode:
+        gcfg = load_config(ledger_path(project_root, home, True))
+        cfg = cfg.model_copy(update={"ack": [*cfg.ack, *gcfg.ack]})
+    return cfg
+
+
+def ack_destination(
+    world,
+    finding: Finding,
+    project_root: Path,
+    home: Path,
+    global_mode: bool,
+    force_local: bool = False,
+    force_global: bool = False,
+) -> Path:
+    """A finding that lives entirely in the machine's global loadout is a
+    machine decision, so its ack goes to ~/.drskill.toml and is honored in
+    every project. Anything touching a project skill stays in the project
+    ledger."""
+    if global_mode or force_global:
+        return ledger_path(project_root, home, True)
+    if force_local:
+        return ledger_path(project_root, home, False)
+    scopes = {
+        world.contributors[cid].scope
+        for cid in finding.contributors
+        if cid in world.contributors
+    }
+    if scopes and scopes == {"user"}:
+        return ledger_path(project_root, home, True)
+    return ledger_path(project_root, home, False)
+
+
 def append_ack(path: Path, ack: Ack) -> None:
     data = tomllib.loads(path.read_text()) if path.is_file() else {}
     entry = {k: v for k, v in ack.model_dump().items() if v is not None}
