@@ -68,3 +68,25 @@ def load_cache(cdir: Path) -> dict[str, Verdict]:
 def save_verdict(cdir: Path, key: str, v: Verdict) -> None:
     cdir.mkdir(parents=True, exist_ok=True)
     (cdir / f"{key}.json").write_text(v.model_dump_json(indent=2) + "\n")
+
+
+def flagged_pairs(world, findings: list[Finding]) -> list[tuple[Contributor, Contributor]]:
+    """All unordered member pairs of each description-overlap cluster.
+    Largest cluster first, then name order, so repeated budgeted runs make
+    progress instead of rejudging a shifting prefix."""
+    overlaps = sorted(
+        (f for f in findings if f.check_id == "description-overlap"),
+        key=lambda f: (-len(f.contributors), f.contributor_names),
+    )
+    pairs: list[tuple[Contributor, Contributor]] = []
+    for f in overlaps:
+        members = sorted(
+            (world.contributors[cid] for cid in f.contributors if cid in world.contributors),
+            key=lambda c: c.name,
+        )
+        pairs.extend(combinations(members, 2))
+    return pairs
+
+
+def unjudged_count(world, findings: list[Finding], cache: dict[str, Verdict]) -> int:
+    return sum(1 for a, b in flagged_pairs(world, findings) if pair_key(a, b) not in cache)

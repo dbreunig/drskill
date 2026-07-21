@@ -50,3 +50,48 @@ def test_cache_dir_locations(tmp_path):
     proj, home = tmp_path / "p", tmp_path / "h"
     assert deep.cache_dir(proj, home, False) == proj / ".drskill" / "cache"
     assert deep.cache_dir(proj, home, True) == home / ".drskill" / "cache"
+
+
+from drskill.models import Finding
+
+
+def finding_for(check_id, members, severity="warning"):
+    return Finding(
+        check_id=check_id, severity=severity,
+        contributors=[m.id for m in members],
+        contributor_names=sorted({m.name for m in members}),
+        harnesses=["claude-code"], message="msg",
+        fingerprint=f"sha256:{'0' * 60}{len(members)}{check_id[:3]}",
+    )
+
+
+class FakeWorld:
+    def __init__(self, members):
+        self.contributors = {m.id: m for m in members}
+
+
+def test_flagged_pairs_largest_cluster_first_then_names():
+    a, b, c = (contributor(n, f"Use for {n} docs.") for n in ("a", "b", "c"))
+    x, y = (contributor(n, f"Use for {n} docs.") for n in ("x", "y"))
+    world = FakeWorld([a, b, c, x, y])
+    findings = [
+        finding_for("description-overlap", [x, y]),
+        finding_for("description-overlap", [c, b, a]),
+        finding_for("missing-activation", [a]),
+    ]
+    pairs = deep.flagged_pairs(world, findings)
+    assert [(p[0].name, p[1].name) for p in pairs] == [
+        ("a", "b"), ("a", "c"), ("b", "c"), ("x", "y"),
+    ]
+
+
+def test_unjudged_count(tmp_path):
+    a, b = contributor("a", "Use for a docs."), contributor("b", "Use for b docs.")
+    world = FakeWorld([a, b])
+    findings = [finding_for("description-overlap", [a, b])]
+    assert deep.unjudged_count(world, findings, {}) == 1
+    cache = {deep.pair_key(a, b): deep.Verdict(
+        verdict="distinct", rationale="r", detail="d",
+        model="m", program_version="v", date="2026-07-21",
+    )}
+    assert deep.unjudged_count(world, findings, cache) == 0
