@@ -151,25 +151,63 @@ def judge_pairs(
     judge: JudgeFn,
     model_id: str,
     max_calls: int | None,
+    rewriter: RewriteFn | None = None,
 ) -> tuple[int, int]:
     """Judge uncached flagged pairs under a hard call budget; None means no
-    limit. Each verdict lands in `cache` and on disk immediately, so an
-    interrupted run loses nothing. Returns (judged, remaining unjudged)."""
-    todo = [
-        (a, b) for a, b in flagged_pairs(world, findings) if pair_key(a, b) not in cache
-    ]
-    judged = 0
+    limit. A description_collision verdict immediately spends one more call
+    on its rewrite proposal, and collision entries missing a rewrite from a
+    failed earlier call are retried before any new pair is judged. Every
+    result lands in `cache` and on disk as it arrives, so an interrupted
+    run loses nothing. Returns (judged, remaining unjudged)."""
+    pairs = flagged_pairs(world, findings)
+    calls = 0
     consecutive_failures = 0
-    for a, b in todo[:max_calls]:
-        result = judge(a, b)
-        if result is None:  # errored or unparseable call: never cached
+
+    def budget_left() -> bool:
+        return max_calls is None or calls < max_calls
+
+    def attempt(fn, *args):
+        # Three consecutive failures mean a persistent problem (bad key,
+        # dead network): stop burning the budget on calls that cannot land.
+        nonlocal calls, consecutive_failures
+        calls += 1
+        result = fn(*args)
+        if result is None:
             consecutive_failures += 1
-            if consecutive_failures >= 3:
-                # Persistent failure (bad key, dead network): stop burning
-                # the budget on calls that will not succeed.
+        else:
+            consecutive_failures = 0
+        return result
+
+    def add_rewrite(key: str, a: Contributor, b: Contributor) -> None:
+        v = cache[key]
+        r = attempt(rewriter, a, b, v.detail)
+        if r is not None:
+            v = v.model_copy(update={
+                "rewrite_target": r.target,
+                "rewrite_text": r.text,
+                "rewrite_reason": r.reason,
+            })
+            cache[key] = v
+            save_verdict(cdir, key, v)
+
+    # Retry pass: collisions whose rewrite call failed on an earlier run.
+    if rewriter is not None:
+        for a, b in pairs:
+            if not budget_left() or consecutive_failures >= 3:
                 break
+            key = pair_key(a, b)
+            v = cache.get(key)
+            if v and v.verdict == "description_collision" and v.rewrite_text is None:
+                add_rewrite(key, a, b)
+
+    todo = [(a, b) for a, b in pairs if pair_key(a, b) not in cache]
+    judged = 0
+    for a, b in todo:
+        if not budget_left() or consecutive_failures >= 3:
+            break
+        result = attempt(judge, a, b)
+        if result is None:  # errored or unparseable call: never cached
             continue
-        consecutive_failures = 0
         v = Verdict(
             **result.model_dump(),
             model=model_id,
@@ -180,6 +218,8 @@ def judge_pairs(
         cache[key] = v
         save_verdict(cdir, key, v)
         judged += 1
+        if rewriter is not None and v.verdict == "description_collision" and budget_left():
+            add_rewrite(key, a, b)
     return judged, len(todo) - judged
 
 
