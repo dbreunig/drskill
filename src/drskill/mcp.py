@@ -19,6 +19,10 @@ _SECRET_PREFIXES = (
     "xoxb-", "xoxp-", "xapp-", "AKIA", "ASIA", "glpat-", "AIza", "ntn_",
 )
 _SECRET_NAME = re.compile(r"(KEY|TOKEN|SECRET|PASSWORD|CREDENTIALS?)$", re.IGNORECASE)
+# Hashes, fingerprints, and public keys are public material, not secrets.
+# Real-machine tuning 2026-07-21: a SHA256 allowlist variable tripped the
+# entropy rule. A known secret prefix still wins over this exclusion.
+_PUBLIC_NAME = re.compile(r"(SHA\d*|HASH|FINGERPRINT|PUBLIC|PUBKEY)", re.IGNORECASE)
 
 
 def looks_secret(name: str, value: str) -> bool:
@@ -28,6 +32,8 @@ def looks_secret(name: str, value: str) -> bool:
         return False  # a reference, resolved by the harness at launch
     if value.startswith(_SECRET_PREFIXES):
         return True
+    if _PUBLIC_NAME.search(name):
+        return False
     if _SECRET_NAME.search(name):
         return True
     # a long single token with mixed classes and no spaces reads as a credential

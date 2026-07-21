@@ -106,3 +106,14 @@ def test_run_scan_reports_config_errors(tmp_path, monkeypatch):
     (proj / ".mcp.json").write_text("{broken")
     world, findings = run_scan(proj, home, config=Config())
     assert world.mcp_config_errors and world.mcp_config_errors[0][0] == "claude-code"
+
+
+def test_hash_and_public_material_is_not_a_secret():
+    assert not mcp.looks_secret(
+        "NODE_REPL_TRUSTED_BROWSER_CLIENT_SHA256S",
+        "a3f8c2d9e1b04756a3f8c2d9e1b04756a3f8c2d9e1b04756a3f8c2d9e1b04756",
+    )
+    assert not mcp.looks_secret("SERVER_FINGERPRINT", "AB:CD:EF:12:34:56:78:90:AB:CD:EF:12:34:56:78:90")
+    assert not mcp.looks_secret("SSH_PUBLIC_KEY", "AAAAB3NzaC1yc2EAAAADAQABAAABgQ0000000000000000")
+    # a known secret prefix still wins even under an innocent name
+    assert mcp.looks_secret("CLIENT_SHA256S", "sk-ant-abcdef1234567890abcdef")

@@ -71,7 +71,11 @@ def secret_in_config(world: World, config: Config) -> list[Finding]:
 def unpinned_server(world: World, config: Config) -> list[Finding]:
     out = []
     for s in world.mcp_servers:
-        if s.command not in _PIN_RUNNERS:
+        # Runners are often invoked through a version-manager shim's full
+        # path (found on a real machine: ~/.asdf/shims/npx), so match on
+        # the basename.
+        runner = Path(s.command).name if s.command else ""
+        if runner not in _PIN_RUNNERS:
             continue
         pkgs = [a for a in s.args if not a.startswith("-") and a not in ("dlx", "exec")]
         if not pkgs:
@@ -113,6 +117,11 @@ def dead_server(world: World, config: Config) -> list[Finding]:
         if s.transport != "stdio" or not s.command:
             continue
         p = Path(s.command)
+        if not p.is_absolute() and "/" in s.command:
+            # A relative path resolves against a launch cwd we cannot know
+            # statically (found on a real machine: a codex app-bundle
+            # helper). Unverifiable is not dead.
+            continue
         exists = p.exists() if p.is_absolute() else shutil.which(s.command) is not None
         if not exists:
             out.append(_finding(

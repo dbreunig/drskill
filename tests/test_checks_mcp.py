@@ -150,3 +150,25 @@ def test_user_scope_mcp_ack_routes_to_machine_ledger(tmp_path):
     assert r.exit_code == 0, r.output
     assert (home / ".drskill.toml").is_file()
     assert not (proj / "drskill.toml").exists()
+
+
+def test_relative_path_command_is_not_declared_dead(tmp_path, monkeypatch):
+    """A relative command resolves against a cwd we cannot know statically."""
+    proj, home = project_with(tmp_path, {
+        "bundle": {"command": "./Some App.app/Contents/MacOS/helper"},
+    })
+    _, findings = scan(proj, home, monkeypatch, tmp_path)
+    assert by_check(findings, "mcp-dead-server") == []
+
+
+def test_unpinned_detected_through_absolute_runner_path(tmp_path, monkeypatch):
+    """Real machine: Desktop configs run npx via an asdf shim's full path."""
+    proj, home = project_with(tmp_path, {
+        "memory": {"command": "/Users/x/.asdf/shims/npx",
+                   "args": ["-y", "@modelcontextprotocol/server-memory"]},
+        "playwright": {"command": "/usr/local/bin/npx",
+                       "args": ["@playwright/mcp@latest", "--headless"]},
+    })
+    _, findings = scan(proj, home, monkeypatch, tmp_path)
+    hit = {f.contributor_names[0] for f in by_check(findings, "mcp-unpinned-server")}
+    assert hit == {"memory", "playwright"}
