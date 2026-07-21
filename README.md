@@ -123,6 +123,8 @@ model = "anthropic/claude-sonnet-5"
 
 Verdicts are stored in `.drskill/cache/`, one small JSON file per judged pair. Commit this directory. Every scan reads it, with or without `--deep`, so one person runs the judgments and every teammate and CI run gets the verdicts for free. A verdict lasts until either description changes, and then the pair is judged again.
 
+The cache carries the same trust as the ack ledger. Neither file is signed, so anyone who can commit to the repo can silence a warning through either one. Review a change to `.drskill/cache/` the way you review a change to `drskill.toml`.
+
 Each `--deep` run makes at most 25 model calls. Raise or lower the budget with `--max-calls`. When the budget runs out, the report says how many pairs are still unjudged.
 
 When every pair in an overlap cluster is judged distinct, the warning becomes a note. The note still prints, so the model's decision stays on the record, but it does not fail `--ci` and needs no ack. A skill with an unacknowledged injection finding never earns this downgrade. Its pairs are still judged and the verdicts print as evidence, but the warning stays a warning, because a skill suspected of prompt injection does not get to talk its way out of an overlap warning.

@@ -75,6 +75,8 @@ The descriptions sent to the judge are attacker controlled. A hostile skill coul
 - A skill with any active Tier 3 injection finding is not eligible for the downgrade. Active means not acknowledged. An injection finding the user has acked reflects the user's own judgment, so it does not block the downgrade. For an ineligible skill, its pairs are still judged and the verdicts still print as evidence, but the warning stays a warning, with a line saying why. A skill that is currently suspected of injection does not get to talk its way out of an overlap warning.
 - The downgrade is never invisible. The informational note keeps the model's decision on the record in every report.
 
+The committed cache is trusted the same way the committed ack ledger is trusted. Neither file is signed, because the repo holds no secret to sign with, so anyone who can commit to the repo can silence a warning through either one. Review a change to `.drskill/cache/` the way you review a change to `drskill.toml`. A forged entry still leaves a visible note in every report, naming the model and date it claims.
+
 ## Testing
 
 - The DSPy program sits behind a small injectable judge interface. Tests drive the pipeline with scripted verdicts and never make a network call.
