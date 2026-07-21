@@ -24,18 +24,31 @@ def _skill_md(world: World) -> list[Contributor]:
 
 @check("missing-activation")
 def missing_activation(world: World, config: Config) -> list[Finding]:
+    offenders = sorted(
+        (
+            c for c in _skill_md(world)
+            if c.routing_text.strip() and not text.has_activation(c.routing_text)
+        ),
+        key=lambda c: c.name,
+    )
+    if not offenders:
+        return []
+    n = len(offenders)
+    head = (
+        f"{n} skill{'s' if n != 1 else ''} never "
+        f"{'say' if n != 1 else 'says'} when to use "
+        f"{'them' if n != 1 else 'it'}; the router has to guess:"
+    )
+    member_lines = "".join(f"\n        {c.name}: {c.id}" for c in offenders)
     return [
         make_finding(
-            "missing-activation", "warning", [c],
-            f"'{c.name}' never says when to use it; the router has to guess "
-            "(or a user has to invoke it by name)",
+            "missing-activation", "warning", offenders,
+            head + member_lines,
             fix_commands=[
-                f"Start the description in {c.id} with a condition, e.g. 'Use when ...'"
+                "Start each description with a condition, e.g. 'Use when ...'"
             ],
-            fingerprint_texts=[f"{c.name}\n{c.routing_text}"],
+            fingerprint_texts=[f"{c.name}\n{c.routing_text}" for c in offenders],
         )
-        for c in _skill_md(world)
-        if c.routing_text.strip() and not text.has_activation(c.routing_text)
     ]
 
 
@@ -206,8 +219,8 @@ def description_overlap(world: World, config: Config) -> list[Finding]:
 
 @check("generic-description")
 def generic_description(world: World, config: Config) -> list[Finding]:
-    out = []
-    for c in _skill_md(world):
+    offenders = []
+    for c in sorted(_skill_md(world), key=lambda c: c.name):
         if not c.routing_text.strip():
             continue
         distinct = {
@@ -215,14 +228,22 @@ def generic_description(world: World, config: Config) -> list[Finding]:
             if t not in text.GENERIC_VOCAB
         }
         if len(distinct) < config.thresholds.generic_min_distinct_tokens:
-            out.append(
-                make_finding(
-                    "generic-description", "warning", [c],
-                    f"'{c.name}' description has no distinguishing words to route on",
-                    fix_commands=[
-                        f"Name the concrete inputs, outputs, or domain in {c.id}"
-                    ],
-                    fingerprint_texts=[f"{c.name}\n{c.routing_text}"],
-                )
-            )
-    return out
+            offenders.append(c)
+    if not offenders:
+        return []
+    n = len(offenders)
+    head = (
+        f"{n} skill description{'s have' if n != 1 else ' has'} "
+        "no distinguishing words to route on:"
+    )
+    member_lines = "".join(f"\n        {c.name}: {c.id}" for c in offenders)
+    return [
+        make_finding(
+            "generic-description", "warning", offenders,
+            head + member_lines,
+            fix_commands=[
+                "Name the concrete inputs, outputs, or domain in each description"
+            ],
+            fingerprint_texts=[f"{c.name}\n{c.routing_text}" for c in offenders],
+        )
+    ]

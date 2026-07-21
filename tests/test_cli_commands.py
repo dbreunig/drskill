@@ -168,7 +168,9 @@ def test_ack_by_short_id(tmp_path):
 def test_ack_several_short_ids(tmp_path):
     proj = tmp_path / "proj"
     _mk(proj, "one")
-    _mk(proj, "two")
+    # a second finding of a different check, since same-check advisory
+    # findings now merge into one cluster
+    write(proj, "vague", "Helps with various tasks.", "b")
     r = invoke(tmp_path, "scan")
     sids = sorted(set(_short_ids(r.output)))
     assert len(sids) == 2
@@ -183,7 +185,10 @@ def test_ack_check_all(tmp_path):
         _mk(proj, n)
     r = invoke(tmp_path, "ack", "missing-activation", "--all")
     assert r.exit_code == 0
-    assert r.output.count("missing-activation") >= 3
+    # the three offenders merge into one cluster finding naming them all
+    assert "missing-activation" in r.output
+    for name in ("one", "two", "three"):
+        assert name in r.output
     assert invoke(tmp_path, "scan", "--ci").exit_code == 0
 
 
@@ -197,7 +202,8 @@ def test_ack_all_everything(tmp_path):
     import tomllib
     data = tomllib.loads((proj / "drskill.toml").read_text())
     assert all(a.get("note") == "baseline" for a in data["ack"])
-    assert len(data["ack"]) >= 3  # missing-activation x2 + generic + overlap...
+    # merged clusters: one missing-activation + one generic-description (+ overlap)
+    assert len(data["ack"]) >= 2
 
 
 def test_ack_unknown_id_errors(tmp_path):
@@ -214,5 +220,7 @@ def test_bare_check_id_acks_whole_class(tmp_path):
         _mk(proj, n)
     r = invoke(tmp_path, "ack", "missing-activation")
     assert r.exit_code == 0
-    assert r.output.count("missing-activation") >= 3
+    assert "missing-activation" in r.output
+    for name in ("one", "two", "three"):
+        assert name in r.output
     assert invoke(tmp_path, "scan", "--ci").exit_code == 0

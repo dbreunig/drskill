@@ -232,3 +232,35 @@ def test_overlap_cluster_lists_paths(tmp_path):
     hit = by_check(findings, "description-overlap")[0]
     assert str(proj / ".claude/skills/doc-a/SKILL.md") in hit.message
     assert str(proj / ".claude/skills/doc-b/SKILL.md") in hit.message
+
+
+def test_missing_activation_merges_into_one_finding(tmp_path):
+    proj, home = tmp_path / "p", tmp_path / "h"
+    write(proj, "alpha", "Formats source code files.")
+    write(proj, "beta", "Renders architecture diagrams.")
+    write(proj, "gamma", "Summarizes long changelogs.")
+    write(proj, "good", "Use when the user asks to reformat code.")
+    findings = run_all(world_from(proj, home), Config())
+    (f,) = by_check(findings, "missing-activation")
+    assert set(f.contributor_names) == {"alpha", "beta", "gamma"}
+    assert "3 skills never say when to use them" in f.message
+    for name in ("alpha", "beta", "gamma"):
+        assert name in f.message
+
+
+def test_missing_activation_singular_message(tmp_path):
+    proj, home = tmp_path / "p", tmp_path / "h"
+    write(proj, "solo", "Formats source code files.")
+    findings = run_all(world_from(proj, home), Config())
+    (f,) = by_check(findings, "missing-activation")
+    assert "1 skill never says when to use it" in f.message
+
+
+def test_generic_description_merges_into_one_finding(tmp_path):
+    proj, home = tmp_path / "p", tmp_path / "h"
+    write(proj, "vague-one", "Helps with various tasks when needed.")
+    write(proj, "vague-two", "Use this tool to help when working on things.")
+    findings = run_all(world_from(proj, home), Config())
+    (f,) = by_check(findings, "generic-description")
+    assert len(f.contributor_names) == 2
+    assert "2 skill descriptions have no distinguishing words" in f.message
