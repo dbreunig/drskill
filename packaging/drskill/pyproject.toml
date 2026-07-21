@@ -5,10 +5,10 @@
 
 [project]
 name = "drskill"
-version = "0.2.0"
+version = "0.3.0"
 description = "brew doctor for your AI agent's skill loadout"
 requires-python = ">=3.11"
-dependencies = ["drskill-core[deep]==0.2.0"]
+dependencies = ["drskill-core[deep]==0.3.0"]
 
 [build-system]
 requires = ["hatchling"]
