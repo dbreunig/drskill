@@ -244,7 +244,10 @@ _OVERRIDE = [
     for p in (
         r"\bignore\b.{0,20}\b(previous|prior|earlier|above|all other)\b.{0,20}\b(instructions?|rules|guidance|guidelines|prompts?)\b",
         r"\bdisregard\b.{0,30}\b(instructions?|rules|guidance|guidelines|system prompt)\b",
-        r"\bdo not (tell|inform|notify|warn|alert)\b.{0,15}\bthe user\b",
+        # "(?!\s+to\b)" keeps the advice sense out: "do not tell the user to
+        # run X" is UX guidance, "do not tell the user about X" is concealment
+        # (real-loadout triage 2026-07-20).
+        r"\bdo not (tell|inform|notify|warn|alert)\b.{0,15}\bthe user\b(?!\s+to\b)",
         r"\bwithout (informing|telling|notifying|alerting)\b.{0,15}\bthe user\b",
         r"\bhide (this|it) from\b",
         r"\bdo not reveal\b",

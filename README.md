@@ -87,6 +87,13 @@ Without `--ci`, warnings alone exit 0. This lets you run `drskill scan` locally 
 | `missing-activation` | warning | A description never states when the skill should trigger, e.g. no "when", "trigger", or "if the user" phrasing. |
 | `generic-description` | warning | A description has fewer distinctive words than `generic_min_distinct_tokens`, e.g. "Helps with various tasks." |
 | `opposing-imperatives` | warning | Two skills give opposite orders about the same action, e.g. "Always use tabs" against "Never use tabs". Deliberately strict matching, so paraphrased conflicts are not caught. |
+| `injection-unicode` | error | Skill text or a bundled file contains bidirectional control characters or zero-width characters. These can hide instructions from a human reviewer. |
+| `injection-credential-read` | error | A bundled script references credential paths such as `~/.ssh`, `~/.aws`, or private key files. Reads of `.env` alone downgrade to a warning. |
+| `injection-override` | warning | Skill text contains instruction-override phrasing, e.g. "ignore all previous instructions" or "without informing the user". |
+| `injection-mandatory-script` | warning | The skill demands that its own bundled script runs as a required first step, e.g. "you must first run scripts/setup.sh". |
+| `injection-egress` | warning | A bundled script calls the network, e.g. `curl` or `requests.post`. The finding quotes each call so you can check the destination. |
+| `injection-encoded-blob` | warning | Skill text or a bundled file contains a long base64 or hex run that a reviewer cannot read. |
+| `injection-remote-fetch` | warning | Skill text tells the agent to fetch remote content and act on it, e.g. `curl` piped to a shell or "download X and follow the instructions". |
 
 ## The ledger
 
@@ -120,6 +127,8 @@ Harness rules are verified in two parts, because they have two different jobs. P
 A finding only inherits the uncertainty it actually depends on. Shadowing and double-load findings depend on precedence; every other finding depends only on paths. When a harness in a finding's list is unverified for the part that finding depends on, its name carries a `?` suffix, and the report ends with one legend line explaining it. A finding with no `?` rests entirely on verified rules.
 
 Token counts are approximate. drskill counts tokens with `tiktoken`'s `o200k_base` encoding, which is a reasonable estimate but will not match every harness's actual tokenizer or catalog rendering exactly.
+
+The seven injection checks flag surfaces; they do not verify intent. Static analysis cannot prove a skill benign or hostile, so every injection finding quotes the exact lines it judged and leaves the verdict to you. A clean scan is not a security guarantee, and a finding is not an accusation. Bundled files that are binary or larger than 1 MiB are recorded but not content scanned, and the report says so when that happens.
 
 The four description and instruction checks are heuristics. Their thresholds are tuned against real public skill sets to stay quiet on well-written skills, and every finding can be acknowledged, but they will miss paraphrased conflicts and will flag some judgment calls. The thresholds live in `drskill.toml`:
 
