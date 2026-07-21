@@ -415,3 +415,57 @@ def injection_credential_read(world: World, config: Config) -> list[Finding]:
             )
         )
     return out
+
+
+# The SkillJect pattern: the skill text demands its own bundled file runs
+# first or always. Both parts are required on one line. A plain pointer like
+# "run scripts/convert.py to convert the file" does not fire.
+_MANDATORY = [
+    re.compile(p, re.IGNORECASE)
+    for p in (
+        r"\b(you )?must\b.{0,30}\brun\b",
+        r"\bbefore (doing )?anything( else)?\b.{0,30}\brun\b",
+        r"\b(always|first),? (begin|start) by running\b",
+        r"\balways run\b",
+        r"\bfirst,? (run|execute)\b",
+        r"\brequired (first )?step\b.{0,30}\b(run|execute)\b",
+    )
+]
+
+
+@check("injection-mandatory-script")
+def injection_mandatory_script(world: World, config: Config) -> list[Finding]:
+    out = []
+    for c in world.contributors.values():
+        if not c.bundled_files:
+            continue
+        paths = {bf.relpath for bf in c.bundled_files}
+        paths |= {Path(bf.relpath).name for bf in c.bundled_files}
+        hits: list[Hit] = []
+        for s in scan_view(c):
+            if s.kind != "skillmd":
+                continue
+            for i, line in enumerate(s.lines, start=1):
+                if i < s.body_start:
+                    continue
+                if any(p.search(line) for p in _MANDATORY) and any(
+                    path in line for path in paths
+                ):
+                    hits.append((s, i, line))
+        if hits:
+            out.append(
+                make_finding(
+                    "injection-mandatory-script", "warning", [c],
+                    evidence_message(
+                        c,
+                        "demands that its own bundled script runs first",
+                        hits,
+                    ),
+                    fix_commands=[
+                        "Read the script before letting any agent run it"
+                    ],
+                    extra_key=c.name,
+                    fingerprint_texts=fingerprint_texts(hits),
+                )
+            )
+    return out
