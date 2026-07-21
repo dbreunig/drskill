@@ -159,3 +159,34 @@ def test_cache_unknown_action(tmp_path):
     r = runner.invoke(app, ["cache", "flush", "--root", str(proj)], env=env_for(tmp_path))
     assert r.exit_code == 1
     assert "stats or prune" in r.output
+
+
+def _distinct_cached(tmp_path, proj):
+    """Seed the cache so the overlap finding downgrades to a note."""
+    from drskill.ledger import Config
+    from drskill.pipeline import run_scan
+
+    home = tmp_path / "home"
+    world, findings = run_scan(proj, home, config=Config())
+    (pair,) = deep.flagged_pairs(world, findings)
+    seed_cache(proj / ".drskill" / "cache", deep.pair_key(*pair))
+
+
+def test_ack_all_skips_notes(tmp_path):
+    proj = overlap_project(tmp_path)
+    _distinct_cached(tmp_path, proj)
+    r = runner.invoke(app, ["ack", "--all", "--root", str(proj)], env=env_for(tmp_path))
+    # the only finding is a note, so there is nothing ackable
+    assert r.exit_code == 1
+    assert "No active finding" in r.output
+    assert not (proj / "drskill.toml").exists()
+
+
+def test_ack_note_by_check_id_refused(tmp_path):
+    proj = overlap_project(tmp_path)
+    _distinct_cached(tmp_path, proj)
+    r = runner.invoke(
+        app, ["ack", "description-overlap", "--root", str(proj)], env=env_for(tmp_path)
+    )
+    assert r.exit_code == 1
+    assert not (proj / "drskill.toml").exists()

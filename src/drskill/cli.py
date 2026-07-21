@@ -224,6 +224,9 @@ def ack(
     config = _load_effective_config_or_exit(root, home, global_mode)
     world, findings = run_scan(root, home, global_mode, config)
     active, _ = ledger.filter_findings(findings, config)
+    # Notes need no ack; sweeping them into the ledger would hide them and
+    # leave a stale ack behind if the verdict cache is ever pruned.
+    active = [f for f in active if f.severity != "note"]
     from drskill.checks import REGISTRY
 
     refs = refs or []
