@@ -8,9 +8,12 @@ import typer
 from rich.console import Console
 from rich.markup import escape
 
-from drskill import ledger, report, state
+from drskill import interactive, ledger, report, state
 from drskill.ledger import Ack
 from drskill.pipeline import run_scan
+
+key_source = interactive.read_key  # patched in tests
+line_source = input  # patched in tests
 
 INIT_TEMPLATE = """\
 # drskill configuration and decision ledger.
@@ -274,6 +277,107 @@ def show(
     report.print_findings(
         world, ordered, console, seen={f.fingerprint for f in targets}
     )  # seen = everything: show never tags new
+
+
+@app.command()
+def review(
+    root: Path = typer.Option(Path("."), "--root", hidden=True),
+    global_mode: bool = typer.Option(False, "--global"),
+    harness: str | None = typer.Option(None, "--harness"),
+) -> None:
+    """Walk the findings one at a time and decide each with one keypress."""
+    refusal = interactive.can_interact()
+    if refusal:
+        console.print(escape(refusal))
+        raise typer.Exit(1)
+    _validate_harness(harness)
+    home = _home()
+    config = _load_effective_config_or_exit(root, home, global_mode)
+    world, findings = run_scan(root, home, global_mode, config, harness=harness)
+    active, _ = ledger.filter_findings(findings, config)
+    if not active:
+        console.print("[green]No findings to review.[/green]")
+        return
+    spath = state.state_path(root, home, global_mode)
+    seen = set(state.load_seen(spath))
+    ordered = report.sort_findings(world, active, seen)
+    acked: list[tuple] = []  # (finding, destination path)
+    fixes: list[str] = []
+    undecided = 0
+    quit_early = False
+    for idx, f in enumerate(ordered, start=1):
+        console.print(f"[dim]{idx} of {len(ordered)}[/dim]")
+        report.print_findings(world, [f], console, seen=seen)
+        console.print(
+            "[bold]a[/bold] ack · [bold]n[/bold] ack+note · [bold]f[/bold] queue fix"
+            " · [bold]s[/bold] skip · [bold]q[/bold] quit"
+        )
+        while True:
+            key = key_source()
+            if key in ("a", "n"):
+                ack_note = None
+                if key == "n":
+                    ack_note = line_source("note: ").strip() or None
+                dest = ledger.ack_destination(world, f, root, home, global_mode)
+                ledger.append_ack(dest, Ack(
+                    check=f.check_id, skills=sorted(f.contributor_names),
+                    fingerprint=f.fingerprint, note=ack_note,
+                    date=dt.date.today(),
+                ))
+                acked.append((f, dest))
+                break
+            if key == "f":
+                fixes.extend(f.fix_commands)
+                break
+            if key == "s":
+                undecided += 1
+                break
+            if key in ("q", "\x03"):  # q or ctrl-c
+                quit_early = True
+                break
+            console.print("[dim]a/n/f/s/q[/dim]")
+        if quit_early:
+            undecided += len(ordered) - idx + 1
+            break
+    _review_summary(acked, fixes, undecided, home)
+    state.mark_seen(spath, [f.fingerprint for f in findings], dt.date.today())
+
+
+def _review_summary(
+    acked: list[tuple], fixes: list[str], undecided: int, home: Path
+) -> None:
+    from drskill.report import short_id
+
+    for f, dest in acked:
+        where = " → ~/.drskill.toml" if dest == home / ".drskill.toml" else ""
+        console.print(
+            f"acked [bold]{escape(short_id(f))}[/bold] "
+            f"{escape(f.check_id)}{escape(where)}"
+        )
+    if fixes:
+        block = "\n".join(fixes)
+        console.print("\nqueued fix commands:\n")
+        console.print(escape(block))
+        if _to_clipboard(block):
+            console.print("[dim](copied to clipboard)[/dim]")
+    if undecided:
+        console.print(
+            f"\n{undecided} finding{'s' if undecided != 1 else ''} left undecided"
+        )
+
+
+def _to_clipboard(text: str) -> bool:
+    import shutil
+    import subprocess
+
+    for cmd in (["pbcopy"], ["xclip", "-selection", "clipboard"], ["xsel", "-ib"]):
+        if shutil.which(cmd[0]):
+            try:
+                subprocess.run(cmd, input=text.encode(), check=True, timeout=5)
+                return True
+            except (OSError, subprocess.SubprocessError):
+                return False
+    return False
 
 
 @app.command("list")
