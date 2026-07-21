@@ -7,7 +7,7 @@ from drskill.checks import run_all
 from drskill.checks.lockfile import load_lockfile
 from drskill.discovery import discover
 from drskill.harnesses import detect_harnesses, load_harnesses
-from drskill.ledger import Config, ledger_path, load_config
+from drskill.ledger import Config, load_effective_config
 from drskill.models import Finding, Provenance
 from drskill.resolution import World, build_world
 
@@ -22,7 +22,8 @@ def run_scan(
     max_calls: int = 25,
 ) -> tuple[World, list[Finding]]:
     if config is None:
-        config = load_config(ledger_path(project_root, home, global_only))
+        # Same merge the CLI uses: machine-level acks are honored everywhere.
+        config = load_effective_config(project_root, home, global_only)
     if harness is None:
         harnesses = detect_harnesses(project_root, home, global_only)
     else:

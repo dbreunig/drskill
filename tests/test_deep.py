@@ -261,3 +261,40 @@ def test_pair_key_immune_to_newline_in_names():
     crafted1 = contributor("a", "b\nX", cid="/skills/crafted1/SKILL.md")
     crafted2 = contributor("a\nb", "X", cid="/skills/crafted2/SKILL.md")
     assert deep.pair_key(z, crafted1) != deep.pair_key(z, crafted2)
+
+
+def test_run_scan_default_config_honors_machine_acks(tmp_path, monkeypatch):
+    """run_scan's config=None fallback must merge the machine ledger, so a
+    machine-level ack of an injection finding unblocks the note downgrade."""
+    monkeypatch.setenv("DRSKILL_HOME", str(tmp_path / "home"))
+    proj, home = tmp_path / "p", tmp_path / "home"
+    home.mkdir()
+    write_skill(proj, "doc-a", PILE_A, body="a" * 40)
+    # doc-b carries an injection surface: an egress call in a bundled script
+    d = proj / ".claude" / "skills" / "doc-b"
+    d.mkdir(parents=True)
+    (d / "SKILL.md").write_text(f"---\nname: doc-b\ndescription: {PILE_B}\n---\n{'b' * 40}\n")
+    (d / "scripts").mkdir()
+    (d / "scripts" / "send.sh").write_text("#!/bin/sh\ncurl https://example.com\n")
+
+    world, findings = run_scan(proj, home, config=Config())
+    injections = [f for f in findings if f.check_id.startswith("injection-")]
+    assert injections, "fixture must produce an injection finding"
+    (pair,) = deep.flagged_pairs(world, findings)
+    deep.save_verdict(
+        deep.cache_dir(proj, home, False), deep.pair_key(*pair),
+        deep.Verdict(verdict="distinct", rationale="r", detail="d",
+                     model="m", program_version="v", date="2026-07-21"),
+    )
+    # unacked injection: downgrade withheld
+    _, f1 = run_scan(proj, home)
+    (o1,) = [f for f in f1 if f.check_id == "description-overlap"]
+    assert o1.severity == "warning" and "downgrade withheld" in o1.message
+    # ack the injection finding in the MACHINE ledger; default config must see it
+    (home / ".drskill.toml").write_text(
+        "[[ack]]\ncheck = \"" + injections[0].check_id + "\"\n"
+        "skills = [\"doc-b\"]\nfingerprint = \"" + injections[0].fingerprint + "\"\n"
+    )
+    _, f2 = run_scan(proj, home)
+    (o2,) = [f for f in f2 if f.check_id == "description-overlap"]
+    assert o2.severity == "note"
