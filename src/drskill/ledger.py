@@ -28,6 +28,10 @@ class Thresholds(BaseModel):
     generic_min_distinct_tokens: int = 2
 
 
+class Deep(BaseModel):
+    model: str = "anthropic/claude-sonnet-5"
+
+
 class Ack(BaseModel):
     check: str
     skills: list[str]
@@ -39,6 +43,7 @@ class Ack(BaseModel):
 class Config(BaseModel):
     budget: Budget = Budget()
     thresholds: Thresholds = Thresholds()
+    deep: Deep = Deep()
     ack: list[Ack] = Field(default_factory=list)
 
 
