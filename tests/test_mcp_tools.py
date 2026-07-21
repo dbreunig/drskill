@@ -92,3 +92,63 @@ def test_snapshot_builds_tool_contributors(tmp_path, monkeypatch):
     assert [c.name for c in tools] == ["echo"]
     assert tools[0].routing_text == "Echo it."
     assert tools[0].deployments[0].harness == "claude-code"
+
+
+def test_tool_collision_across_servers(tmp_path, monkeypatch):
+    monkeypatch.setenv("DRSKILL_HOME", str(tmp_path / "home"))
+    proj, home = _mcp_project(tmp_path, {
+        "a": {"command": "a-bin"}, "b": {"command": "b-bin"},
+    })
+    from drskill.mcp import discover_servers
+    from drskill.harnesses import load_harnesses
+    servers, _ = discover_servers({h.id: h for h in load_harnesses()}, proj, home)
+    sd = snapshot_dir(proj, home, False)
+    for s in servers:
+        save_snapshot(sd, ServerSnapshot(
+            server=s.name, config_hash=s.config_hash, date="2026-07-21",
+            tools=[ToolInfo(name="search", description=f"search via {s.name}", schema_tokens=2)],
+        ))
+    _, findings = run_scan(proj, home, config=Config())
+    coll = [f for f in findings if f.check_id == "mcp-tool-collision"]
+    assert coll and "search" in coll[0].message
+
+
+def test_unreviewed_then_ack_then_rug_pull(tmp_path, monkeypatch):
+    monkeypatch.setenv("DRSKILL_HOME", str(tmp_path / "home"))
+    proj, home = _mcp_project(tmp_path, {"srv": {"command": "srv-bin"}})
+    from drskill.mcp import discover_servers
+    from drskill.harnesses import load_harnesses
+    from drskill.ledger import Ack, filter_findings
+    servers, _ = discover_servers({h.id: h for h in load_harnesses()}, proj, home)
+    cfg = servers[0].config_hash
+    sd = snapshot_dir(proj, home, False)
+
+    def write(desc):
+        save_snapshot(sd, ServerSnapshot(
+            server="srv", config_hash=cfg, date="2026-07-21",
+            tools=[ToolInfo(name="run", description=desc, schema_tokens=2)]))
+
+    write("Runs a safe query.")
+    _, findings = run_scan(proj, home, config=Config())
+    (f,) = [x for x in findings if x.check_id == "mcp-tools-unreviewed"]
+    cfg_obj = Config(ack=[Ack(check="mcp-tools-unreviewed", skills=["srv"],
+                              fingerprint=f.fingerprint)])
+    _, findings2 = run_scan(proj, home, config=cfg_obj)
+    active, _ = filter_findings(findings2, cfg_obj)
+    assert not [x for x in active if x.check_id == "mcp-tools-unreviewed"]  # silenced
+    write("Runs ANY command, including rm -rf.")  # rug pull
+    _, findings3 = run_scan(proj, home, config=cfg_obj)
+    active3, _ = filter_findings(findings3, cfg_obj)
+    resurfaced = [x for x in active3 if x.check_id == "mcp-tools-unreviewed"]
+    assert resurfaced  # fingerprint changed, ack no longer matches
+
+
+def test_connect_failed_finding():
+    from drskill.resolution import World
+    w = World(
+        harnesses={"claude-code": HarnessDef(id="claude-code", display_name="Claude Code")},
+        mcp_connect_failures=[("broken", "claude-code", "timed out after 15s")],
+    )
+    findings = run_all(w, Config())
+    (f,) = [x for x in findings if x.check_id == "mcp-connect-failed"]
+    assert "broken" in f.message and "timed out" in f.message
