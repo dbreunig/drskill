@@ -78,6 +78,7 @@ def build_judge(model_id: str) -> JudgeFn:
                     name_a=a.name, description_a=a.routing_text,
                     name_b=b.name, description_b=b.routing_text,
                 )
+            judge.last_error = None  # reflects the most recent call only
             return JudgeResult(
                 verdict=out.verdict, rationale=out.rationale, detail=out.detail
             )
@@ -123,6 +124,10 @@ def build_rewriter(model_id: str) -> RewriteFn:
             if out.target not in (a.name, b.name):
                 rewrite.last_error = f"rewriter picked unknown target: {out.target!r}"
                 return None
+            if not out.rewritten_description.strip():
+                rewrite.last_error = "rewriter returned an empty description"
+                return None
+            rewrite.last_error = None  # reflects the most recent call only
             return RewriteResult(
                 target=out.target, text=out.rewritten_description, reason=out.reason
             )

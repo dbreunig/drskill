@@ -143,6 +143,24 @@ def unjudged_count(world, findings: list[Finding], cache: dict[str, Verdict]) ->
     return sum(1 for a, b in flagged_pairs(world, findings) if pair_key(a, b) not in cache)
 
 
+def pending_rewrites(world, findings: list[Finding], cache: dict[str, Verdict]) -> int:
+    """Collision verdicts still waiting for a rewrite proposal, because the
+    budget ran out or the rewrite call failed."""
+    out = 0
+    for a, b in flagged_pairs(world, findings):
+        v = cache.get(pair_key(a, b))
+        if v and v.verdict == "description_collision" and not v.rewrite_text:
+            out += 1
+    return out
+
+
+def _flat(s: str) -> str:
+    """Model and skill text rendered into single evidence lines must stay a
+    single line: an embedded newline would break the diff layout and could
+    forge report lines such as a fake fix command."""
+    return " ".join(s.split())
+
+
 def judge_pairs(
     world,
     findings: list[Finding],
@@ -159,67 +177,71 @@ def judge_pairs(
     failed earlier call are retried before any new pair is judged. Every
     result lands in `cache` and on disk as it arrives, so an interrupted
     run loses nothing. Returns (judged, remaining unjudged)."""
-    pairs = flagged_pairs(world, findings)
+    keyed = [(pair_key(a, b), a, b) for a, b in flagged_pairs(world, findings)]
     calls = 0
-    consecutive_failures = 0
+    # Three consecutive failures mean a persistent problem, so that program
+    # stops burning the budget. The counters are per program: a dead
+    # rewriter must not stop a healthy judge from judging new pairs.
+    judge_failures = 0
+    rewrite_failures = 0
 
     def budget_left() -> bool:
         return max_calls is None or calls < max_calls
 
-    def attempt(fn, *args):
-        # Three consecutive failures mean a persistent problem (bad key,
-        # dead network): stop burning the budget on calls that cannot land.
-        nonlocal calls, consecutive_failures
-        calls += 1
-        result = fn(*args)
-        if result is None:
-            consecutive_failures += 1
-        else:
-            consecutive_failures = 0
-        return result
-
-    def add_rewrite(key: str, a: Contributor, b: Contributor) -> None:
+    def attempt_rewrite(key: str, a: Contributor, b: Contributor) -> None:
+        nonlocal calls, rewrite_failures
         v = cache[key]
-        r = attempt(rewriter, a, b, v.detail)
-        if r is not None:
-            v = v.model_copy(update={
-                "rewrite_target": r.target,
-                "rewrite_text": r.text,
-                "rewrite_reason": r.reason,
-            })
-            cache[key] = v
-            save_verdict(cdir, key, v)
+        calls += 1
+        r = rewriter(a, b, v.detail)
+        if r is None or not r.text.strip():
+            # A blank proposal is a failure, never a cached rewrite.
+            rewrite_failures += 1
+            return
+        rewrite_failures = 0
+        v = v.model_copy(update={
+            "rewrite_target": r.target,
+            "rewrite_text": r.text,
+            "rewrite_reason": r.reason,
+        })
+        cache[key] = v
+        save_verdict(cdir, key, v)
 
     # Retry pass: collisions whose rewrite call failed on an earlier run.
     if rewriter is not None:
-        for a, b in pairs:
-            if not budget_left() or consecutive_failures >= 3:
+        for key, a, b in keyed:
+            if not budget_left() or rewrite_failures >= 3:
                 break
-            key = pair_key(a, b)
             v = cache.get(key)
-            if v and v.verdict == "description_collision" and v.rewrite_text is None:
-                add_rewrite(key, a, b)
+            if v and v.verdict == "description_collision" and not v.rewrite_text:
+                attempt_rewrite(key, a, b)
 
-    todo = [(a, b) for a, b in pairs if pair_key(a, b) not in cache]
+    todo = [(key, a, b) for key, a, b in keyed if key not in cache]
     judged = 0
-    for a, b in todo:
-        if not budget_left() or consecutive_failures >= 3:
+    for key, a, b in todo:
+        if not budget_left() or judge_failures >= 3:
             break
-        result = attempt(judge, a, b)
+        calls += 1
+        result = judge(a, b)
         if result is None:  # errored or unparseable call: never cached
+            judge_failures += 1
             continue
+        judge_failures = 0
         v = Verdict(
             **result.model_dump(),
             model=model_id,
             program_version=PROGRAM_VERSION,
             date=dt.date.today().isoformat(),
         )
-        key = pair_key(a, b)
         cache[key] = v
         save_verdict(cdir, key, v)
         judged += 1
-        if rewriter is not None and v.verdict == "description_collision" and budget_left():
-            add_rewrite(key, a, b)
+        if (
+            rewriter is not None
+            and v.verdict == "description_collision"
+            and budget_left()
+            and rewrite_failures < 3
+        ):
+            attempt_rewrite(key, a, b)
     return judged, len(todo) - judged
 
 
@@ -276,18 +298,18 @@ def apply_verdicts(
         extra_fixes = []
         for (an, bn), v in judged.items():
             if v.verdict == "distinct":
-                lines.append(f"\n      deep: {an} vs {bn}: distinct; {v.rationale}")
+                lines.append(f"\n      deep: {an} vs {bn}: distinct; {_flat(v.rationale)}")
                 continue
             lines.append(
-                f"\n      deep: {an} vs {bn}: {v.verdict}; {v.rationale}; "
-                f"confusion example: '{v.detail}'"
+                f"\n      deep: {an} vs {bn}: {v.verdict}; {_flat(v.rationale)}; "
+                f"confusion example: '{_flat(v.detail)}'"
             )
             target = by_name.get(v.rewrite_target or "")
             if v.verdict == "description_collision" and v.rewrite_text and target:
                 lines.append(
-                    f"\n      deep: rewrite for {target.name} ({v.rewrite_reason}):"
-                    f"\n      - {target.routing_text}"
-                    f"\n      + {v.rewrite_text}"
+                    f"\n      deep: rewrite for {target.name} ({_flat(v.rewrite_reason or '')}):"
+                    f"\n      - {_flat(target.routing_text)}"
+                    f"\n      + {_flat(v.rewrite_text)}"
                 )
                 extra_fixes.append(
                     "Review the proposed description above, then edit "

@@ -327,3 +327,19 @@ def test_deep_scan_reports_rewriter_error(tmp_path, monkeypatch):
     r = runner.invoke(app, ["scan", "--root", str(proj), "--deep"], env=env_for(tmp_path))
     assert "model calls are failing" in r.output
     assert "RateLimitError" in r.output
+
+
+def test_deferred_rewrite_reports_pending(tmp_path, monkeypatch):
+    proj = overlap_project(tmp_path)
+    monkeypatch.setattr(
+        deep_llm, "build_judge",
+        fake_builder(deep.JudgeResult(
+            verdict="description_collision", rationale="r", detail="d"
+        )),
+    )
+    # budget of 1: the verdict lands, the rewrite is deferred
+    r = runner.invoke(
+        app, ["scan", "--root", str(proj), "--deep", "--max-calls", "1"],
+        env=env_for(tmp_path),
+    )
+    assert "1 rewrite proposal pending" in r.output

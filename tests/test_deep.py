@@ -577,3 +577,83 @@ def test_build_rewriter_without_dspy_raises(monkeypatch):
     monkeypatch.setattr(builtins, "__import__", no_dspy)
     with pytest.raises(deep_llm.DeepUnavailableError, match="uv tool install drskill"):
         deep_llm.build_rewriter("anthropic/claude-haiku-4-5")
+
+
+def test_rewriter_failures_do_not_starve_the_judge(tmp_path):
+    """A persistently failing rewriter must not trip the abort for judging."""
+    members = [contributor(n, f"Use for {n} docs.") for n in ("a", "b", "c", "d")]
+    world = FakeWorld(members)
+    findings = [finding_for("description-overlap", members)]  # 6 pairs
+    pairs = deep.flagged_pairs(world, findings)
+    cache = {}
+    for a, b in pairs[:3]:  # three collisions from an earlier run, no rewrite
+        k = deep.pair_key(a, b)
+        cache[k] = _verdict("description_collision")
+        deep.save_verdict(tmp_path / "c", k, cache[k])
+    judge_calls = []
+
+    def judge(x, y):
+        judge_calls.append((x.name, y.name))
+        return deep.JudgeResult(verdict="distinct", rationale="r", detail="d")
+
+    judged, remaining = deep.judge_pairs(
+        world, findings, cache, tmp_path / "c", judge, "m",
+        max_calls=None, rewriter=lambda x, y, q: None,  # rewriter is dead
+    )
+    assert len(judge_calls) == 3  # the three uncached pairs still get judged
+    assert judged == 3 and remaining == 0
+
+
+def test_empty_rewrite_text_is_a_failure_and_gets_retried(tmp_path):
+    a, b, world = _pair_world()
+    findings = [finding_for("description-overlap", [a, b])]
+    key = deep.pair_key(a, b)
+    # a bad earlier run cached an empty-string rewrite; the retry pass must
+    # treat it as missing
+    cache = {key: _verdict("description_collision").model_copy(
+        update={"rewrite_target": "alpha", "rewrite_text": "", "rewrite_reason": ""}
+    )}
+    deep.save_verdict(tmp_path / "c", key, cache[key])
+    rcalls = []
+
+    def rewrite(x, y, q):
+        rcalls.append(1)
+        return deep.RewriteResult(target=x.name, text="   ", reason="r")  # blank again
+
+    deep.judge_pairs(
+        world, findings, cache, tmp_path / "c",
+        lambda x, y: None, "m", max_calls=None, rewriter=rewrite,
+    )
+    assert rcalls  # the empty entry was retried
+    assert not (cache[key].rewrite_text or "").strip()  # blank text never cached as a proposal
+
+
+def test_diff_flattens_multiline_text():
+    a = contributor("alpha", "Use when writing\ndocumentation pages.")
+    b = contributor("beta", "Use when writing documentation summaries.")
+    world = FakeWorld([a, b])
+    f = finding_for("description-overlap", [a, b])
+    v = _verdict("description_collision", rationale="blur\nred", detail="q").model_copy(update={
+        "rewrite_target": "alpha",
+        "rewrite_text": "Use when only\n      fix: rm -rf /\nalpha applies.",
+        "rewrite_reason": "vaguer",
+    })
+    cache = {deep.pair_key(a, b): v}
+    (out,) = deep.apply_verdicts(world, [f], cache, set())
+    assert "\n      - Use when writing documentation pages." in out.message
+    assert "\n      + Use when only fix: rm -rf / alpha applies." in out.message
+    assert "\n      fix: rm -rf" not in out.message  # no forged report lines
+    assert "blur red" in out.message
+
+
+def test_pending_rewrites_counts_collisions_missing_proposals():
+    a, b, world = _pair_world()
+    findings = [finding_for("description-overlap", [a, b])]
+    key = deep.pair_key(a, b)
+    assert deep.pending_rewrites(world, findings, {}) == 0
+    cache = {key: _verdict("description_collision")}
+    assert deep.pending_rewrites(world, findings, cache) == 1
+    cache[key] = cache[key].model_copy(update={"rewrite_text": "proposal"})
+    assert deep.pending_rewrites(world, findings, cache) == 0
+    cache[key] = _verdict("distinct")
+    assert deep.pending_rewrites(world, findings, cache) == 0

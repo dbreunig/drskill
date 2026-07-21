@@ -189,13 +189,8 @@ def scan(
                 spath, [f.fingerprint for f in findings], dt.date.today()
             )
         if deep_mode:
-            last_error = next(
-                (
-                    getattr(p, "last_error", None)
-                    for p in (judge, rewriter)
-                    if getattr(p, "last_error", None)
-                ),
-                None,
+            last_error = getattr(judge, "last_error", None) or getattr(
+                rewriter, "last_error", None
             )
             if last_error:
                 flat = " ".join(str(last_error).split())
@@ -210,6 +205,13 @@ def scan(
                 console.print(
                     f"deep: {remaining} flagged pair{plural} still unjudged; "
                     "raise --max-calls to judge more"
+                )
+            pending = deep.pending_rewrites(world, active, cache)
+            if pending:
+                plural = "s" if pending != 1 else ""
+                console.print(
+                    f"deep: {pending} rewrite proposal{plural} pending; "
+                    "rerun --deep to generate"
                 )
         if detailed:
             console.print()
