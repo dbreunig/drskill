@@ -87,6 +87,42 @@ def main() -> None:
     pass
 
 
+def _resolve_refs(refs: list[str], active: list) -> list:
+    """Resolve 4-hex finding ids and bare check ids to active findings.
+    Exits 1 on no match or on an ambiguous id. Shared by ack and show."""
+    import re
+
+    from drskill.checks import REGISTRY
+
+    targets: list = []
+    for ref in refs:
+        if ref in REGISTRY:
+            matches = [f for f in active if f.check_id == ref]
+            if not matches:
+                console.print(f"[red]No active finding matches[/red] {escape(ref)}")
+                raise typer.Exit(1)
+            targets += [f for f in matches if f not in targets]
+        elif re.fullmatch(r"[0-9a-f]{4,64}", ref):
+            hits = [f for f in active if f.fingerprint.split(":", 1)[1].startswith(ref)]
+            if not hits:
+                console.print(f"[red]No active finding matches[/red] id {escape(ref)}")
+                raise typer.Exit(1)
+            if len(hits) > 1:
+                console.print(
+                    f"[red]Ambiguous id[/red] {escape(ref)}: matches "
+                    f"{len(hits)} findings; use more characters"
+                )
+                raise typer.Exit(1)
+            if hits[0] not in targets:
+                targets.append(hits[0])
+        else:
+            console.print(
+                f"[red]Not a finding id or check id:[/red] {escape(ref)}"
+            )
+            raise typer.Exit(1)
+    return targets
+
+
 @app.command()
 def scan(
     root: Path = typer.Option(Path("."), "--root", hidden=True),
@@ -190,19 +226,7 @@ def ack(
             raise typer.Exit(1)
         targets = matches
     elif refs and all(re.fullmatch(r"[0-9a-f]{4,64}", r) for r in refs):
-        for ref in refs:
-            hits = [f for f in active if f.fingerprint.split(":", 1)[1].startswith(ref)]
-            if not hits:
-                console.print(f"[red]No active finding matches[/red] id {escape(ref)}")
-                raise typer.Exit(1)
-            if len(hits) > 1:
-                console.print(
-                    f"[red]Ambiguous id[/red] {escape(ref)}: matches "
-                    f"{len(hits)} findings; use more characters"
-                )
-                raise typer.Exit(1)
-            if hits[0] not in targets:
-                targets.append(hits[0])
+        targets = _resolve_refs(refs, active)
     else:
         console.print(
             "[red]Nothing to ack:[/red] pass finding ids from the report, "
@@ -230,6 +254,26 @@ def ack(
         console.print(f"Acknowledged [bold]{escape(label)}[/bold]{escape(suffix)}")
     for dest, n in dest_counts.items():
         console.print(f"{n} finding{'s' if n != 1 else ''} → {escape(str(dest))}")
+
+
+@app.command()
+def show(
+    refs: list[str] = typer.Argument(..., help="finding ids or check ids"),
+    root: Path = typer.Option(Path("."), "--root", hidden=True),
+    global_mode: bool = typer.Option(False, "--global"),
+    harness: str | None = typer.Option(None, "--harness"),
+) -> None:
+    """Print the full evidence for specific findings."""
+    _validate_harness(harness)
+    home = _home()
+    config = _load_effective_config_or_exit(root, home, global_mode)
+    world, findings = run_scan(root, home, global_mode, config, harness=harness)
+    active, _ = ledger.filter_findings(findings, config)
+    targets = _resolve_refs(refs, active)
+    ordered = report.sort_findings(world, targets, set())
+    report.print_findings(
+        world, ordered, console, seen={f.fingerprint for f in targets}
+    )  # seen = everything: show never tags new
 
 
 @app.command("list")

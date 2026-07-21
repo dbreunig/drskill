@@ -259,3 +259,29 @@ def test_local_flag_forces_project_ledger(tmp_path):
     assert r.exit_code == 0
     assert (proj / "drskill.toml").exists()
     assert not (tmp_path / "home" / ".drskill.toml").exists()
+
+
+def test_show_by_id_and_check(tmp_path):
+    proj = tmp_path / "proj"
+    _mk(proj, "one")
+    write(proj, "vague", "Helps with various tasks.", "b")
+    r = invoke(tmp_path, "scan")
+    sids = sorted(set(_short_ids(r.output)))
+    assert len(sids) == 2
+    r_id = invoke(tmp_path, "show", sids[0])
+    assert r_id.exit_code == 0
+    assert sids[0] in r_id.output
+    r_check = invoke(tmp_path, "show", "missing-activation")
+    assert r_check.exit_code == 0
+    assert "missing-activation" in r_check.output and "one" in r_check.output
+    r_bad = invoke(tmp_path, "show", "dead")
+    assert r_bad.exit_code == 1
+    assert "No active finding" in r_bad.output
+
+
+def test_show_does_not_write_state(tmp_path):
+    proj = tmp_path / "proj"
+    _mk(proj, "one")
+    r = invoke(tmp_path, "show", "missing-activation")
+    assert r.exit_code == 0
+    assert not (tmp_path / "home" / ".drskill").exists()
