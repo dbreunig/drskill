@@ -149,6 +149,26 @@ def render(
         summary += f" ({len(acked)} acknowledged)"
     summary += " · token counts are approximate"
     console.print(summary)
+    binary = oversize = 0
+    affected = 0
+    for c in world.contributors.values():
+        skipped = [f for f in c.bundled_files if not f.is_text or f.oversize]
+        if skipped:
+            affected += 1
+            binary += sum(1 for f in skipped if not f.is_text)
+            oversize += sum(1 for f in skipped if f.is_text and f.oversize)
+    if binary or oversize:
+        parts = []
+        if binary:
+            parts.append(f"{binary} binary")
+        if oversize:
+            parts.append(f"{oversize} over 1 MiB")
+        total = binary + oversize
+        console.print(
+            f"[dim]{total} bundled file{'s' if total != 1 else ''} not content "
+            f"scanned ({', '.join(parts)}) across {affected} "
+            f"skill{'s' if affected != 1 else ''}[/dim]"
+        )
     if any_marked:
         console.print(
             "[dim]? = drskill has not verified this harness's skill-loading rules[/dim]"

@@ -202,3 +202,30 @@ def test_header_plain_when_no_empty():
     text = render_to_text(world, [], [])
     assert "more empty" not in text
     assert "1 harness, 1 skills" in text
+
+
+def test_render_reports_unscanned_bundled_files(tmp_path):
+    from rich.console import Console
+
+    from drskill.discovery import discover
+    from drskill.harnesses import HarnessDef
+    from drskill.resolution import build_world
+    from drskill.report import render
+
+    d = tmp_path / ".claude" / "skills" / "assets"
+    d.mkdir(parents=True)
+    (d / "SKILL.md").write_text(
+        "---\nname: assets\ndescription: Use when testing.\n---\nBody.\n"
+    )
+    (d / "logo.png").write_bytes(b"\x89PNG\x00\x00")
+    h = HarnessDef(
+        id="t3", display_name="T3",
+        paths_verified=True, precedence_verified=True,
+        project_paths=[".claude/skills"], recursive=True,
+    )
+    instances, broken = discover(h, tmp_path, tmp_path / "no-home")
+    world = build_world(instances, {"t3": h}, broken)
+    console = Console(record=True, width=120)
+    render(world, [], [], console)
+    text = console.export_text()
+    assert "1 bundled file not content scanned (1 binary) across 1 skill" in text
