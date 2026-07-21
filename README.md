@@ -30,6 +30,21 @@ Acknowledge a finding so it stops showing up until the skill's content changes:
 drskill ack near-duplicate docx-report documentation-writer
 ```
 
+Walk the findings one at a time and decide each with one keypress:
+
+```
+drskill review
+```
+
+`review` shows each finding with its full evidence and takes single-key actions: `a` acks it, `n` acks it with a note, `f` queues its fix commands for a copy and paste block at the end, `s` skips it, and `q` quits. Acks are written as you go, so quitting midway loses nothing. `review` only runs in a real terminal. When stdin or stdout is not a TTY, or `CI` or `DRSKILL_NO_INTERACTIVE` is set, it prints one line pointing at `scan` and `ack` and exits. `scan` itself never prompts, so a script or an agent calling drskill can never get stuck at a prompt.
+
+Print the full evidence for one finding, or for a whole check class:
+
+```
+drskill show fe5b
+drskill show injection-egress
+```
+
 List every harness's effective skill set with token counts:
 
 ```
@@ -111,6 +126,12 @@ date = 2026-07-19
 A finding's fingerprint is a hash of the check id plus the content of every skill involved. An ack silences a finding only while that fingerprint still matches. If you edit one of the skills named in the ack, its content hash changes, the fingerprint no longer matches, and the finding comes back on the next scan. This is deliberate. An ack means "this exact situation is fine," not "never check this pair again."
 
 In global mode (`--global`), the ledger lives at `~/.drskill.toml` instead.
+
+Acks are scope aware. When a finding involves only machine-level skills, e.g. a vendored skill under your home directory that has nothing to do with the current repo, `drskill ack` writes the ack to `~/.drskill.toml` and says so. Every project scan honors acks from both ledgers, so you decide once per machine instead of once per repo. When any project skill is involved, the ack goes to the project's committed `drskill.toml` as before. Two flags override the routing: `--local` forces the project ledger, and `--global-ack` forces the machine ledger.
+
+## Reading the report
+
+Findings print errors first, then warnings. Inside each section the order is: findings you have not seen before, then findings on skills you installed, then findings on harness-vendored skills, which carry a `[system skill]` label. A finding you have not seen carries a `new` tag, and the summary line counts them. The memory behind the `new` tag lives in `~/.drskill/state/`, one small file per project. It only records what the report has shown you; it is not the ledger, and `--json` runs never touch it, so an agent polling drskill does not clear your markers. When a finding affects every detected harness, the harness line collapses to a count, e.g. "all 7 harnesses". Checks that flag description quality report one finding listing every offending skill, so three skills with the same problem are one entry and one ack.
 
 The `source` column in `list` shows where a skill came from: `skills-lock` for skills named in a project's `skills-lock.json`, `gh-skill` for skills with `gh skill` provenance in their frontmatter, and `linked` for skills that live in or link into a `.agents/skills` store. The `linked` label means an installer arranged the layout; drskill does not guess which one. `unmanaged` means a plain directory with no known manager.
 

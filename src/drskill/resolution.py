@@ -202,6 +202,9 @@ def build_world(
                 order=inst.order,
             )
         )
+    for c in world.contributors.values():
+        paths = [Path(c.id), *(d.path for d in c.deployments)]
+        c.system = any(".system" in p.parts for p in paths)
     _mark_shadows(world)
     return world
 

@@ -84,3 +84,59 @@ def test_append_ack_round_trip(tmp_path):
     assert "note" not in data["ack"][1]  # None fields omitted for tomli-w
     cfg = load_config(p)
     assert len(cfg.ack) == 2
+
+
+def test_effective_config_merges_global_acks(tmp_path):
+    from drskill.ledger import load_effective_config
+
+    proj = tmp_path / "proj"
+    proj.mkdir()
+    home = tmp_path / "home"
+    home.mkdir()
+    (proj / "drskill.toml").write_text(
+        '[[ack]]\ncheck = "a"\nskills = []\nfingerprint = "sha256:p"\n'
+    )
+    (home / ".drskill.toml").write_text(
+        '[[ack]]\ncheck = "b"\nskills = []\nfingerprint = "sha256:g"\n'
+    )
+    cfg = load_effective_config(proj, home, False)
+    assert {a.fingerprint for a in cfg.ack} == {"sha256:p", "sha256:g"}
+    gcfg = load_effective_config(proj, home, True)
+    assert {a.fingerprint for a in gcfg.ack} == {"sha256:g"}
+
+
+def test_ack_destination_routes_by_scope(tmp_path):
+    from drskill.ledger import ack_destination
+    from drskill.models import Contributor, Finding, TokenCost
+    from drskill.resolution import World
+
+    proj = tmp_path / "proj"
+    home = tmp_path / "home"
+
+    def contributor(cid, scope):
+        return Contributor(
+            id=cid, name=cid, scope=scope,
+            token_cost=TokenCost(catalog_tokens=0, body_tokens=0),
+            content_hash="sha256:0",
+        )
+
+    user_c = contributor("/home/u/.claude/skills/g/SKILL.md", "user")
+    proj_c = contributor("/repo/.claude/skills/p/SKILL.md", "project")
+    world = World(contributors={user_c.id: user_c, proj_c.id: proj_c})
+
+    def finding(contributors):
+        return Finding(
+            check_id="x", severity="warning", contributors=contributors,
+            contributor_names=[], harnesses=[], message="m",
+            fingerprint="sha256:f",
+        )
+
+    global_only = finding([user_c.id])
+    mixed = finding([user_c.id, proj_c.id])
+    none = finding([])
+    assert ack_destination(world, global_only, proj, home, False) == home / ".drskill.toml"
+    assert ack_destination(world, mixed, proj, home, False) == proj / "drskill.toml"
+    assert ack_destination(world, none, proj, home, False) == proj / "drskill.toml"
+    assert ack_destination(world, mixed, proj, home, False, force_global=True) == home / ".drskill.toml"
+    assert ack_destination(world, global_only, proj, home, False, force_local=True) == proj / "drskill.toml"
+    assert ack_destination(world, global_only, proj, home, True) == home / ".drskill.toml"

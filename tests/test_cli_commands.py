@@ -168,7 +168,9 @@ def test_ack_by_short_id(tmp_path):
 def test_ack_several_short_ids(tmp_path):
     proj = tmp_path / "proj"
     _mk(proj, "one")
-    _mk(proj, "two")
+    # a second finding of a different check, since same-check advisory
+    # findings now merge into one cluster
+    write(proj, "vague", "Helps with various tasks.", "b")
     r = invoke(tmp_path, "scan")
     sids = sorted(set(_short_ids(r.output)))
     assert len(sids) == 2
@@ -183,7 +185,10 @@ def test_ack_check_all(tmp_path):
         _mk(proj, n)
     r = invoke(tmp_path, "ack", "missing-activation", "--all")
     assert r.exit_code == 0
-    assert r.output.count("missing-activation") >= 3
+    # the three offenders merge into one cluster finding naming them all
+    assert "missing-activation" in r.output
+    for name in ("one", "two", "three"):
+        assert name in r.output
     assert invoke(tmp_path, "scan", "--ci").exit_code == 0
 
 
@@ -197,7 +202,8 @@ def test_ack_all_everything(tmp_path):
     import tomllib
     data = tomllib.loads((proj / "drskill.toml").read_text())
     assert all(a.get("note") == "baseline" for a in data["ack"])
-    assert len(data["ack"]) >= 3  # missing-activation x2 + generic + overlap...
+    # merged clusters: one missing-activation + one generic-description (+ overlap)
+    assert len(data["ack"]) >= 2
 
 
 def test_ack_unknown_id_errors(tmp_path):
@@ -214,5 +220,68 @@ def test_bare_check_id_acks_whole_class(tmp_path):
         _mk(proj, n)
     r = invoke(tmp_path, "ack", "missing-activation")
     assert r.exit_code == 0
-    assert r.output.count("missing-activation") >= 3
+    assert "missing-activation" in r.output
+    for name in ("one", "two", "three"):
+        assert name in r.output
     assert invoke(tmp_path, "scan", "--ci").exit_code == 0
+
+
+def _mk_global(tmp_path, name, description):
+    home = tmp_path / "home"
+    d = home / ".claude" / "skills" / name
+    d.mkdir(parents=True)
+    (d / "SKILL.md").write_text(
+        f"---\nname: {name}\ndescription: {description}\n---\nbody\n"
+    )
+
+
+def test_machine_level_finding_acks_globally(tmp_path):
+    proj = tmp_path / "proj"
+    proj.mkdir()
+    (tmp_path / "home").mkdir(exist_ok=True)
+    _mk_global(tmp_path, "gskill", "Formats code.")  # missing-activation, user scope
+    r = invoke(tmp_path, "ack", "missing-activation")
+    assert r.exit_code == 0
+    assert "machine-level" in r.output
+    home_ledger = tmp_path / "home" / ".drskill.toml"
+    assert home_ledger.exists() and "missing-activation" in home_ledger.read_text()
+    assert not (proj / "drskill.toml").exists()
+    # the merged config silences the finding on the next project scan
+    assert invoke(tmp_path, "scan", "--ci").exit_code == 0
+
+
+def test_local_flag_forces_project_ledger(tmp_path):
+    proj = tmp_path / "proj"
+    proj.mkdir()
+    (tmp_path / "home").mkdir(exist_ok=True)
+    _mk_global(tmp_path, "gskill", "Formats code.")
+    r = invoke(tmp_path, "ack", "missing-activation", "--local")
+    assert r.exit_code == 0
+    assert (proj / "drskill.toml").exists()
+    assert not (tmp_path / "home" / ".drskill.toml").exists()
+
+
+def test_show_by_id_and_check(tmp_path):
+    proj = tmp_path / "proj"
+    _mk(proj, "one")
+    write(proj, "vague", "Helps with various tasks.", "b")
+    r = invoke(tmp_path, "scan")
+    sids = sorted(set(_short_ids(r.output)))
+    assert len(sids) == 2
+    r_id = invoke(tmp_path, "show", sids[0])
+    assert r_id.exit_code == 0
+    assert sids[0] in r_id.output
+    r_check = invoke(tmp_path, "show", "missing-activation")
+    assert r_check.exit_code == 0
+    assert "missing-activation" in r_check.output and "one" in r_check.output
+    r_bad = invoke(tmp_path, "show", "dead")
+    assert r_bad.exit_code == 1
+    assert "No active finding" in r_bad.output
+
+
+def test_show_does_not_write_state(tmp_path):
+    proj = tmp_path / "proj"
+    _mk(proj, "one")
+    r = invoke(tmp_path, "show", "missing-activation")
+    assert r.exit_code == 0
+    assert not (tmp_path / "home" / ".drskill").exists()

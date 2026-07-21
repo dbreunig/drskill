@@ -294,3 +294,20 @@ def test_bare_md_skill_has_no_bundled_files(tmp_path):
     world = build_world(instances, {"t3": h}, broken)
     loose = [c for c in world.contributors.values() if c.name == "loose"]
     assert loose and loose[0].bundled_files == []
+
+
+def test_system_skill_classified_by_dot_system_segment(tmp_path):
+    d = tmp_path / ".claude" / "skills" / ".system" / "vendor-skill"
+    d.mkdir(parents=True)
+    (d / "SKILL.md").write_text(
+        "---\nname: vendor-skill\ndescription: Use when testing.\n---\nBody.\n"
+    )
+    e = tmp_path / ".claude" / "skills" / "mine"
+    e.mkdir(parents=True)
+    (e / "SKILL.md").write_text(
+        "---\nname: mine\ndescription: Use when testing.\n---\nBody.\n"
+    )
+    world = _bundled_world(tmp_path)
+    by_name = {c.name: c for c in world.contributors.values()}
+    assert by_name["vendor-skill"].system
+    assert not by_name["mine"].system

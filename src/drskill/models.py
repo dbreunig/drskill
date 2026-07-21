@@ -60,6 +60,7 @@ class Contributor(BaseModel):
     frontmatter_valid: bool = True
     frontmatter: dict = Field(default_factory=dict)
     frontmatter_text: str = ""
+    system: bool = False  # lives under a `.system` dir: a harness-vendored skill
 
 
 class Finding(BaseModel):

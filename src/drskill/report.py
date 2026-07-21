@@ -102,15 +102,40 @@ def _facet_unverified(world: World, f: Finding, hid: str) -> bool:
     return not hdef.paths_verified
 
 
+def _all_system(world: World, f: Finding) -> bool:
+    cs = [world.contributors.get(cid) for cid in f.contributors]
+    cs = [c for c in cs if c is not None]
+    return bool(cs) and all(c.system for c in cs)
+
+
+def sort_findings(
+    world: World, findings: list[Finding], seen: set[str]
+) -> list[Finding]:
+    """New before seen, your skills before harness-vendored ones, then a
+    stable check/message tiebreak."""
+    return sorted(
+        findings,
+        key=lambda f: (
+            0 if f.fingerprint not in seen else 1,
+            1 if _all_system(world, f) else 0,
+            f.check_id,
+            f.message,
+        ),
+    )
+
+
 def short_id(f: Finding) -> str:
     """First four hex chars of the fingerprint: the finding's ack handle."""
     return f.fingerprint.split(":", 1)[1][:4]
 
 
-def _print_finding(world: World, f: Finding, console: Console) -> bool:
+def _print_finding(
+    world: World, f: Finding, console: Console, new: bool = False
+) -> bool:
     marked = False
+    tag = "[bold cyan]new[/bold cyan] " if new else ""
     console.print(
-        f"  [[bold]{escape(short_id(f))}[/bold]] {escape(f.check_id)}: "
+        f"  [[bold]{escape(short_id(f))}[/bold]] {tag}{escape(f.check_id)}: "
         f"{escape(_sanitize(f.message))}"
     )
     if f.harnesses:
@@ -121,15 +146,38 @@ def _print_finding(world: World, f: Finding, console: Console) -> bool:
                 marked = True
             else:
                 labels.append(hid)
-        console.print(f"      harnesses: {escape(', '.join(labels))}")
+        detected = set(world.harnesses)
+        if len(detected) >= 2 and set(f.harnesses) == detected:
+            qm = [label for label in labels if label.endswith("?")]
+            line = f"all {len(detected)} harnesses"
+            if qm:
+                line += f" ({', '.join(qm)})"
+        else:
+            line = ", ".join(labels)
+        suffix = "  [dim]\\[system skill][/dim]" if _all_system(world, f) else ""
+        console.print(f"      harnesses: {escape(line)}{suffix}")
     for cmd in f.fix_commands:
         console.print(f"      fix: {escape(_sanitize(cmd))}")
     console.print()
     return marked
 
 
+def print_findings(
+    world: World,
+    findings: list[Finding],
+    console: Console,
+    seen: set[str] | frozenset[str] = frozenset(),
+) -> None:
+    for f in findings:
+        _print_finding(world, f, console, new=f.fingerprint not in seen)
+
+
 def render(
-    world: World, active: list[Finding], acked: list[Finding], console: Console
+    world: World,
+    active: list[Finding],
+    acked: list[Finding],
+    console: Console,
+    seen: set[str] | frozenset[str] = frozenset(),
 ) -> None:
     populated = [hid for hid in world.harnesses if world.effective(hid)]
     empty = len(world.harnesses) - len(populated)
@@ -140,25 +188,38 @@ def render(
         header += f" ({empty} more empty)"
     header += f", {n_skills} skills"
     console.print(header)
-    errors = [f for f in active if f.severity == "error"]
-    warnings = [f for f in active if f.severity == "warning"]
+    ordered = sort_findings(world, active, set(seen))
+    errors = [f for f in ordered if f.severity == "error"]
+    warnings = [f for f in ordered if f.severity == "warning"]
+    new_count = sum(1 for f in ordered if f.fingerprint not in seen)
     if not active:
         console.print("\n[green]No findings.[/green]", end="")
     any_marked = False
     if errors:
         console.print("\n[red bold]ERRORS[/red bold]")
         for f in errors:
-            any_marked = _print_finding(world, f, console) or any_marked
+            any_marked = (
+                _print_finding(world, f, console, new=f.fingerprint not in seen)
+                or any_marked
+            )
     if warnings:
         console.print("\n[yellow bold]WARNINGS[/yellow bold]")
         for f in warnings:
-            any_marked = _print_finding(world, f, console) or any_marked
+            any_marked = (
+                _print_finding(world, f, console, new=f.fingerprint not in seen)
+                or any_marked
+            )
     summary = (
         f"\n{len(errors)} error{'s' if len(errors) != 1 else ''}, "
         f"{len(warnings)} warning{'s' if len(warnings) != 1 else ''}"
     )
+    extras = []
+    if new_count:
+        extras.append(f"{new_count} new")
     if acked:
-        summary += f" ({len(acked)} acknowledged)"
+        extras.append(f"{len(acked)} acknowledged")
+    if extras:
+        summary += f" ({', '.join(extras)})"
     summary += " · token counts are approximate"
     console.print(summary)
     binary = oversize = 0
@@ -186,12 +247,13 @@ def render(
             "[dim]? = drskill has not verified this harness's skill-loading rules[/dim]"
         )
     if active:
-        example = " ".join(short_id(f) for f in active[:2])
+        example = " ".join(short_id(f) for f in ordered[:2])
         console.print(f"\nack findings by id, e.g. `drskill ack {escape(example)}`:")
-        width = max(len(f.check_id) for f in active)
-        for f in active:
+        width = max(len(f.check_id) for f in ordered)
+        for f in ordered:
             names = ", ".join(f.contributor_names)
+            tag = " [bold cyan]new[/bold cyan]" if f.fingerprint not in seen else "    "
             console.print(
-                f"  [bold]{escape(short_id(f))}[/bold] "
+                f"  [bold]{escape(short_id(f))}[/bold]{tag} "
                 f"{escape(f.check_id.ljust(width))}  {escape(_sanitize(names))}"
             )
