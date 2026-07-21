@@ -14,7 +14,9 @@ This cycle ships the whole pipeline with hand written prompts. A later cycle com
 
 ## Install and configuration
 
-The `[deep]` extras group holds the one new dependency, `dspy`, which brings LiteLLM with it. Nothing in the default install changes. `dspy` is imported lazily. A scan without `--deep` never loads it, which keeps the existing CLI startup rule.
+The `[deep]` extras group holds the one new dependency, `dspy`, which brings LiteLLM with it. `dspy` is imported lazily. A scan without `--deep` never loads it, which keeps the existing CLI startup rule.
+
+Packaging inverted after implementation, by the user's decision. The PyPI package `drskill` is now a metapackage, defined in `packaging/drskill/pyproject.toml`, that depends on `drskill-core[deep]` at the same version. This repo's code builds as `drskill-core`. So the default install carries the deep tier from the start, and CI opts down to `drskill-core` instead of humans opting up. A release publishes both packages, core first, with versions kept equal.
 
 The ledger gains a `[deep]` section with one key:
 
@@ -29,7 +31,7 @@ API keys come from the environment, through the standard LiteLLM variables such 
 
 Two failure modes stop the run before any scan work:
 
-- `--deep` without the extras installed prints one line naming `pip install 'drskill[deep]'` and exits 1.
+- `--deep` without the extras installed prints one line naming the full install, `uv tool install drskill`, and exits 1.
 - `--deep` without a usable key for the configured model prints one line naming the missing variable and exits 1.
 
 ## Pipeline flow

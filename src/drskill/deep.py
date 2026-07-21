@@ -21,9 +21,12 @@ from drskill.models import Contributor, Finding
 VerdictClass = Literal["distinct", "description_collision", "scope_overlap"]
 
 try:
-    PROGRAM_VERSION = metadata.version("drskill")
+    PROGRAM_VERSION = metadata.version("drskill-core")
 except metadata.PackageNotFoundError:
-    PROGRAM_VERSION = "unknown"
+    try:  # pre-rename installs published the code as `drskill`
+        PROGRAM_VERSION = metadata.version("drskill")
+    except metadata.PackageNotFoundError:
+        PROGRAM_VERSION = "unknown"
 
 
 class JudgeResult(BaseModel):

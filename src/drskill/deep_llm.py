@@ -16,7 +16,8 @@ def build_judge(model_id: str) -> JudgeFn:
         import dspy
     except ImportError as e:
         raise DeepUnavailableError(
-            "deep checks need the [deep] extra: pip install 'drskill[deep]'"
+            "deep checks are not in the minimal install: "
+            "uv tool install drskill (or pip install 'drskill-core[deep]')"
         ) from e
     import litellm
 

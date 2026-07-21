@@ -15,13 +15,13 @@ Every problem it reports ends in a command: a fix command or a command to acknow
 ## Install
 
 ```
-uv tool install "drskill[deep]"
-```
-
-This installs everything, including the model-judged deep checks. If you want the minimal install, e.g. for CI, where the LLM layer is never used, drop the extra:
-
-```
 uv tool install drskill
+```
+
+This installs everything, including the model-judged deep checks. For a minimal install, e.g. in CI, where the LLM layer is never used, install the core package instead:
+
+```
+uv tool install drskill-core
 ```
 
 ## Quick start
@@ -142,7 +142,7 @@ Without `--ci`, warnings alone exit 0. This lets you run `drskill scan` locally 
 
 ## Deep checks
 
-The description-overlap check compares text, so some of its warnings are false alarms. `drskill scan --deep` sends each flagged pair of skills to a language model, which judges whether the two skills are distinct, whether their descriptions collide, or whether their scopes genuinely overlap. Deep mode is included in the recommended install above; a minimal install without it needs `uv tool install "drskill[deep]"` first. The only other requirement is a provider API key, e.g. `ANTHROPIC_API_KEY`. drskill sends only skill names and descriptions to the model, and it sends nothing at all unless you pass `--deep`.
+The description-overlap check compares text, so some of its warnings are false alarms. `drskill scan --deep` sends each flagged pair of skills to a language model, which judges whether the two skills are distinct, whether their descriptions collide, or whether their scopes genuinely overlap. Deep mode is included in the standard install; only the minimal `drskill-core` install leaves it out. The only other requirement is a provider API key, e.g. `ANTHROPIC_API_KEY`. drskill sends only skill names and descriptions to the model, and it sends nothing at all unless you pass `--deep`.
 
 The key comes from your environment. To set it once per machine, put it in `~/.drskill/env`:
 

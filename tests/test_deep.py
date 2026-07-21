@@ -251,7 +251,7 @@ def test_build_judge_without_dspy_raises(monkeypatch):
         return real_import(name, *args, **kwargs)
 
     monkeypatch.setattr(builtins, "__import__", no_dspy)
-    with pytest.raises(deep_llm.DeepUnavailableError, match=r"drskill\[deep\]"):
+    with pytest.raises(deep_llm.DeepUnavailableError, match="uv tool install drskill"):
         deep_llm.build_judge("anthropic/claude-haiku-4-5")
 
 
