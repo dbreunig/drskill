@@ -1,10 +1,12 @@
 # The explain command
 
 Date: 2026-07-21
-Status: approved
+Status: deferred to the deep cycle
 Parent documents: `initial_design_doc.md`, `docs/superpowers/specs/2026-07-19-drskill-v0.1-design.md`, `docs/superpowers/specs/2026-07-20-report-triage-design.md`
 
-This is the fourth and last cycle of the v0.2 release. The 0.2.0 release ships after this cycle.
+This cycle was planned as the fourth and last cycle of the v0.2 release. During spec review we deferred it, and 0.2.0 ships with cycles 1 to 3.
+
+The reason is that the design below scores a query with text similarity, but no harness routes that way. The harness puts every description in the prompt and the model picks. A cosine score cannot see a synonym collision, e.g. a query that says "graph" never matches a description that says "chart", so both the rankings and the "no skill matches" verdict can be wrong in ways a reader cannot detect. A verdict line that says "routes to X" would claim more than the tool knows. The parts that survive the objection are the query conditional view of which descriptions claim a query's terms, the coverage gap verdict, and the saved query drift check. The decision was to build explain when the deep layer exists, so the routing judgment comes from a model reading the descriptions, with the lexical scorer below available as a free fallback tier if it still earns its place then. The rest of this spec is preserved as input for that cycle.
 
 ## Why
 
