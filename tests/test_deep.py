@@ -298,3 +298,23 @@ def test_run_scan_default_config_honors_machine_acks(tmp_path, monkeypatch):
     _, f2 = run_scan(proj, home)
     (o2,) = [f for f in f2 if f.check_id == "description-overlap"]
     assert o2.severity == "note"
+
+
+def test_deep_budget_skips_acked_clusters(tmp_path, monkeypatch):
+    monkeypatch.setenv("DRSKILL_HOME", str(tmp_path / "home"))
+    proj, home = tmp_path / "p", tmp_path / "home"
+    write_skill(proj, "doc-a", PILE_A, body="a" * 40)
+    write_skill(proj, "doc-b", PILE_B, body="b" * 40)
+    _, findings = run_scan(proj, home)
+    (overlap,) = [f for f in findings if f.check_id == "description-overlap"]
+    from drskill.ledger import Ack
+    cfg = Config(ack=[Ack(check="description-overlap", skills=["doc-a", "doc-b"],
+                          fingerprint=overlap.fingerprint)])
+    calls = []
+
+    def judge(x, y):
+        calls.append((x.name, y.name))
+        return deep.JudgeResult(verdict="distinct", rationale="r", detail="d")
+
+    run_scan(proj, home, config=cfg, judge=judge)
+    assert calls == []  # the acked cluster's pairs never spend budget

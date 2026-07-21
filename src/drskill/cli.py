@@ -173,7 +173,7 @@ def scan(
             )
         if deep_mode:
             cache = deep.load_cache(deep.cache_dir(root, home, global_mode))
-            remaining = deep.unjudged_count(world, findings, cache)
+            remaining = deep.unjudged_count(world, active, cache)
             if remaining:
                 plural = "s" if remaining != 1 else ""
                 console.print(

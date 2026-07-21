@@ -49,8 +49,10 @@ def run_scan(
     findings = run_all(world, config)
     cdir = deep.cache_dir(project_root, home, global_only)
     cache = deep.load_cache(cdir)
-    if judge is not None:
-        deep.judge_pairs(world, findings, cache, cdir, judge, config.deep.model, max_calls)
     acked_fps = {a.fingerprint for a in config.ack}
+    if judge is not None:
+        # Acked clusters never spend the call budget; the user already ruled.
+        active = [f for f in findings if f.fingerprint not in acked_fps]
+        deep.judge_pairs(world, active, cache, cdir, judge, config.deep.model, max_calls)
     findings = deep.apply_verdicts(world, findings, cache, acked_fps)
     return world, findings
