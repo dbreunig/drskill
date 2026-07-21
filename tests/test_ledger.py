@@ -151,3 +151,28 @@ def test_deep_section_parses(tmp_path):
     p = tmp_path / "drskill.toml"
     p.write_text('[deep]\nmodel = "openai/gpt-5"\n')
     assert load_config(p).deep.model == "openai/gpt-5"
+
+
+def test_append_ack_preserves_comments_and_formatting(tmp_path):
+    p = tmp_path / "drskill.toml"
+    p.write_text(
+        "# team ledger, do not delete\n"
+        "[budget]\n"
+        "catalog_tokens_max = 9000  # bumped for the monorepo\n"
+    )
+    append_ack(p, Ack(check="near-duplicate", skills=["a", "b"], fingerprint="sha256:ab"))
+    text = p.read_text()
+    assert "# team ledger, do not delete" in text
+    assert "catalog_tokens_max = 9000  # bumped for the monorepo" in text
+    cfg = load_config(p)
+    assert cfg.budget.catalog_tokens_max == 9000
+    assert [a.fingerprint for a in cfg.ack] == ["sha256:ab"]
+
+
+def test_append_ack_handles_missing_trailing_newline(tmp_path):
+    p = tmp_path / "drskill.toml"
+    p.write_text("[thresholds]\nnear_duplicate = 0.9")  # no trailing newline
+    append_ack(p, Ack(check="x-check", skills=["s"], fingerprint="sha256:cd"))
+    cfg = load_config(p)
+    assert cfg.thresholds.near_duplicate == 0.9
+    assert [a.fingerprint for a in cfg.ack] == ["sha256:cd"]

@@ -171,7 +171,7 @@ Two commands manage the cache. `drskill cache stats` prints entry counts by verd
 
 ## The ledger
 
-`drskill.toml` sits at the root of your repo and should be committed. It holds your budgets, your thresholds, and your decisions. When you run `drskill ack`, it appends an entry like this:
+`drskill.toml` sits at the root of your repo and should be committed. It holds your budgets, your thresholds, and your decisions. When you run `drskill ack`, it appends an entry to the end of the file and touches nothing else, so your comments and formatting are preserved. An entry looks like this:
 
 ```toml
 [[ack]]
@@ -195,8 +195,6 @@ Findings print errors first, then warnings. Inside each section the order is: fi
 The `source` column in `list` shows where a skill came from: `skills-lock` for skills named in a project's `skills-lock.json`, `gh-skill` for skills with `gh skill` provenance in their frontmatter, and `linked` for skills that live in or link into a `.agents/skills` store. The `linked` label means an installer arranged the layout; `drskill` does not guess which one. `unmanaged` means a plain directory with no known manager.
 
 ## Known limitations
-
-Comments in `drskill.toml` are lost when `drskill ack` rewrites the file. The file is parsed and re-written as data, and the writer does not carry comments forward. If you rely on comments to explain a budget or a threshold, keep that explanation in a separate note, not inline in the file.
 
 Claude Code skills bundled inside plugins are not scanned yet. `drskill` only walks the plain `.claude/skills` directories described in the harness table; it does not look inside installed plugin packages.
 

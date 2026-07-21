@@ -109,10 +109,19 @@ def ack_destination(
 
 
 def append_ack(path: Path, ack: Ack) -> None:
-    data = tomllib.loads(path.read_text()) if path.is_file() else {}
+    """Append the new [[ack]] entry as text instead of rewriting the file,
+    so the user's comments and formatting are never touched. An [[ack]]
+    header always starts a fresh table, so appending is valid TOML no
+    matter what the file ends with."""
     entry = {k: v for k, v in ack.model_dump().items() if v is not None}
-    data.setdefault("ack", []).append(entry)
-    path.write_text(tomli_w.dumps(data))
+    block = tomli_w.dumps({"ack": [entry]})
+    if not path.is_file():
+        path.write_text(block)
+        return
+    existing = path.read_text()
+    tomllib.loads(existing)  # malformed ledgers fail loudly, before we append
+    sep = "" if existing.endswith("\n") or not existing else "\n"
+    path.write_text(existing + sep + "\n" + block if existing.strip() else block)
 
 
 def filter_findings(
