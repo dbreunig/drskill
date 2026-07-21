@@ -467,6 +467,7 @@ def list_cmd(
     tokens: bool = typer.Option(False, "--tokens"),
     harness: str | None = typer.Option(None, "--harness"),
     show_all: bool = typer.Option(False, "--all", help="include harnesses with no skills"),
+    mcp: bool = typer.Option(False, "--mcp", help="list MCP servers instead of skills"),
     root: Path = typer.Option(Path("."), "--root", hidden=True),
     global_mode: bool = typer.Option(False, "--global"),
 ) -> None:
@@ -476,6 +477,22 @@ def list_cmd(
     config = _load_effective_config_or_exit(root, home, global_mode)
     world, _findings = run_scan(root, home, global_mode, config, harness=harness)
     _warn_if_undetected(harness, root, home, global_mode)
+    if mcp:
+        from rich.table import Table
+
+        table = Table(title="MCP servers")
+        for col in ("harness", "server", "transport", "scope", "source"):
+            table.add_column(col)
+        for s in sorted(world.mcp_servers, key=lambda s: (s.harness, s.name, s.scope)):
+            table.add_row(
+                escape(s.harness), escape(s.name), escape(s.transport),
+                escape(s.scope), escape(s.source),
+            )
+        if world.mcp_servers:
+            console.print(table)
+        else:
+            console.print("No MCP servers configured for the detected harnesses.")
+        return
     report.render_harness_tables(
         world, console, tokens=tokens, harness=harness, show_all=show_all
     )

@@ -97,6 +97,8 @@ def _facet_unverified(world: World, f: Finding, hid: str) -> bool:
     hdef = world.harnesses.get(hid)
     if hdef is None:
         return False
+    if f.check_id.startswith("mcp-"):
+        return not hdef.mcp_verified
     if f.check_id in PRECEDENCE_CHECKS:
         return not hdef.precedence_verified
     return not hdef.paths_verified
@@ -187,6 +189,9 @@ def render(
     if empty:
         header += f" ({empty} more empty)"
     header += f", {n_skills} skills"
+    if world.mcp_servers:
+        n_mcp = len(world.mcp_servers)
+        header += f", {n_mcp} MCP server{'s' if n_mcp != 1 else ''}"
     console.print(header)
     ordered = sort_findings(world, active, set(seen))
     errors = [f for f in ordered if f.severity == "error"]

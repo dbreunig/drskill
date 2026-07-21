@@ -111,3 +111,42 @@ def test_invalid_config_finding(tmp_path, monkeypatch):
     _, findings = scan(proj, home, monkeypatch, tmp_path)
     (f,) = by_check(findings, "mcp-config-invalid")
     assert f.severity == "error"
+
+
+from typer.testing import CliRunner
+
+from drskill.cli import app
+
+runner = CliRunner()
+
+
+def env_for(tmp_path):
+    home = tmp_path / "home"
+    home.mkdir(exist_ok=True)
+    return {"DRSKILL_HOME": str(home), "COLUMNS": "200"}
+
+
+def test_header_counts_servers(tmp_path):
+    proj, _ = project_with(tmp_path, {"gh": {"command": "gh-mcp-not-installed-xyz"}})
+    r = runner.invoke(app, ["scan", "--root", str(proj)], env=env_for(tmp_path))
+    assert "1 MCP server" in r.output
+    assert "mcp-dead-server" in r.output
+
+
+def test_list_mcp_table(tmp_path):
+    proj, _ = project_with(tmp_path, {"gh": {"command": "gh-mcp"}})
+    r = runner.invoke(app, ["list", "--mcp", "--root", str(proj)], env=env_for(tmp_path))
+    assert r.exit_code == 0, r.output
+    assert "gh" in r.output and "stdio" in r.output and "project" in r.output
+
+
+def test_user_scope_mcp_ack_routes_to_machine_ledger(tmp_path):
+    proj, home = project_with(tmp_path, {}, home_claude_json={
+        "mcpServers": {"gh": {"command": "gh-mcp", "env": {"API_KEY": "literal-value"}}},
+    })
+    r = runner.invoke(
+        app, ["ack", "mcp-secret-in-config", "--root", str(proj)], env=env_for(tmp_path)
+    )
+    assert r.exit_code == 0, r.output
+    assert (home / ".drskill.toml").is_file()
+    assert not (proj / "drskill.toml").exists()

@@ -98,11 +98,13 @@ def ack_destination(
         return ledger_path(project_root, home, True)
     if force_local:
         return ledger_path(project_root, home, False)
-    scopes = {
-        world.contributors[cid].scope
-        for cid in finding.contributors
-        if cid in world.contributors
-    }
+    by_source = {s.source: s.scope for s in getattr(world, "mcp_servers", [])}
+    scopes = set()
+    for cid in finding.contributors:
+        if cid in world.contributors:
+            scopes.add(world.contributors[cid].scope)
+        elif cid in by_source:
+            scopes.add(by_source[cid])
     if scopes and scopes == {"user"}:
         return ledger_path(project_root, home, True)
     return ledger_path(project_root, home, False)
