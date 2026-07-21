@@ -158,6 +158,26 @@ def parse_config(
     return [], [f"{path}: unknown MCP config format '{fmt}'"]
 
 
+def raw_server_env(server: MCPServer) -> dict[str, str]:
+    """Re-read a server's literal env map from its config file at connect
+    time. Values are never stored on the model; the connector passes them
+    straight to the child process."""
+    try:
+        if server.source.endswith(".toml"):
+            data = tomllib.loads(Path(server.source).read_text())
+            table = (data.get("mcp_servers") or {}).get(server.name) or {}
+        else:
+            data = json.loads(Path(server.source).read_text())
+            table = (
+                (data.get("mcpServers") or data.get("servers") or {}).get(server.name)
+                or {}
+            )
+        env = table.get("env") or {}
+        return {str(k): str(v) for k, v in env.items()} if isinstance(env, dict) else {}
+    except Exception:
+        return {}
+
+
 def discover_servers(
     harnesses: dict, project_root: Path, home: Path, global_only: bool = False
 ) -> tuple[list[MCPServer], list[tuple[str, str, str, bool]]]:
