@@ -1,0 +1,107 @@
+from pathlib import Path
+
+from drskill.checks import injection
+from drskill.discovery import discover
+from drskill.harnesses import HarnessDef
+from drskill.ledger import Config
+from drskill.resolution import build_world
+
+
+def make_world(root):
+    h = HarnessDef(
+        id="t3", display_name="T3",
+        paths_verified=True, precedence_verified=True,
+        project_paths=[".claude/skills"], recursive=True,
+    )
+    instances, broken = discover(h, root, root / "no-home")
+    return build_world(instances, {"t3": h}, broken)
+
+
+def write_skill(root, name, body, description="Use when testing.", files=None):
+    d = root / ".claude" / "skills" / name
+    d.mkdir(parents=True)
+    (d / "SKILL.md").write_text(
+        f"---\nname: {name}\ndescription: {description}\n---\n{body}\n"
+    )
+    for relpath, content in (files or {}).items():
+        p = d / relpath
+        p.parent.mkdir(parents=True, exist_ok=True)
+        if isinstance(content, bytes):
+            p.write_bytes(content)
+        else:
+            p.write_text(content)
+    return d
+
+
+def the_contributor(world):
+    (c,) = world.contributors.values()
+    return c
+
+
+def run_check(check_id, world):
+    from drskill.checks import REGISTRY
+
+    return REGISTRY[check_id](world, Config())
+
+
+# ---- scan view ----
+
+def test_scan_view_sources_and_kinds(tmp_path):
+    write_skill(
+        tmp_path, "kinds", "Body line.",
+        files={
+            "scripts/a.py": "x = 1\n",
+            "scripts/b": "#!/bin/sh\necho hi\n",
+            "references/doc.md": "prose here\n",
+        },
+    )
+    c = the_contributor(make_world(tmp_path))
+    view = injection.scan_view(c)
+    kinds = {s.relpath: s.kind for s in view}
+    assert kinds == {
+        "SKILL.md": "skillmd",
+        "scripts/a.py": "script",
+        "scripts/b": "script",  # shebang, no extension
+        "references/doc.md": "prose",
+    }
+    skillmd = next(s for s in view if s.kind == "skillmd")
+    assert skillmd.lines[skillmd.body_start - 1] == "Body line."
+
+
+def test_scan_view_skips_binary_and_oversize(tmp_path):
+    from drskill.resolution import SCAN_CAP_BYTES
+
+    write_skill(
+        tmp_path, "skipping", "Body.",
+        files={
+            "blob.bin": b"\x00\x01\x02",
+            "huge.txt": b"a" * (SCAN_CAP_BYTES + 1),
+            "ok.txt": "fine\n",
+        },
+    )
+    c = the_contributor(make_world(tmp_path))
+    relpaths = {s.relpath for s in injection.scan_view(c)}
+    assert relpaths == {"SKILL.md", "ok.txt"}
+
+
+def test_evidence_message_caps_hits_and_escapes(tmp_path):
+    write_skill(tmp_path, "evidence", "Body.")
+    c = the_contributor(make_world(tmp_path))
+    src = injection.Source(
+        relpath="scripts/x.sh", kind="script",
+        text="", lines=[], body_start=1,
+    )
+    hits = [(src, i, f"line with \u200b number {i}") for i in range(1, 6)]
+    msg = injection.evidence_message(c, "does something", hits)
+    assert "scripts/x.sh:1:" in msg
+    assert "(and 2 more)" in msg
+    assert "\\u200b" in msg and "\u200b" not in msg
+    assert "static flag" in msg
+
+
+def test_removal_commands_quote_paths(tmp_path):
+    write_skill(tmp_path, "unmanaged one", "Body.")
+    c = the_contributor(make_world(tmp_path))
+    (cmd,) = injection.removal_commands(c)
+    assert cmd.startswith("rm -r ")
+    assert "'" in cmd  # space in path forces shell quoting
