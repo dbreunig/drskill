@@ -275,3 +275,44 @@ def injection_override(world: World, config: Config) -> list[Finding]:
                 )
             )
     return out
+
+
+_PIPE_TO_SHELL = re.compile(r"\b(curl|wget)\b[^\n]*\|\s*(sudo\s+)?(ba|z|da)?sh\b")
+_URLISH = re.compile(r"https?://")
+_FETCH_DIRECTIVE = re.compile(
+    r"\b(run|execute|eval|follow (the|these|its) instructions|apply (it|them))\b",
+    re.IGNORECASE,
+)
+
+
+@check("injection-remote-fetch")
+def injection_remote_fetch(world: World, config: Config) -> list[Finding]:
+    out = []
+    for c in world.contributors.values():
+        hits: list[Hit] = []
+        for s in scan_view(c):
+            if s.kind not in _PROSE_KINDS:
+                continue
+            for i, line in enumerate(s.lines, start=1):
+                if _PIPE_TO_SHELL.search(line) or (
+                    _URLISH.search(line) and _FETCH_DIRECTIVE.search(line)
+                ):
+                    hits.append((s, i, line))
+        if hits:
+            out.append(
+                make_finding(
+                    "injection-remote-fetch", "warning", [c],
+                    evidence_message(
+                        c,
+                        "instructs the agent to fetch remote content and act on it",
+                        hits,
+                    ),
+                    fix_commands=[
+                        "Fetched content becomes instructions the skill author"
+                        " controls after install; remove the step or pin the content"
+                    ],
+                    extra_key=c.name,
+                    fingerprint_texts=fingerprint_texts(hits),
+                )
+            )
+    return out
