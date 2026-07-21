@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import json
+import re
 import shlex
 
 from rich.console import Console
@@ -9,6 +10,16 @@ from rich.table import Table
 
 from drskill.models import Finding
 from drskill.resolution import World
+
+# Rich's escape() neutralizes markup but passes invisible and bidirectional
+# characters through, so adversarial skill text could reorder or hide parts
+# of the report. Escape them at render time, belt and suspenders with the
+# checks' own snippet escaping.
+_INVISIBLE = re.compile(r"[\u200b\ufeff\u2028\u2029\u202a-\u202e\u2066-\u2069]")
+
+
+def _sanitize(text: str) -> str:
+    return _INVISIBLE.sub(lambda m: f"\\u{ord(m.group()):04x}", text)
 
 
 def to_json(findings: list[Finding]) -> str:
@@ -99,7 +110,8 @@ def short_id(f: Finding) -> str:
 def _print_finding(world: World, f: Finding, console: Console) -> bool:
     marked = False
     console.print(
-        f"  [[bold]{escape(short_id(f))}[/bold]] {escape(f.check_id)}: {escape(f.message)}"
+        f"  [[bold]{escape(short_id(f))}[/bold]] {escape(f.check_id)}: "
+        f"{escape(_sanitize(f.message))}"
     )
     if f.harnesses:
         labels = []
@@ -111,7 +123,7 @@ def _print_finding(world: World, f: Finding, console: Console) -> bool:
                 labels.append(hid)
         console.print(f"      harnesses: {escape(', '.join(labels))}")
     for cmd in f.fix_commands:
-        console.print(f"      fix: {escape(cmd)}")
+        console.print(f"      fix: {escape(_sanitize(cmd))}")
     console.print()
     return marked
 
@@ -149,6 +161,26 @@ def render(
         summary += f" ({len(acked)} acknowledged)"
     summary += " · token counts are approximate"
     console.print(summary)
+    binary = oversize = 0
+    affected = 0
+    for c in world.contributors.values():
+        skipped = [f for f in c.bundled_files if not f.is_text or f.oversize]
+        if skipped:
+            affected += 1
+            binary += sum(1 for f in skipped if not f.is_text)
+            oversize += sum(1 for f in skipped if f.is_text and f.oversize)
+    if binary or oversize:
+        parts = []
+        if binary:
+            parts.append(f"{binary} binary")
+        if oversize:
+            parts.append(f"{oversize} over 1 MiB")
+        total = binary + oversize
+        console.print(
+            f"[dim]{total} bundled file{'s' if total != 1 else ''} not content "
+            f"scanned ({', '.join(parts)}) across {affected} "
+            f"skill{'s' if affected != 1 else ''}[/dim]"
+        )
     if any_marked:
         console.print(
             "[dim]? = drskill has not verified this harness's skill-loading rules[/dim]"
@@ -161,5 +193,5 @@ def render(
             names = ", ".join(f.contributor_names)
             console.print(
                 f"  [bold]{escape(short_id(f))}[/bold] "
-                f"{escape(f.check_id.ljust(width))}  {escape(names)}"
+                f"{escape(f.check_id.ljust(width))}  {escape(_sanitize(names))}"
             )

@@ -57,7 +57,7 @@ One check id per surface, so the bare check id ack form silences exactly one cla
 | `injection-override` | warning | prose and SKILL.md | instruction override phrasing, e.g. "ignore previous instructions", "disregard your rules", "do not tell the user", "without informing the user" |
 | `injection-mandatory-script` | warning | SKILL.md body | a mandatory first step framing, e.g. "you must first run" or "before anything else, run", combined with a path that matches one of the skill's own bundled files |
 | `injection-egress` | warning | scripts | network tokens per language, e.g. `curl`, `wget`, `nc`, `Invoke-WebRequest`, `requests.`, `urllib`, `httpx`, `socket.`, `fetch(`, `http.request`, `Net::HTTP` |
-| `injection-encoded-blob` | warning | all text | a run of base64 characters of 120 or more, or a run of hex characters of 128 or more |
+| `injection-encoded-blob` | warning | all text | a run of base64 characters of 120 or more, or a run of more than 128 hex characters (sha512 digests are exactly 128, so they stay quiet) |
 | `injection-remote-fetch` | warning | prose and SKILL.md | an instruction to fetch remote content and execute it or follow it, e.g. a URL plus "run", "execute", or "follow the instructions", or `curl` piped to a shell inside instruction text |
 
 Notes on the choices:
@@ -74,7 +74,7 @@ Every lexicon and threshold is a module constant, not a ledger key. This matches
 
 One finding per skill per check, aggregating all hits across that skill's files. The message leads with the standard 4 hex id and quotes the evidence. Each hit shows the file path relative to the skill directory, the line number, and the line itself, trimmed to the report width, rich escaped, with invisible characters rendered as escape codes. `injection-unicode` also names the codepoints it found. At most 3 hits are quoted per finding, followed by a count of the remaining hits. A finding never asserts a surface without showing a line.
 
-Fingerprints follow the established basis rule. The fingerprint hashes the full contents of the files that contain hits, raw bytes for bundled files and normalized content for SKILL.md, qualified with the skill name. An ack therefore survives edits to files without hits and resurfaces when a hit file changes or a new file starts hitting.
+Fingerprints follow the established basis rule. The fingerprint hashes the full text of the files that contain hits, as decoded for scanning, with SKILL.md normalized, and is qualified with the skill name. An ack therefore survives edits to files without hits and resurfaces when a hit file changes or a new file starts hitting.
 
 Error findings recommend removal and end with concrete commands. When the skill is installer managed the command is `npx skills remove <name>`. Otherwise it is a shell quoted `rm -r` of the skill directory. The ack line is printed as well, since every finding is ack-able. Warning findings end with the ack line.
 
@@ -87,6 +87,15 @@ Nothing structural changes. Tier 3 findings flow through the existing severity s
 `scripts/corpus.py` gains a Tier 3 sheet. For each corpus it prints every injection finding with its full quoted evidence, plus a count per check. The corpora are the same three from the Tier 2 cycle. The hermes-agent corpus is the noise gate, because its 179 skills include real bundled scripts. anthropics/skills and vercel-labs/agent-skills sanity check the prose checks.
 
 We hand review the sheets before merge. False positives get fixed in the lexicons, not shipped. Clear verdicts freeze into conformance cases, with a LICENSE-NOTE.md in the case directory whenever skill text is copied in.
+
+Tuning outcome (2026-07-20, corpora: anthropics/skills at 18 skills, vercel-labs/agent-skills at 9, NousResearch/hermes-agent at 179). The first sheet surfaced four false positive classes, and each produced a lexicon fix with a regression test:
+
+- The bare `.key` pattern in the credential check matched JS property access such as `merged?.metrics?.[eq.key]?.rows` and produced a false error. The pattern is removed. `.pem`, `id_rsa`, and the directory paths stay.
+- The mandatory script check matched the noun phrase "first run" in a table row that also named a bundled file. The check now requires the bundled path to appear after the mandatory framing on the line.
+- The remote fetch check fired on any line with a URL and the word "run", which flagged dev server chatter such as `npm run dev` beside a localhost URL. Local URLs are now excluded, and the directive branch requires a fetch verb joined to an act verb, e.g. "download X and run it". The "follow the instructions" phrasing and pipes to a shell still fire on their own.
+- The egress check matched `urllib.parse`, which is string handling, and Unix domain sockets, which are local IPC. The lexicon now matches `urllib.request`, `socket.create_connection`, and `AF_INET` instead.
+
+Final counts after the fixes: anthropics/skills fires 1 override (a document that quotes override phrasing while warning against it) and 1 egress. vercel-labs fires 1 credential warning (a deploy script excluding `.env` from an upload) and 2 egress. hermes-agent fires 1 unicode error (zero width spaces in a scraped reference file), 8 credential warnings (skills reading the loadout's own `.env` by convention), 2 override (security documents quoting attack phrasing), 29 egress, and 13 remote fetch (installer instructions that pipe curl or wget to a shell). These remaining findings were reviewed and kept by decision: egress volume ships as is because the class ack (`drskill ack injection-egress`) silences it after one triage pass, and installer pipes stay flagged because piping remote content to a shell is the exact surface this tier exists to show. The clearest verdicts are frozen in `tests/conformance/cases/corpus-injection/`.
 
 ## Testing
 

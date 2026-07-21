@@ -1,0 +1,21 @@
+# Frozen verdicts from the Tier 3 corpus tuning pass (2026-07-20).
+
+[[expect]]
+check = "injection-remote-fetch"
+skills = ["gpu-cloud"]
+
+[[expect]]
+check = "injection-credential-read"
+skills = ["trading-client"]
+
+[[forbid]]
+check = "injection-remote-fetch"
+skills = ["tool-caller"]
+
+[[forbid]]
+check = "injection-credential-read"
+skills = ["metrics-optimizer"]
+
+[[forbid]]
+check = "injection-egress"
+skills = ["metrics-optimizer"]

@@ -21,3 +21,59 @@ skills = ["git-helper", "docx-report"]
 [[forbid]]
 check = "opposing-imperatives"
 skills = ["git-helper", "docx-report"]
+
+[[forbid]]
+check = "injection-unicode"
+skills = ["git-helper"]
+
+[[forbid]]
+check = "injection-unicode"
+skills = ["docx-report"]
+
+[[forbid]]
+check = "injection-credential-read"
+skills = ["git-helper"]
+
+[[forbid]]
+check = "injection-credential-read"
+skills = ["docx-report"]
+
+[[forbid]]
+check = "injection-override"
+skills = ["git-helper"]
+
+[[forbid]]
+check = "injection-override"
+skills = ["docx-report"]
+
+[[forbid]]
+check = "injection-mandatory-script"
+skills = ["git-helper"]
+
+[[forbid]]
+check = "injection-mandatory-script"
+skills = ["docx-report"]
+
+[[forbid]]
+check = "injection-egress"
+skills = ["git-helper"]
+
+[[forbid]]
+check = "injection-egress"
+skills = ["docx-report"]
+
+[[forbid]]
+check = "injection-encoded-blob"
+skills = ["git-helper"]
+
+[[forbid]]
+check = "injection-encoded-blob"
+skills = ["docx-report"]
+
+[[forbid]]
+check = "injection-remote-fetch"
+skills = ["git-helper"]
+
+[[forbid]]
+check = "injection-remote-fetch"
+skills = ["docx-report"]

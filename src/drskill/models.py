@@ -35,6 +35,16 @@ class TokenCost(BaseModel):
     body_tokens: int  # full body, approximate
 
 
+class BundledFile(BaseModel):
+    """A file a skill ships with, e.g. under scripts/ or references/."""
+
+    relpath: str  # posix style, relative to the skill directory
+    size: int
+    content_hash: str  # sha256 of the raw bytes, no normalization
+    is_text: bool  # no null byte in the first 8 KiB
+    oversize: bool  # larger than the scan cap; recorded, never content-scanned
+
+
 class Contributor(BaseModel):
     id: str  # str(realpath of the skill file)
     kind: Literal["skill"] = "skill"
@@ -42,6 +52,7 @@ class Contributor(BaseModel):
     source: Provenance = Provenance()
     scope: Literal["project", "user"]
     deployments: list[Deployment] = Field(default_factory=list)
+    bundled_files: list[BundledFile] = Field(default_factory=list)
     routing_text: str = ""
     body: str = ""
     token_cost: TokenCost

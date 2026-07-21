@@ -193,3 +193,104 @@ def test_search_order_none_never_shadows(tmp_path):
     instances, broken = discover(h, proj, home)
     world = build_world(instances, {h.id: h}, broken)
     assert all(d.shadowed_by is None for c, d in world.harness_loads("nonesuch"))
+
+
+# ---- bundled file collection (Tier 3) ----
+
+from drskill.harnesses import HarnessDef
+
+
+def _bundled_world(root):
+    h = HarnessDef(
+        id="t3", display_name="T3",
+        paths_verified=True, precedence_verified=True,
+        project_paths=[".claude/skills"], recursive=True,
+    )
+    instances, broken = discover(h, root, root / "no-home")
+    return build_world(instances, {"t3": h}, broken)
+
+
+def _write_skill(root, name, body="Body.", description="Use when testing."):
+    d = root / ".claude" / "skills" / name
+    d.mkdir(parents=True)
+    (d / "SKILL.md").write_text(
+        f"---\nname: {name}\ndescription: {description}\n---\n{body}\n"
+    )
+    return d
+
+
+def test_bundled_files_collected_with_metadata(tmp_path):
+    d = _write_skill(tmp_path, "helper")
+    (d / "scripts").mkdir()
+    (d / "scripts" / "run.py").write_text("print('hi')\n")
+    (d / "notes.md").write_text("reference text\n")
+    world = _bundled_world(tmp_path)
+    (c,) = world.contributors.values()
+    by_path = {f.relpath: f for f in c.bundled_files}
+    assert set(by_path) == {"scripts/run.py", "notes.md"}
+    f = by_path["scripts/run.py"]
+    assert f.size == len("print('hi')\n")
+    assert f.content_hash.startswith("sha256:")
+    assert f.is_text and not f.oversize
+
+
+def test_bundled_files_exclude_skill_md_itself(tmp_path):
+    _write_skill(tmp_path, "solo")
+    world = _bundled_world(tmp_path)
+    (c,) = world.contributors.values()
+    assert c.bundled_files == []
+
+
+def test_bundled_binary_and_oversize_flagged(tmp_path):
+    from drskill.resolution import SCAN_CAP_BYTES
+
+    d = _write_skill(tmp_path, "assets")
+    (d / "logo.png").write_bytes(b"\x89PNG\x00\x00binary")
+    (d / "big.txt").write_bytes(b"a" * (SCAN_CAP_BYTES + 1))
+    world = _bundled_world(tmp_path)
+    (c,) = world.contributors.values()
+    by_path = {f.relpath: f for f in c.bundled_files}
+    assert not by_path["logo.png"].is_text
+    assert by_path["big.txt"].oversize and by_path["big.txt"].is_text
+
+
+def test_bundled_symlink_loop_terminates(tmp_path):
+    d = _write_skill(tmp_path, "loopy")
+    (d / "sub").mkdir()
+    (d / "sub" / "file.txt").write_text("x\n")
+    (d / "sub" / "back").symlink_to(d)
+    world = _bundled_world(tmp_path)
+    (c,) = world.contributors.values()
+    relpaths = [f.relpath for f in c.bundled_files]
+    assert relpaths.count("sub/file.txt") == 1
+
+
+@pytest.mark.skipif(running_as_root(), reason="root ignores file modes")
+def test_unreadable_bundled_file_recorded(tmp_path):
+    d = _write_skill(tmp_path, "locked")
+    p = d / "secret.txt"
+    p.write_text("x\n")
+    p.chmod(0)
+    try:
+        world = _bundled_world(tmp_path)
+    finally:
+        p.chmod(0o644)
+    (c,) = world.contributors.values()
+    assert c.bundled_files == []
+    assert any(path.endswith("secret.txt") for _h, path in world.unreadable)
+
+
+def test_bare_md_skill_has_no_bundled_files(tmp_path):
+    h = HarnessDef(
+        id="t3", display_name="T3",
+        paths_verified=True, precedence_verified=True,
+        project_paths=["skills"], root_md_paths=["skills"], recursive=True,
+    )
+    sd = tmp_path / "skills"
+    sd.mkdir()
+    (sd / "loose.md").write_text("---\nname: loose\ndescription: Use when x.\n---\nBody.\n")
+    (sd / "stray.txt").write_text("not collected\n")
+    instances, broken = discover(h, tmp_path, tmp_path / "no-home")
+    world = build_world(instances, {"t3": h}, broken)
+    loose = [c for c in world.contributors.values() if c.name == "loose"]
+    assert loose and loose[0].bundled_files == []

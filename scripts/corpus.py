@@ -33,6 +33,15 @@ TIER2 = [
     "generic-description",
     "opposing-imperatives",
 ]
+TIER3 = [
+    "injection-unicode",
+    "injection-credential-read",
+    "injection-override",
+    "injection-mandatory-script",
+    "injection-egress",
+    "injection-encoded-blob",
+    "injection-remote-fetch",
+]
 
 
 def fetch(root: Path) -> None:
@@ -68,7 +77,7 @@ def main() -> None:
     root = Path(__file__).resolve().parent.parent / ".corpus"
     fetch(root)
     config = Config()
-    from drskill.checks import duplicates, heuristics  # noqa: F401  registers checks
+    from drskill.checks import duplicates, heuristics, injection  # noqa: F401  registers checks
 
     for name in CORPORA:
         world = corpus_world(root / name)
@@ -93,6 +102,13 @@ def main() -> None:
             print(f"\n### {cid} ({len(findings)})\n")
             for f in findings:
                 print(f"- {', '.join(f.contributor_names)}: {excerpt(f.message, 100)}")
+        print("\n### tier 3 injection surfaces\n")
+        for cid in TIER3:
+            findings = REGISTRY[cid](world, config)
+            print(f"#### {cid} ({len(findings)})\n")
+            for f in findings:
+                print(f.message)
+                print()
 
 
 if __name__ == "__main__":

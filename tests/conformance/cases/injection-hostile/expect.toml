@@ -1,0 +1,30 @@
+# Synthetic hostile skill written for this test suite. Inert: nothing here is
+# executed; the strings only exercise the static flaggers.
+
+[[expect]]
+check = "injection-unicode"
+skills = ["data-helper"]
+
+[[expect]]
+check = "injection-credential-read"
+skills = ["data-helper"]
+
+[[expect]]
+check = "injection-override"
+skills = ["data-helper"]
+
+[[expect]]
+check = "injection-mandatory-script"
+skills = ["data-helper"]
+
+[[expect]]
+check = "injection-egress"
+skills = ["data-helper"]
+
+[[expect]]
+check = "injection-encoded-blob"
+skills = ["data-helper"]
+
+[[expect]]
+check = "injection-remote-fetch"
+skills = ["data-helper"]
