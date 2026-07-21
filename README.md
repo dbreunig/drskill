@@ -49,7 +49,15 @@ Walk the findings one at a time and decide each with one keypress:
 drskill review
 ```
 
-`review` shows each finding with its full evidence and takes single-key actions: `a` acks it, `n` acks it with a note, `f` queues its fix commands for a copy and paste block at the end, `s` skips it, and `q` quits. Acks are written as you go, so quitting midway loses nothing. `review` only runs in a real terminal. When stdin or stdout is not a TTY, or `CI` or `DRSKILL_NO_INTERACTIVE` is set, it prints one line pointing at `scan` and `ack` and exits. `scan` itself never prompts, so a script or an agent calling drskill can never get stuck at a prompt.
+`review` shows each finding with its full evidence and takes single-key actions: 
+
+- `a` acks it, 
+- `n` acks it with a note, 
+- `f` queues its fix commands for a copy and paste block at the end, 
+- `s` skips it, 
+- and `q` quits. 
+
+Each ack is written the moment you press the key, to the same ledger the `ack` command would pick: the project's `drskill.toml`, or `~/.drskill.toml` when the finding involves only machine-level skills. Quitting midway loses nothing, and the exit summary lists what was acked into which ledger. `review` only runs in a real terminal. When stdin or stdout is not a TTY, or `CI` or `DRSKILL_NO_INTERACTIVE` is set, it prints one line pointing at `scan` and `ack` and exits. `scan` itself never prompts, so a script or an agent calling drskill can never get stuck at a prompt.
 
 Print the full evidence for one finding, or for a whole check class:
 
