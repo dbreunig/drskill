@@ -229,3 +229,27 @@ def test_render_reports_unscanned_bundled_files(tmp_path):
     render(world, [], [], console)
     text = console.export_text()
     assert "1 bundled file not content scanned (1 binary) across 1 skill" in text
+
+
+def test_render_sanitizes_bidi_in_messages():
+    from rich.console import Console
+
+    from drskill.models import Finding
+    from drskill.report import render
+    from drskill.resolution import World
+
+    f = Finding(
+        check_id="injection-override",
+        severity="warning",
+        contributors=["x"],
+        contributor_names=["evil\u202ename"],
+        harnesses=[],
+        message="header \u202e hidden",
+        fix_commands=["rm 'evil\u202e'"],
+        fingerprint="sha256:abcd1234",
+    )
+    console = Console(record=True, width=200)
+    render(World(), [f], [], console)
+    text = console.export_text()
+    assert "\u202e" not in text
+    assert text.count("\\u202e") >= 3  # message, fix command, recap names

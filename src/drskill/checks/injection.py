@@ -47,6 +47,13 @@ def _cache_key(c: Contributor) -> tuple:
     )
 
 
+def _split_lines(text: str) -> list[str]:
+    """Split on newlines only. str.splitlines also consumes U+2028/U+2029 and
+    friends, which would hide those separators from the unicode check and
+    skew reported line numbers."""
+    return text.replace("\r\n", "\n").replace("\r", "\n").split("\n")
+
+
 def _body_start(lines: list[str]) -> int:
     if lines and lines[0].strip() == "---":
         for i in range(1, len(lines)):
@@ -67,7 +74,7 @@ def scan_view(c: Contributor) -> list[Source]:
     except OSError:
         text = ""
     if text:
-        lines = text.splitlines()
+        lines = _split_lines(text)
         sources.append(
             Source(
                 relpath=skill_file.name,
@@ -88,7 +95,7 @@ def scan_view(c: Contributor) -> list[Source]:
         ext = Path(bf.relpath).suffix.lower()
         kind = "script" if ext in SCRIPT_EXTS or ftext.startswith("#!") else "prose"
         sources.append(
-            Source(relpath=bf.relpath, kind=kind, text=ftext, lines=ftext.splitlines())
+            Source(relpath=bf.relpath, kind=kind, text=ftext, lines=_split_lines(ftext))
         )
     _VIEW_CACHE[key] = sources
     return sources
@@ -109,10 +116,11 @@ _SNIPPET_MAX = 100
 
 
 def _printable(line: str) -> str:
-    """Render control and format characters visibly; keep tabs."""
+    """Render control, format, and invisible-separator characters visibly;
+    keep tabs."""
     return "".join(
         f"\\u{ord(ch):04x}"
-        if ch != "\t" and unicodedata.category(ch) in ("Cc", "Cf")
+        if ch != "\t" and unicodedata.category(ch) in ("Cc", "Cf", "Zl", "Zp")
         else ch
         for ch in line
     )
@@ -122,7 +130,7 @@ def evidence_message(
     c: Contributor, summary: str, hits: list[Hit], note: str | None = None
 ) -> str:
     skill_dir = str(Path(c.id).parent)
-    lines = [f"'{c.name}' {summary} ({skill_dir}):"]
+    lines = [f"'{_printable(c.name)}' {summary} ({skill_dir}):"]
     for s, n, line in hits[:3]:
         snippet = _printable(line.strip())
         if len(snippet) > _SNIPPET_MAX:
@@ -150,7 +158,9 @@ def fingerprint_texts(hits: list[Hit]) -> list[str]:
 
 
 def removal_commands(c: Contributor) -> list[str]:
-    if c.source.kind in ("skills-lock", "linked"):
+    # A name starting with "-" would be parsed as a flag by the installer
+    # even shell-quoted, so those fall through to the path form.
+    if c.source.kind in ("skills-lock", "linked") and not c.name.startswith("-"):
         return [f"npx skills remove {shlex.quote(c.name)}"]
     skill_file = Path(c.id)
     if skill_file.name == "SKILL.md":
@@ -165,7 +175,9 @@ def removal_commands(c: Contributor) -> list[str]:
 # several writing systems use them. A byte order mark is legitimate only as
 # the first character of a file.
 _SUSPECT_CHARS = frozenset(
-    "​﻿‪‫‬‭‮⁦⁧⁨⁩"
+    "\u200b\ufeff\u2028\u2029"
+    "\u202a\u202b\u202c\u202d\u202e"
+    "\u2066\u2067\u2068\u2069"
 )
 _ALL_KINDS = {"skillmd", "script", "prose"}
 
@@ -280,7 +292,16 @@ def injection_override(world: World, config: Config) -> list[Finding]:
     return out
 
 
-_PIPE_TO_SHELL = re.compile(r"\b(curl|wget)\b[^\n]*\|\s*(sudo\s+)?(ba|z|da)?sh\b")
+# Matched in two linear steps (tool first, pipe-to-shell tail after it): a
+# single backtracking regex is quadratic on crafted lines full of "curl"
+# tokens, and a hostile skill stalling the scanner is itself an attack.
+_FETCH_TOOL = re.compile(r"\b(curl|wget)\b")
+_SHELL_TAIL = re.compile(r"\|\s*(sudo\s+)?(ba|z|da)?sh\b")
+
+
+def _pipe_to_shell(line: str) -> bool:
+    tool = _FETCH_TOOL.search(line)
+    return bool(tool and _SHELL_TAIL.search(line, tool.end()))
 _URLISH = re.compile(r"https?://")
 # Local URLs are dev-server chatter, not remote content (corpus tuning
 # 2026-07-20: `npm run dev` beside http://localhost was the main noise).
@@ -305,7 +326,7 @@ def injection_remote_fetch(world: World, config: Config) -> list[Finding]:
                 continue
             for i, line in enumerate(s.lines, start=1):
                 cleaned = _LOCAL_URL.sub("", line)
-                if _PIPE_TO_SHELL.search(cleaned) or (
+                if _pipe_to_shell(cleaned) or (
                     _URLISH.search(cleaned) and _FETCH_DIRECTIVE.search(cleaned)
                 ):
                     hits.append((s, i, line))
@@ -454,8 +475,18 @@ def injection_mandatory_script(world: World, config: Config) -> list[Finding]:
     for c in world.contributors.values():
         if not c.bundled_files:
             continue
-        paths = {bf.relpath for bf in c.bundled_files}
-        paths |= {Path(bf.relpath).name for bf in c.bundled_files}
+        # Word-bounded match on the relpath or basename; names shorter than
+        # 3 characters are skipped because they match almost anything.
+        names = {bf.relpath for bf in c.bundled_files}
+        names |= {Path(bf.relpath).name for bf in c.bundled_files}
+        names = {n for n in names if len(n) >= 3}
+        if not names:
+            continue
+        path_re = re.compile(
+            r"(?<!\w)(?:"
+            + "|".join(re.escape(n) for n in sorted(names, key=len, reverse=True))
+            + r")(?!\w)"
+        )
         hits: list[Hit] = []
         for s in scan_view(c):
             if s.kind != "skillmd":
@@ -471,7 +502,7 @@ def injection_mandatory_script(world: World, config: Config) -> list[Finding]:
                     match = p.search(line)
                     if match:
                         break
-                if match and any(path in line[match.end():] for path in paths):
+                if match and path_re.search(line, match.end()):
                     hits.append((s, i, line))
         if hits:
             out.append(

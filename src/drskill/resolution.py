@@ -83,13 +83,14 @@ def collect_bundled_files(skill_file: Path) -> tuple[list[BundledFile], list[str
                 continue
             digest = hashlib.sha256()
             head = b""
+            size = 0  # counted from the bytes hashed, so the two cannot drift
             try:
-                size = p.stat().st_size
                 with open(p, "rb") as fh:
                     while chunk := fh.read(65536):
                         if not head:
                             head = chunk[:_SNIFF_BYTES]
                         digest.update(chunk)
+                        size += len(chunk)
             except OSError:
                 unreadable.append(str(p))
                 continue
