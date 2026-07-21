@@ -47,7 +47,7 @@ class BundledFile(BaseModel):
 
 class Contributor(BaseModel):
     id: str  # str(realpath of the skill file)
-    kind: Literal["skill"] = "skill"
+    kind: Literal["skill", "mcp_tool"] = "skill"
     name: str
     source: Provenance = Provenance()
     scope: Literal["project", "user"]

@@ -53,6 +53,8 @@ def _harnesses_loading_both(world: World, a: Contributor, b: Contributor) -> set
 def exact_duplicate(world: World, config: Config) -> list[Finding]:
     by_hash: dict[str, list[Contributor]] = {}
     for c in world.contributors.values():
+        if c.kind != "skill":
+            continue
         by_hash.setdefault(c.content_hash, []).append(c)
     out = []
     for group in by_hash.values():
@@ -81,7 +83,7 @@ def exact_duplicate(world: World, config: Config) -> list[Finding]:
 
 @check("near-duplicate")
 def near_duplicate(world: World, config: Config) -> list[Finding]:
-    cs = list(world.contributors.values())
+    cs = [c for c in world.contributors.values() if c.kind == "skill"]
     sigs = {c.id: signature(shingles(_text(c))) for c in cs}
     out = []
     for a, b in combinations(cs, 2):

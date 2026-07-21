@@ -18,7 +18,18 @@ def _skill_md(world: World) -> list[Contributor]:
     return [
         c
         for c in world.contributors.values()
-        if Path(c.id).name == "SKILL.md" and c.frontmatter_valid
+        if c.kind == "skill" and Path(c.id).name == "SKILL.md" and c.frontmatter_valid
+    ]
+
+
+def _routing_contributors(world: World) -> list[Contributor]:
+    """Contributors that inject a routing description: skills and MCP tools.
+    description-overlap runs over both so a tool can collide with a skill."""
+    return [
+        c
+        for c in world.contributors.values()
+        if (c.kind == "skill" and Path(c.id).name == "SKILL.md" and c.frontmatter_valid)
+        or c.kind == "mcp_tool"
     ]
 
 
@@ -144,7 +155,7 @@ def _is_duplicate_pair(
 
 @check("description-overlap")
 def description_overlap(world: World, config: Config) -> list[Finding]:
-    cs = [c for c in _skill_md(world) if c.routing_text.strip()]
+    cs = [c for c in _routing_contributors(world) if c.routing_text.strip()]
     vecs = {c.id: text.shingle_vector(c.routing_text) for c in cs}
     sigs = {c.id: signature(shingles(f"{c.routing_text}\n{c.body}")) for c in cs}
 
