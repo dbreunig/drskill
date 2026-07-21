@@ -90,3 +90,72 @@ def flagged_pairs(world, findings: list[Finding]) -> list[tuple[Contributor, Con
 
 def unjudged_count(world, findings: list[Finding], cache: dict[str, Verdict]) -> int:
     return sum(1 for a, b in flagged_pairs(world, findings) if pair_key(a, b) not in cache)
+
+
+def apply_verdicts(
+    world, findings: list[Finding], cache: dict[str, Verdict], acked_fps: set[str]
+) -> list[Finding]:
+    """Reshape description-overlap findings with cached verdicts. With an
+    empty cache this is the identity, so users who never run --deep see no
+    change. A fully distinct cluster downgrades to a visible note unless a
+    member has an active injection finding; a suspected skill does not get
+    to talk its way out of an overlap warning."""
+    if not cache:
+        return findings
+    injected: set[str] = set()
+    for f in findings:
+        if f.check_id.startswith("injection-") and f.fingerprint not in acked_fps:
+            injected.update(f.contributors)
+    out: list[Finding] = []
+    for f in findings:
+        if f.check_id != "description-overlap":
+            out.append(f)
+            continue
+        members = sorted(
+            (world.contributors[cid] for cid in f.contributors if cid in world.contributors),
+            key=lambda c: c.name,
+        )
+        pairs = list(combinations(members, 2))
+        judged = {
+            (a.name, b.name): cache[pair_key(a, b)]
+            for a, b in pairs
+            if pair_key(a, b) in cache
+        }
+        if not judged:
+            out.append(f)
+            continue
+        blocked = sorted({m.name for m in members if m.id in injected})
+        all_distinct = len(judged) == len(pairs) and all(
+            v.verdict == "distinct" for v in judged.values()
+        )
+        if all_distinct and not blocked:
+            latest = max(judged.values(), key=lambda v: v.date)
+            names = ", ".join(m.name for m in members)
+            out.append(f.model_copy(update={
+                "severity": "note",
+                "message": (
+                    f"overlap flagged ({names}); judged distinct by "
+                    f"{latest.model}, {latest.date}"
+                ),
+                "fix_commands": [],
+            }))
+            continue
+        lines = []
+        for (an, bn), v in judged.items():
+            if v.verdict == "distinct":
+                lines.append(f"\n      deep: {an} vs {bn}: distinct; {v.rationale}")
+            else:
+                lines.append(
+                    f"\n      deep: {an} vs {bn}: {v.verdict}; {v.rationale}; "
+                    f"confusion example: '{v.detail}'"
+                )
+        missing = len(pairs) - len(judged)
+        if missing:
+            lines.append(f"\n      deep: {missing} of {len(pairs)} pairs unjudged")
+        if all_distinct and blocked:
+            lines.append(
+                "\n      deep: judged distinct, but downgrade withheld: "
+                f"active injection findings on {', '.join(blocked)}"
+            )
+        out.append(f.model_copy(update={"message": f.message + "".join(lines)}))
+    return out

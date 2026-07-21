@@ -95,3 +95,72 @@ def test_unjudged_count(tmp_path):
         model="m", program_version="v", date="2026-07-21",
     )}
     assert deep.unjudged_count(world, findings, cache) == 0
+
+
+def _verdict(cls, rationale="r", detail="d", model="test-model", date="2026-07-21"):
+    return deep.Verdict(
+        verdict=cls, rationale=rationale, detail=detail,
+        model=model, program_version="v", date=date,
+    )
+
+
+def _pair_world():
+    a = contributor("alpha", "Use when writing documentation pages.")
+    b = contributor("beta", "Use when writing documentation summaries.")
+    return a, b, FakeWorld([a, b])
+
+
+def test_apply_verdicts_empty_cache_is_identity():
+    a, b, world = _pair_world()
+    findings = [finding_for("description-overlap", [a, b])]
+    assert deep.apply_verdicts(world, findings, {}, set()) is findings
+
+
+def test_all_distinct_downgrades_to_note():
+    a, b, world = _pair_world()
+    f = finding_for("description-overlap", [a, b])
+    cache = {deep.pair_key(a, b): _verdict("distinct")}
+    (out,) = deep.apply_verdicts(world, [f], cache, set())
+    assert out.severity == "note"
+    assert out.message == "overlap flagged (alpha, beta); judged distinct by test-model, 2026-07-21"
+    assert out.fix_commands == []
+    assert out.fingerprint == f.fingerprint
+
+
+def test_collision_verdict_keeps_warning_with_evidence():
+    a, b, world = _pair_world()
+    f = finding_for("description-overlap", [a, b])
+    cache = {deep.pair_key(a, b): _verdict(
+        "description_collision", rationale="same scope words", detail="write the docs page",
+    )}
+    (out,) = deep.apply_verdicts(world, [f], cache, set())
+    assert out.severity == "warning"
+    assert "deep: alpha vs beta: description_collision; same scope words" in out.message
+    assert "confusion example: 'write the docs page'" in out.message
+
+
+def test_partial_verdicts_note_unjudged_pairs():
+    a = contributor("alpha", "Use for alpha docs.")
+    b = contributor("beta", "Use for beta docs.")
+    c = contributor("gamma", "Use for gamma docs.")
+    world = FakeWorld([a, b, c])
+    f = finding_for("description-overlap", [a, b, c])
+    cache = {deep.pair_key(a, b): _verdict("distinct")}
+    (out,) = deep.apply_verdicts(world, [f], cache, set())
+    assert out.severity == "warning"
+    assert "deep: 2 of 3 pairs unjudged" in out.message
+
+
+def test_active_injection_blocks_downgrade_and_ack_unblocks():
+    a, b, world = _pair_world()
+    overlap = finding_for("description-overlap", [a, b])
+    injection = finding_for("injection-egress", [a])
+    cache = {deep.pair_key(a, b): _verdict("distinct")}
+    (out, _) = deep.apply_verdicts(world, [overlap, injection], cache, set())
+    assert out.severity == "warning"
+    assert "downgrade withheld" in out.message
+    assert "alpha" in out.message
+    (out2, _) = deep.apply_verdicts(
+        world, [overlap, injection], cache, {injection.fingerprint}
+    )
+    assert out2.severity == "note"
