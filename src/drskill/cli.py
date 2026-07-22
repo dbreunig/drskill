@@ -503,6 +503,10 @@ def list_cmd(
     config = _load_effective_config_or_exit(root, home, global_mode)
     world, _findings = run_scan(root, home, global_mode, config, harness=harness)
     _warn_if_undetected(harness, root, home, global_mode)
+    from drskill import suites
+
+    # Suite lookup is only shown here, so it only runs here (not on scan/show).
+    suites.assign_suites(world, home)
     if mcp:
         from rich.table import Table
 

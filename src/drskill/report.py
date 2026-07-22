@@ -41,7 +41,8 @@ def render_harness_tables(
     for hid, hdef in sorted(world.harnesses.items()):
         if harness and hid != harness:
             continue
-        if not show_all and harness is None and not world.effective(hid):
+        has_mcp = any(s.harness == hid for s in world.mcp_servers)
+        if not show_all and harness is None and not world.effective(hid) and not has_mcp:
             hidden.append(hid)
             continue
         if not hdef.paths_verified:
@@ -52,33 +53,69 @@ def render_harness_tables(
             suffix = ""
         title = escape(hdef.display_name) + suffix
         table = Table(title=title)
-        table.add_column("skill")
+        table.add_column("name")
+        table.add_column("kind")
         table.add_column("scope")
         table.add_column("source")
+        table.add_column("suite")
         if tokens:
             table.add_column("catalog", justify="right")
             table.add_column("body", justify="right")
         table.add_column("notes")
         cat_total = body_total = 0
+        # Everything the harness loads, skills and MCP tools together, sorted
+        # so a suite (a plugin for skills, a server for tools) reads as a
+        # block. Skills come before the MCP block, then by suite name, then
+        # by name. Each row is (sort_key, cells).
+        rows: list[tuple] = []
+
+        def _cells(name, kind, scope, source, suite, notes, cat=None, body=None):
+            row = [escape(name), kind, escape(scope), escape(source), escape(suite)]
+            if tokens:
+                row += ["" if cat is None else str(cat), "" if body is None else str(body)]
+            row.append(escape(notes))
+            return row
+
+        connected_cfgs: set[str] = set()
         for c, d in world.harness_loads(hid):
-            if c.kind != "skill":
-                continue  # MCP tools are shown by `list --mcp`, not here
+            is_tool = c.kind == "mcp_tool"
             notes = []
             if d.shadowed_by:
                 notes.append("shadowed")
             if d.via_symlink:
                 notes.append("symlink")
-            row = [escape(c.name), escape(d.scope), escape(c.source.kind)]
+            if is_tool:
+                connected_cfgs.add(c.id.split(":", 1)[0])
+            cat = body = None
             if tokens:
-                row += [str(c.token_cost.catalog_tokens), str(c.token_cost.body_tokens)]
+                cat, body = c.token_cost.catalog_tokens, c.token_cost.body_tokens
                 if d.shadowed_by is None:
                     cat_total += c.token_cost.catalog_tokens
                     body_total += c.token_cost.body_tokens
-            row.append(escape(", ".join(notes)))
-            table.add_row(*row)
+            key = (0 if not is_tool else 1, c.suite or "￿", c.name)
+            rows.append((key, _cells(
+                c.name, "mcp tool" if is_tool else "skill", d.scope,
+                "" if is_tool else c.source.kind, c.suite or "",
+                ", ".join(notes), cat, body,
+            )))
+
+        # A configured server drskill has not connected to yet: one row for
+        # the server, so `list` always shows the MCP servers even without a
+        # handshake. Once connected, its tools replace this row.
+        for s in world.mcp_servers:
+            if s.harness != hid or s.config_hash in connected_cfgs:
+                continue
+            key = (1, s.name, s.name)
+            rows.append((key, _cells(
+                s.name, "mcp server", s.scope, "", s.name,
+                "not connected; run scan --mcp-connect", None, None,
+            )))
+
+        for _key, cells in sorted(rows, key=lambda r: r[0]):
+            table.add_row(*cells)
         if tokens:
-            table.add_row("total (effective)", "", "", str(cat_total), str(body_total), "",
-                          style="bold")
+            table.add_row("total (effective)", "", "", "", "", str(cat_total),
+                          str(body_total), "", style="bold")
         console.print(table)
     if hidden:
         plural = "es" if len(hidden) != 1 else ""

@@ -123,6 +123,34 @@ Run in CI, where any unacknowledged warning should fail the build:
 drskill scan --ci
 ```
 
+### Example scans
+
+A few scans you might run:
+
+Deeply check one agent's skills and MCPs. This scopes the scan to Claude Code and uses the model to judge which overlap warnings are real:
+
+```
+drskill scan --mcp-connect --harness claude-code --deep
+```
+
+Do a full audit before a Skill or MCP release. This judges skill overlaps and connects to every MCP server to read its tools:
+
+```
+drskill scan --deep --mcp-connect
+```
+
+Judge everything in one pass, with no cap on model calls:
+
+```
+drskill scan --deep --max-calls all
+```
+
+Gate a pull request. This connects to servers, judges overlaps, and fails the build on any unacknowledged warning:
+
+```
+drskill scan --deep --mcp-connect --ci
+```
+
 ## Exit codes
 
 | code | meaning |
@@ -264,6 +292,10 @@ Acks are scope aware. When a finding involves only machine-level skills, e.g. a 
 Findings print errors first, then warnings. Inside each section the order is: findings you have not seen before, then findings on skills you installed, then findings on harness-vendored skills, which carry a `[system skill]` label. A finding you have not seen carries a `new` tag, and the summary line counts them. The memory behind the `new` tag lives in `~/.drskill/state/`, one small file per project. It only records what the report has shown you; it is not the ledger, and `--json` runs never touch it, so an agent polling `drskill` does not clear your markers. When a finding affects every detected harness, the harness line collapses to a count, e.g. "all 7 harnesses". Checks that flag description quality report one finding listing every offending skill, so three skills with the same problem are one entry and one ack.
 
 The `source` column in `list` shows where a skill came from: `skills-lock` for skills named in a project's `skills-lock.json`, `gh-skill` for skills with `gh skill` provenance in their frontmatter, and `linked` for skills that live in or link into a `.agents/skills` store. The `linked` label means an installer arranged the layout; `drskill` does not guess which one. `unmanaged` means a plain directory with no known manager.
+
+`list` shows a harness's whole loadout in one table: its skills and its MCP servers. Each row has a `kind` (`skill`, `mcp server`, or `mcp tool`) and a `suite`. A configured server shows as one `mcp server` row until you run `--mcp-connect`; after that it expands into one `mcp tool` row per tool the server exposes. The rows are sorted by suite, so a suite reads as a block: all your superpowers skills together, then the rest, then each server and its tools together.
+
+The `suite` column names where a row came from. For a skill it is the plugin or repo. `drskill` recovers a plugin suite by matching the skill's content against the plugin caches on disk, so a plugin skill copied into a shared store is still recognized. For a skill that a lockfile tracks, the suite is the lockfile source, the same origin the `source` column records. For an MCP tool the suite is the server that exposes it. A skill with neither a plugin match nor a lockfile source shows a blank suite, because `drskill` does not guess a suite from a path or a bare name.
 
 ## Known limitations
 
