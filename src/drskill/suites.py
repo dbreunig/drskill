@@ -1,64 +1,49 @@
-"""Recover which suite a skill came from. drskill matches installed skills
-against the plugin caches on disk (by content hash) and against
-skills-lock.json sources. It never guesses from a path or a name."""
+"""Recover which suite a skill came from.
+
+drskill matches installed skills against the plugin caches on disk by
+content hash. For a skill that a lockfile already governs, it reuses the
+lockfile source drskill has already recorded as that skill's provenance,
+the same value the `source` column shows. It never guesses a suite from a
+path or a bare name."""
 
 from __future__ import annotations
 
-import json
 from pathlib import Path
 
-from drskill.resolution import content_hash
+from drskill.resolution import World, content_hash
 
 
-def _plugin_hashes(home: Path) -> dict[str, str]:
+def build_registry(home: Path) -> dict[str, str]:
+    """Map a normalized content hash to a plugin name, read from every
+    cached plugin skill. Iteration is sorted so a hash shared by two
+    plugins resolves to the same plugin on every machine."""
     by_hash: dict[str, str] = {}
     cache = home / ".claude" / "plugins" / "cache"
     if not cache.is_dir():
         return by_hash
-    # cache/<marketplace>/<plugin>/<version>/skills/<name>/SKILL.md
-    for skill_md in cache.glob("*/*/*/skills/*/SKILL.md"):
-        plugin = skill_md.parents[3].name
-        try:
-            h = content_hash(skill_md.read_text(encoding="utf-8", errors="replace"))
-        except OSError:
+    # cache/<marketplace>/<plugin>/<version>/skills/**/SKILL.md
+    for skills_dir in sorted(cache.glob("*/*/*/skills")):
+        if not skills_dir.is_dir():
             continue
-        by_hash.setdefault(h, plugin)  # first plugin to claim a hash wins, stable
+        plugin = skills_dir.parent.parent.name
+        for skill_md in sorted(skills_dir.rglob("SKILL.md")):
+            try:
+                h = content_hash(skill_md.read_text(encoding="utf-8", errors="replace"))
+            except OSError:
+                continue
+            by_hash.setdefault(h, plugin)
     return by_hash
 
 
-def _lockfile_sources(home: Path) -> dict[str, str]:
-    # Bounded search of the known machine-level lockfile spots. Never walk
-    # the whole home tree; the project lockfile is folded in separately by
-    # the pipeline.
-    candidates = [
-        home / "skills-lock.json",
-        home / ".claude" / "skills-lock.json",
-        home / ".agents" / "skills-lock.json",
-    ]
-    by_name: dict[str, str] = {}
-    for lock in candidates:
-        if not lock.is_file():
+def assign_suites(world: World, home: Path) -> None:
+    """Set `suite` on each skill contributor in place. A content-hash match
+    to a plugin wins; otherwise a skill drskill has already recorded as
+    lockfile-tracked shows its lockfile source; otherwise it stays None."""
+    by_hash = build_registry(home)
+    for c in world.contributors.values():
+        if c.kind != "skill":
             continue
-        try:
-            data = json.loads(lock.read_text())
-        except Exception:
-            continue
-        entries = data.get("skills") if isinstance(data, dict) else None
-        if not isinstance(entries, dict):
-            continue
-        for name, entry in entries.items():
-            if isinstance(entry, dict) and isinstance(entry.get("source"), str):
-                by_name.setdefault(str(name), entry["source"])
-    return by_name
-
-
-def build_registry(home: Path) -> tuple[dict[str, str], dict[str, str]]:
-    return _plugin_hashes(home), _lockfile_sources(home)
-
-
-def suite_for(
-    content_hash: str, name: str, by_hash: dict[str, str], by_name: dict[str, str]
-) -> str | None:
-    if content_hash in by_hash:
-        return by_hash[content_hash]
-    return by_name.get(name)
+        found = by_hash.get(c.content_hash)
+        if found is None and c.source.kind == "skills-lock" and c.source.source:
+            found = c.source.source
+        c.suite = found

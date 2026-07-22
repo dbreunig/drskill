@@ -2,7 +2,9 @@ import json
 from pathlib import Path
 
 from drskill import suites
-from drskill.resolution import content_hash
+from drskill.models import Contributor, Provenance, TokenCost
+from drskill.resolution import World, content_hash
+from drskill.harnesses import HarnessDef
 
 
 def write_skill(path: Path, name: str, description: str, body: str = "b") -> str:
@@ -16,12 +18,26 @@ def plugin_cache(home: Path, marketplace: str, plugin: str, version: str):
     return home / ".claude" / "plugins" / "cache" / marketplace / plugin / version / "skills"
 
 
+def _contrib(name, chash, source_kind="unmanaged", source=None):
+    return Contributor(
+        id=f"/skills/{name}/SKILL.md", name=name, scope="user",
+        routing_text="desc", token_cost=TokenCost(catalog_tokens=1, body_tokens=0),
+        content_hash=chash, source=Provenance(kind=source_kind, source=source),
+    )
+
+
+def _world(*cs):
+    return World(
+        contributors={c.id: c for c in cs},
+        harnesses={"claude-code": HarnessDef(id="claude-code", display_name="Claude Code")},
+    )
+
+
 def test_registry_maps_plugin_skill_by_content_hash(tmp_path):
     home = tmp_path / "home"
     skills = plugin_cache(home, "official", "superpowers", "6.1.1")
     h = write_skill(skills / "brainstorming", "brainstorming", "Use when planning.")
-    by_hash, _ = suites.build_registry(home)
-    assert by_hash[h] == "superpowers"
+    assert suites.build_registry(home)[h] == "superpowers"
 
 
 def test_registry_indexes_every_cached_version(tmp_path):
@@ -30,65 +46,69 @@ def test_registry_indexes_every_cached_version(tmp_path):
     h_old = write_skill(old / "brainstorming", "brainstorming", "Old wording.")
     new = plugin_cache(home, "official", "superpowers", "6.1.1")
     write_skill(new / "brainstorming", "brainstorming", "New wording.")
-    by_hash, _ = suites.build_registry(home)
-    assert by_hash[h_old] == "superpowers"  # a match against the old version still counts
+    assert suites.build_registry(home)[h_old] == "superpowers"
 
 
-def test_registry_reads_lockfile_source(tmp_path):
+def test_registry_finds_nested_plugin_skills(tmp_path):
     home = tmp_path / "home"
-    home.mkdir()
-    (home / "skills-lock.json").write_text(json.dumps({
-        "version": 1,
-        "skills": {"scaffold-docs": {"source": "dbreunig/scaffold-docs-skill",
-                                     "sourceType": "github"}},
-    }))
-    _, by_name = suites.build_registry(home)
-    assert by_name["scaffold-docs"] == "dbreunig/scaffold-docs-skill"
-
-
-def test_registry_skips_corrupt_files(tmp_path):
-    home = tmp_path / "home"
-    home.mkdir()
-    (home / "skills-lock.json").write_text("{not json")
-    by_hash, by_name = suites.build_registry(home)
-    assert by_hash == {} and by_name == {}
-
-
-def test_suite_for_prefers_hash_then_name(tmp_path):
-    by_hash = {"sha256:aa": "superpowers"}
-    by_name = {"brainstorming": "someone/repo"}
-    assert suites.suite_for("sha256:aa", "brainstorming", by_hash, by_name) == "superpowers"
-    assert suites.suite_for("sha256:zz", "brainstorming", by_hash, by_name) == "someone/repo"
-    assert suites.suite_for("sha256:zz", "unknown", by_hash, by_name) is None
-
-
-from drskill.ledger import Config
-from drskill.pipeline import run_scan
-
-
-def test_pipeline_assigns_plugin_suite_to_a_flat_copy(tmp_path, monkeypatch):
-    home = tmp_path / "home"
-    monkeypatch.setenv("DRSKILL_HOME", str(home))
-    # a plugin cache defines 'brainstorming'
     skills = plugin_cache(home, "official", "superpowers", "6.1.1")
-    write_skill(skills / "brainstorming", "brainstorming", "Use when planning a feature.")
-    # the same skill is installed flat for claude-code, with identical content
-    proj = tmp_path / "proj"
-    write_skill(proj / ".claude" / "skills" / "brainstorming",
-                "brainstorming", "Use when planning a feature.")
-    world, _ = run_scan(proj, home, config=Config())
-    c = next(c for c in world.contributors.values() if c.name == "brainstorming")
-    assert c.suite == "superpowers"
+    h = write_skill(skills / "group" / "nested", "nested", "Use when nested.")
+    assert suites.build_registry(home)[h] == "superpowers"
 
 
-def test_pipeline_leaves_suite_none_when_unknown(tmp_path, monkeypatch):
+def test_registry_is_deterministic_across_duplicate_plugins(tmp_path):
     home = tmp_path / "home"
-    monkeypatch.setenv("DRSKILL_HOME", str(home))
-    proj = tmp_path / "proj"
-    write_skill(proj / ".claude" / "skills" / "solo", "solo", "Use when doing a solo task.")
-    world, _ = run_scan(proj, home, config=Config())
-    c = next(c for c in world.contributors.values() if c.name == "solo")
-    assert c.suite is None
+    # two plugins ship byte-identical content; the label must be stable
+    a = plugin_cache(home, "official", "alpha-suite", "1.0")
+    b = plugin_cache(home, "official", "beta-suite", "1.0")
+    h1 = write_skill(a / "shared", "shared", "Use when shared.")
+    write_skill(b / "shared", "shared", "Use when shared.")
+    assert suites.build_registry(home)[h1] == "alpha-suite"  # sorted, first wins
+
+
+def test_registry_empty_when_no_cache(tmp_path):
+    assert suites.build_registry(tmp_path / "nohome") == {}
+
+
+def test_assign_uses_plugin_match(tmp_path):
+    home = tmp_path / "home"
+    skills = plugin_cache(home, "official", "superpowers", "6.1.1")
+    h = write_skill(skills / "brainstorming", "brainstorming", "Use when planning.")
+    w = _world(_contrib("brainstorming", h))
+    suites.assign_suites(w, home)
+    assert next(iter(w.contributors.values())).suite == "superpowers"
+
+
+def test_assign_falls_back_to_lockfile_provenance(tmp_path):
+    home = tmp_path / "home"
+    home.mkdir()
+    # no plugin match, but drskill already marked this skill skills-lock
+    w = _world(_contrib("scaffold-docs", "sha256:zz",
+                        source_kind="skills-lock", source="dbreunig/scaffold-docs-skill"))
+    suites.assign_suites(w, home)
+    assert next(iter(w.contributors.values())).suite == "dbreunig/scaffold-docs-skill"
+
+
+def test_assign_leaves_unmanaged_skill_blank(tmp_path):
+    home = tmp_path / "home"
+    home.mkdir()
+    # a local skill with no plugin match and no lockfile provenance: no suite
+    w = _world(_contrib("solo", "sha256:zz", source_kind="unmanaged"))
+    suites.assign_suites(w, home)
+    assert next(iter(w.contributors.values())).suite is None
+
+
+def test_assign_ignores_mcp_tools(tmp_path):
+    home = tmp_path / "home"
+    home.mkdir()
+    t = Contributor(
+        id="cfg:tool", name="tool", kind="mcp_tool", scope="user",
+        routing_text="d", token_cost=TokenCost(catalog_tokens=1, body_tokens=0),
+        content_hash="sha256:zz",
+    )
+    w = _world(t)
+    suites.assign_suites(w, home)
+    assert next(iter(w.contributors.values())).suite is None
 
 
 from typer.testing import CliRunner
@@ -98,7 +118,7 @@ from drskill.cli import app
 runner = CliRunner()
 
 
-def test_list_shows_suite_column(tmp_path):
+def test_list_shows_plugin_suite_for_flat_copy(tmp_path):
     home = tmp_path / "home"
     home.mkdir()
     skills = plugin_cache(home, "official", "superpowers", "6.1.1")
@@ -112,15 +132,16 @@ def test_list_shows_suite_column(tmp_path):
     assert "suite" in r.output and "superpowers" in r.output
 
 
-def test_list_suite_column_escapes_markup(tmp_path):
+def test_list_suite_column_escapes_lockfile_source(tmp_path):
     home = tmp_path / "home"
     home.mkdir()
-    (home / "skills-lock.json").write_text(json.dumps({
+    proj = tmp_path / "proj"
+    write_skill(proj / ".claude" / "skills" / "weird", "weird", "Use when doing a weird task.")
+    # a project lockfile gives this skill a source; the suite surfaces it, escaped
+    (proj / "skills-lock.json").write_text(json.dumps({
         "version": 1,
         "skills": {"weird": {"source": "[red]x[/red]/repo"}},
     }))
-    proj = tmp_path / "proj"
-    write_skill(proj / ".claude" / "skills" / "weird", "weird", "Use when doing a weird task.")
     r = runner.invoke(app, ["list", "--root", str(proj)],
                       env={"DRSKILL_HOME": str(home), "COLUMNS": "200"})
     assert "[red]x[/red]/repo" in r.output and "\x1b[31m" not in r.output
