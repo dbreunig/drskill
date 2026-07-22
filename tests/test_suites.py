@@ -178,3 +178,18 @@ def test_list_includes_mcp_tools_and_sorts_by_suite(tmp_path):
     assert "memory" in r.output  # the tool's suite is its server
     # skills still show their suite
     assert "superpowers" in r.output
+
+
+def test_list_shows_server_row_when_not_connected(tmp_path):
+    home = tmp_path / "home"
+    home.mkdir()
+    proj = tmp_path / "proj"
+    write_skill(proj / ".claude" / "skills" / "solo", "solo", "Use when solo.")
+    # a configured server but NO snapshot (never connected)
+    (proj / ".mcp.json").write_text(json.dumps({"mcpServers": {"memory": {"command": "mem-bin"}}}))
+    r = runner.invoke(app, ["list", "--root", str(proj)],
+                      env={"DRSKILL_HOME": str(home), "COLUMNS": "220"})
+    assert r.exit_code == 0, r.output
+    # the server itself is listed, marked, and points at --mcp-connect
+    assert "memory" in r.output and "mcp server" in r.output
+    assert "connect" in r.output  # a hint to run --mcp-connect
