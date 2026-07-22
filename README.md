@@ -123,6 +123,34 @@ Run in CI, where any unacknowledged warning should fail the build:
 drskill scan --ci
 ```
 
+## Real scans
+
+The flags combine. A few scans you would actually run:
+
+Deeply check one agent's skills. This scopes the scan to Claude Code and uses the model to judge which overlap warnings are real:
+
+```
+drskill scan --harness claude-code --deep
+```
+
+Do a full audit before a release. This judges skill overlaps and connects to every MCP server to read its tools:
+
+```
+drskill scan --deep --mcp-connect
+```
+
+Judge everything in one pass, with no cap on model calls:
+
+```
+drskill scan --deep --max-calls all
+```
+
+Gate a pull request. This connects to servers, judges overlaps, and fails the build on any unacknowledged warning:
+
+```
+drskill scan --deep --mcp-connect --ci
+```
+
 ## Exit codes
 
 | code | meaning |
