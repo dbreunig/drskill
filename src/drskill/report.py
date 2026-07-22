@@ -55,6 +55,7 @@ def render_harness_tables(
         table.add_column("skill")
         table.add_column("scope")
         table.add_column("source")
+        table.add_column("suite")
         if tokens:
             table.add_column("catalog", justify="right")
             table.add_column("body", justify="right")
@@ -68,7 +69,10 @@ def render_harness_tables(
                 notes.append("shadowed")
             if d.via_symlink:
                 notes.append("symlink")
-            row = [escape(c.name), escape(d.scope), escape(c.source.kind)]
+            row = [
+                escape(c.name), escape(d.scope), escape(c.source.kind),
+                escape(c.suite or ""),
+            ]
             if tokens:
                 row += [str(c.token_cost.catalog_tokens), str(c.token_cost.body_tokens)]
                 if d.shadowed_by is None:
@@ -77,8 +81,8 @@ def render_harness_tables(
             row.append(escape(", ".join(notes)))
             table.add_row(*row)
         if tokens:
-            table.add_row("total (effective)", "", "", str(cat_total), str(body_total), "",
-                          style="bold")
+            table.add_row("total (effective)", "", "", "", str(cat_total),
+                          str(body_total), "", style="bold")
         console.print(table)
     if hidden:
         plural = "es" if len(hidden) != 1 else ""

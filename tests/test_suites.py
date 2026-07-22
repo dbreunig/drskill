@@ -89,3 +89,38 @@ def test_pipeline_leaves_suite_none_when_unknown(tmp_path, monkeypatch):
     world, _ = run_scan(proj, home, config=Config())
     c = next(c for c in world.contributors.values() if c.name == "solo")
     assert c.suite is None
+
+
+from typer.testing import CliRunner
+
+from drskill.cli import app
+
+runner = CliRunner()
+
+
+def test_list_shows_suite_column(tmp_path):
+    home = tmp_path / "home"
+    home.mkdir()
+    skills = plugin_cache(home, "official", "superpowers", "6.1.1")
+    write_skill(skills / "brainstorming", "brainstorming", "Use when planning a feature.")
+    proj = tmp_path / "proj"
+    write_skill(proj / ".claude" / "skills" / "brainstorming",
+                "brainstorming", "Use when planning a feature.")
+    r = runner.invoke(app, ["list", "--root", str(proj)],
+                      env={"DRSKILL_HOME": str(home), "COLUMNS": "200"})
+    assert r.exit_code == 0, r.output
+    assert "suite" in r.output and "superpowers" in r.output
+
+
+def test_list_suite_column_escapes_markup(tmp_path):
+    home = tmp_path / "home"
+    home.mkdir()
+    (home / "skills-lock.json").write_text(json.dumps({
+        "version": 1,
+        "skills": {"weird": {"source": "[red]x[/red]/repo"}},
+    }))
+    proj = tmp_path / "proj"
+    write_skill(proj / ".claude" / "skills" / "weird", "weird", "Use when doing a weird task.")
+    r = runner.invoke(app, ["list", "--root", str(proj)],
+                      env={"DRSKILL_HOME": str(home), "COLUMNS": "200"})
+    assert "[red]x[/red]/repo" in r.output and "\x1b[31m" not in r.output
