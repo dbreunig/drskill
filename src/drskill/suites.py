@@ -27,8 +27,18 @@ def _plugin_hashes(home: Path) -> dict[str, str]:
 
 
 def _lockfile_sources(home: Path) -> dict[str, str]:
+    # Bounded search of the known machine-level lockfile spots. Never walk
+    # the whole home tree; the project lockfile is folded in separately by
+    # the pipeline.
+    candidates = [
+        home / "skills-lock.json",
+        home / ".claude" / "skills-lock.json",
+        home / ".agents" / "skills-lock.json",
+    ]
     by_name: dict[str, str] = {}
-    for lock in home.rglob("skills-lock.json"):
+    for lock in candidates:
+        if not lock.is_file():
+            continue
         try:
             data = json.loads(lock.read_text())
         except Exception:
