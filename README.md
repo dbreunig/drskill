@@ -265,6 +265,8 @@ Findings print errors first, then warnings. Inside each section the order is: fi
 
 The `source` column in `list` shows where a skill came from: `skills-lock` for skills named in a project's `skills-lock.json`, `gh-skill` for skills with `gh skill` provenance in their frontmatter, and `linked` for skills that live in or link into a `.agents/skills` store. The `linked` label means an installer arranged the layout; `drskill` does not guess which one. `unmanaged` means a plain directory with no known manager.
 
+`list` also has a `suite` column that names the plugin or repo a skill came from, e.g. `superpowers`. `drskill` recovers this by matching the skill's content against the plugin caches on disk and against the lockfile source. It matches on content, so a plugin skill copied into a shared store is still recognized. It leaves the column blank when the origin cannot be verified, rather than guessing from a path or a name.
+
 ## Known limitations
 
 Claude Code skills bundled inside plugins are not scanned yet. `drskill` only walks the plain `.claude/skills` directories described in the harness table; it does not look inside installed plugin packages.
