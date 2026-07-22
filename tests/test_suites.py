@@ -60,3 +60,32 @@ def test_suite_for_prefers_hash_then_name(tmp_path):
     assert suites.suite_for("sha256:aa", "brainstorming", by_hash, by_name) == "superpowers"
     assert suites.suite_for("sha256:zz", "brainstorming", by_hash, by_name) == "someone/repo"
     assert suites.suite_for("sha256:zz", "unknown", by_hash, by_name) is None
+
+
+from drskill.ledger import Config
+from drskill.pipeline import run_scan
+
+
+def test_pipeline_assigns_plugin_suite_to_a_flat_copy(tmp_path, monkeypatch):
+    home = tmp_path / "home"
+    monkeypatch.setenv("DRSKILL_HOME", str(home))
+    # a plugin cache defines 'brainstorming'
+    skills = plugin_cache(home, "official", "superpowers", "6.1.1")
+    write_skill(skills / "brainstorming", "brainstorming", "Use when planning a feature.")
+    # the same skill is installed flat for claude-code, with identical content
+    proj = tmp_path / "proj"
+    write_skill(proj / ".claude" / "skills" / "brainstorming",
+                "brainstorming", "Use when planning a feature.")
+    world, _ = run_scan(proj, home, config=Config())
+    c = next(c for c in world.contributors.values() if c.name == "brainstorming")
+    assert c.suite == "superpowers"
+
+
+def test_pipeline_leaves_suite_none_when_unknown(tmp_path, monkeypatch):
+    home = tmp_path / "home"
+    monkeypatch.setenv("DRSKILL_HOME", str(home))
+    proj = tmp_path / "proj"
+    write_skill(proj / ".claude" / "skills" / "solo", "solo", "Use when doing a solo task.")
+    world, _ = run_scan(proj, home, config=Config())
+    c = next(c for c in world.contributors.values() if c.name == "solo")
+    assert c.suite is None

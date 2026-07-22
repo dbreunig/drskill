@@ -61,6 +61,7 @@ class Contributor(BaseModel):
     frontmatter: dict = Field(default_factory=dict)
     frontmatter_text: str = ""
     system: bool = False  # lives under a `.system` dir: a harness-vendored skill
+    suite: str | None = None  # the plugin or repo this skill came from, when known
 
 
 class Finding(BaseModel):

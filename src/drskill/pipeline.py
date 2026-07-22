@@ -87,6 +87,21 @@ def run_scan(
                         )
                     }
                 )
+    from drskill import suites
+
+    by_hash, by_name = suites.build_registry(home)
+    # a project-scope lockfile source counts too
+    if world.lockfile:
+        for name, entry in world.lockfile.items():
+            src = entry.get("source") if isinstance(entry, dict) else None
+            if isinstance(src, str):
+                by_name.setdefault(name, src)
+    for cid, c in list(world.contributors.items()):
+        if c.kind != "skill":
+            continue
+        found = suites.suite_for(c.content_hash, c.name, by_hash, by_name)
+        if found is not None:
+            world.contributors[cid] = c.model_copy(update={"suite": found})
     if progress:
         progress("reading MCP configs")
     world.mcp_servers, world.mcp_config_errors = mcp.discover_servers(
