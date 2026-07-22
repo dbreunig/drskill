@@ -1,6 +1,8 @@
 ### 🎶 They Call Me Dr. Skill 🎶
 
-`drskill` is `brew doctor` for your agent's skill loadout. It looks at every coding agent installed on your machine or configured in your repo, works out exactly which skills each one loads, and checks that set for problems: 
+`drskill` is `brew doctor` for your agent's loadout. Coding agents load Skills and connect to MCP servers before you type a word. `drskill` looks at every agent on your machine or in your repo, works out exactly which skills and which servers each one loads, and checks the whole set for problems.
+
+On the skill side it finds:
 
 1. Skills that shadow each other
 2. Skills loaded twice
@@ -8,9 +10,27 @@
 4. Skills that break the SKILL.md spec
 5. Broken symlinks
 6. Drift against your lockfile
-7. Skills that burn too many tokens. 
+7. Skills that burn too many tokens
 
-Every problem it reports ends in a command: a fix command or a command to acknowledge the problem and move on. `drskill` only reads your files. It never installs, edits, or deletes a skill, and it makes zero calls to an LLM unless you explicitly opt in with `scan --deep`.
+On the MCP side it finds:
+
+1. The same server configured twice with drifted settings
+2. Secrets sitting in a committable config file
+3. Unpinned server packages that run whatever publishes next
+4. Server commands that no longer exist
+5. Tools whose descriptions collide with each other or with a skill
+6. Servers that quietly change their tools after you approved them
+
+The last two need `drskill` to connect to the servers, which it does only when you ask.
+
+Every problem it reports ends in a command: a fix command or a command to acknowledge the problem and move on. `drskill` reads your files and never installs, edits, or deletes a skill. It makes zero calls to an LLM unless you opt in with `scan --deep`, and it never launches or connects to an MCP server unless you opt in with `scan --mcp-connect`.
+
+Use `drskill` to:
+
+- Learn why an agent reaches for the wrong skill or tool, e.g. two descriptions overlap so a router cannot tell them apart
+- Catch config risks before they ship, e.g. a secret in a committed file or an unpinned server package
+- Notice when your loadout changes (without you doing anything), e.g. a skill that drifted from its lockfile or a server that rewrote a tool description
+- Write skill and tool descriptions that do not clash with other libraries
 
 ## Install
 
@@ -18,7 +38,9 @@ Every problem it reports ends in a command: a fix command or a command to acknow
 uv tool install drskill
 ```
 
-This installs everything, including the model-judged deep checks. For a minimal install, e.g. in CI, where the LLM layer is never used, install the core package instead:
+This installs everything, including the model-judged deep checks and the MCP server connection support.
+
+For a minimal install, e.g. in CI, where neither is used, install the core package instead:
 
 ```
 uv tool install drskill-core
@@ -40,7 +62,7 @@ Write a starter ledger file with default budgets and thresholds:
 drskill init
 ```
 
-Acknowledge a finding so it stops showing up until the skill's content changes. There are four forms:
+Acknowledge (`ack`) a finding so it stops showing up until the skill's content changes. There are four forms:
 
 ```
 drskill ack fe5b                     # one finding, by the id shown in the report
@@ -148,7 +170,7 @@ Without `--ci`, warnings alone exit 0. This lets you run `drskill scan` locally 
 | `mcp-dead-server` | error | A stdio server's command is not on PATH or its absolute path does not exist. |
 | `mcp-connect-failed` | warning | A `--mcp-connect` handshake to a server did not connect, timed out, or errored. |
 | `mcp-tool-collision` | warning | Two servers expose the same tool name into one harness's set. Which one the agent gets is client dependent. |
-| `mcp-tools-unreviewed` | warning | A server's enumerated tool set has not been acknowledged. Acking approves that exact set; any later tool-description change resurfaces the finding. |
+| `mcp-tools-unreviewed` | note on first sight, warning on change | A server's enumerated tool set. On first sight it is a note asking you to record an approved baseline. If the server later changes a tool's description, it becomes a warning. |
 
 ## Deep checks
 
@@ -169,6 +191,15 @@ The judge model is set in the ledger and defaults to a current Anthropic model:
 model = "anthropic/claude-haiku-4-5"
 ```
 
+The model is a LiteLLM model id, so any provider LiteLLM supports works. To use an OpenAI model, set the id and put `OPENAI_API_KEY` in your environment:
+
+```toml
+[deep]
+model = "openai/gpt-5.6-luna"
+```
+
+The provider is read from the id, so the only change is the model line and the matching key. Everything else, the cache, the budget, and the checks, is the same.
+
 Verdicts are stored in `.drskill/cache/`, one small JSON file per judged pair. Commit this directory. Every scan reads it, with or without `--deep`, so one person runs the judgments and every teammate and CI run gets the verdicts for free. A verdict lasts until either description changes, and then the pair is judged again.
 
 The cache carries the same trust as the ack ledger. Neither file is signed, so anyone who can commit to the repo can silence a warning through either one. Review a change to `.drskill/cache/` the way you review a change to `drskill.toml`.
@@ -179,7 +210,7 @@ When every pair in an overlap cluster is judged distinct, the warning becomes a 
 
 When the judge classes a pair as a description collision, the same run also proposes a fix. A second model call rewrites one of the two descriptions, and the finding shows the proposal as a diff: the current description on a minus line, the proposed one on a plus line, with the model's reason for picking that skill. The proposal is model text headed for your skill file, so read it before pasting. drskill never edits the file itself. A rewrite costs one extra call from the same `--max-calls` budget, and a proposal that failed to generate is retried at the start of the next `--deep` run. Once you apply a rewrite, the description has changed, so the next `--deep` run judges the pair fresh, and a good rewrite comes back distinct.
 
-Two commands manage the cache. `drskill cache stats` prints entry counts by verdict, by model, and the age range. `drskill cache prune` deletes entries that no longer match any flagged pair.
+Two commands manage the cache. `drskill cache stats` prints entry counts by verdict, by model, and the age range. `drskill cache prune` deletes verdict entries and tool snapshots that no longer match any configured skill pair or server.
 
 ## MCP servers
 
@@ -205,7 +236,9 @@ This connects to every configured server, runs the MCP handshake, and reads its 
 
 Each successful handshake writes a snapshot of the server's tools into `.drskill/cache/mcp-tools/`. The snapshot holds tool names, descriptions, and token counts. It holds no secret. Commit this directory. Every later scan reads the snapshots, so tool findings, the token bill, and the conflict checks work for the whole team without anyone connecting again, labeled "as of" the snapshot date.
 
-Once tools are known, three things happen. Their descriptions flow through the same `description-overlap` and deep checks as skills, so a tool that collides with another tool or with a skill is flagged. The scan header gains the context bill: the size of the largest harness's starting context, split between its skill catalog and its MCP tool definitions. And `mcp-tools-unreviewed` asks you to approve each server's tool set once. Acking it records that exact set. If a server later rewrites a tool description, the finding comes back and names the changed tool. That is drskill catching a server that changed its tools after you trusted it.
+Once tools are known, three things happen. Their descriptions flow through the same `description-overlap` and deep checks as skills, so a tool that collides with another tool or with a skill is flagged. The scan header gains the context bill: the size of the largest harness's starting context, split between its skill catalog and its MCP tool definitions.
+
+And `mcp-tools-unreviewed` handles the tool descriptions themselves. A tool description is text the server writes, not you, and the agent loads it as instructions, so a server you trust can quietly rewrite it later. The first time drskill sees a server's tools it prints a note asking you to record them as an approved baseline. Acking saves that exact set. If the server then changes a tool's description, the note becomes a warning that fails `--ci`, so you find out that a server changed what it tells your agent after you trusted it.
 
 ## The ledger
 
