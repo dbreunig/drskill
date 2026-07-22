@@ -145,3 +145,36 @@ def test_list_suite_column_escapes_lockfile_source(tmp_path):
     r = runner.invoke(app, ["list", "--root", str(proj)],
                       env={"DRSKILL_HOME": str(home), "COLUMNS": "200"})
     assert "[red]x[/red]/repo" in r.output and "\x1b[31m" not in r.output
+
+
+from drskill.mcp_connect import ServerSnapshot, ToolInfo, save_snapshot, snapshot_dir
+
+
+def test_list_includes_mcp_tools_and_sorts_by_suite(tmp_path):
+    home = tmp_path / "home"
+    home.mkdir()
+    # a superpowers plugin skill in the cache
+    sp = plugin_cache(home, "official", "superpowers", "6.1.1")
+    write_skill(sp / "brainstorming", "brainstorming", "Use when planning a feature.")
+    proj = tmp_path / "proj"
+    write_skill(proj / ".claude" / "skills" / "brainstorming",
+                "brainstorming", "Use when planning a feature.")
+    write_skill(proj / ".claude" / "skills" / "solo", "solo", "Use when solo.")
+    # a configured MCP server with a snapshot of one tool
+    proj_mcp = {"mcpServers": {"memory": {"command": "mem-bin"}}}
+    (proj / ".mcp.json").write_text(json.dumps(proj_mcp))
+    from drskill.mcp import discover_servers
+    from drskill.harnesses import load_harnesses
+    servers, _ = discover_servers({h.id: h for h in load_harnesses()}, proj, home)
+    cfg = next(s.config_hash for s in servers if s.name == "memory")
+    save_snapshot(snapshot_dir(proj, home, False), ServerSnapshot(
+        server="memory", config_hash=cfg, date="2026-07-21",
+        tools=[ToolInfo(name="read_graph", description="Read the graph.", schema_tokens=3)]))
+    r = runner.invoke(app, ["list", "--root", str(proj)],
+                      env={"DRSKILL_HOME": str(home), "COLUMNS": "220"})
+    assert r.exit_code == 0, r.output
+    # the tool is listed, marked as an mcp tool, grouped under its server
+    assert "read_graph" in r.output and "mcp tool" in r.output
+    assert "memory" in r.output  # the tool's suite is its server
+    # skills still show their suite
+    assert "superpowers" in r.output

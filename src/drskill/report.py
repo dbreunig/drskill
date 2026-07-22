@@ -52,7 +52,8 @@ def render_harness_tables(
             suffix = ""
         title = escape(hdef.display_name) + suffix
         table = Table(title=title)
-        table.add_column("skill")
+        table.add_column("name")
+        table.add_column("kind")
         table.add_column("scope")
         table.add_column("source")
         table.add_column("suite")
@@ -61,16 +62,29 @@ def render_harness_tables(
             table.add_column("body", justify="right")
         table.add_column("notes")
         cat_total = body_total = 0
-        for c, d in world.harness_loads(hid):
-            if c.kind != "skill":
-                continue  # MCP tools are shown by `list --mcp`, not here
+        # Everything the harness loads, skills and MCP tools together, sorted
+        # so a suite (a plugin for skills, a server for tools) reads as a
+        # block. Skills come before tools, then by suite name, then by name.
+        loads = sorted(
+            world.harness_loads(hid),
+            key=lambda cd: (
+                0 if cd[0].kind == "skill" else 1,
+                cd[0].suite or "￿",  # unknown suite sorts last
+                cd[0].name,
+            ),
+        )
+        for c, d in loads:
+            is_tool = c.kind == "mcp_tool"
             notes = []
             if d.shadowed_by:
                 notes.append("shadowed")
             if d.via_symlink:
                 notes.append("symlink")
             row = [
-                escape(c.name), escape(d.scope), escape(c.source.kind),
+                escape(c.name),
+                "mcp tool" if is_tool else "skill",
+                escape(d.scope),
+                "" if is_tool else escape(c.source.kind),
                 escape(c.suite or ""),
             ]
             if tokens:
@@ -81,7 +95,7 @@ def render_harness_tables(
             row.append(escape(", ".join(notes)))
             table.add_row(*row)
         if tokens:
-            table.add_row("total (effective)", "", "", "", str(cat_total),
+            table.add_row("total (effective)", "", "", "", "", str(cat_total),
                           str(body_total), "", style="bold")
         console.print(table)
     if hidden:

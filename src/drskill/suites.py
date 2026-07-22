@@ -36,11 +36,16 @@ def build_registry(home: Path) -> dict[str, str]:
 
 
 def assign_suites(world: World, home: Path) -> None:
-    """Set `suite` on each skill contributor in place. A content-hash match
-    to a plugin wins; otherwise a skill drskill has already recorded as
-    lockfile-tracked shows its lockfile source; otherwise it stays None."""
+    """Set `suite` on each contributor in place. A skill's suite is its
+    plugin (by content hash) or its lockfile source. An MCP tool's suite is
+    the server that exposes it, so tools group by server the way skills
+    group by plugin. Anything unmatched stays None."""
     by_hash = build_registry(home)
+    server_by_cfg = {s.config_hash: s.name for s in world.mcp_servers}
     for c in world.contributors.values():
+        if c.kind == "mcp_tool":
+            c.suite = server_by_cfg.get(c.id.split(":", 1)[0])
+            continue
         if c.kind != "skill":
             continue
         found = by_hash.get(c.content_hash)
