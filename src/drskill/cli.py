@@ -91,6 +91,20 @@ def main() -> None:
     pass
 
 
+def _save_approved_baseline(world, f, root: Path, home: Path, global_mode: bool) -> None:
+    """Acking the MCP tool baseline approves that exact snapshot; keep a
+    copy so a later rug-pull warning can name and quote what changed."""
+    if f.check_id != "mcp-tools-unreviewed":
+        return
+    from drskill import mcp_connect as mcpc
+    from drskill.checks.mcp_tools import unreviewed_fingerprint
+
+    sdir = mcpc.snapshot_dir(root, home, global_mode)
+    for snap in world.mcp_snapshots.values():
+        if unreviewed_fingerprint(snap) == f.fingerprint:
+            mcpc.save_approved(sdir, snap)
+
+
 def _resolve_refs(refs: list[str], active: list) -> list:
     """Resolve 4-hex finding ids and bare check ids to active findings.
     Exits 1 on no match or on an ambiguous id. Shared by ack and show."""
@@ -339,6 +353,7 @@ def ack(
             Ack(check=f.check_id, skills=sorted(f.contributor_names),
                 fingerprint=f.fingerprint, note=note, date=dt.date.today()),
         )
+        _save_approved_baseline(world, f, root, home, global_mode)
         dest_counts[dest] = dest_counts.get(dest, 0) + 1
         label = f"{f.check_id} " + ", ".join(f.contributor_names) if f.contributor_names else f.check_id
         suffix = ""
@@ -421,6 +436,7 @@ def review(
                     fingerprint=f.fingerprint, note=ack_note,
                     date=dt.date.today(),
                 ))
+                _save_approved_baseline(world, f, root, home, global_mode)
                 acked.append((f, dest))
                 break
             if key == "f":
