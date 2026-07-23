@@ -9,6 +9,7 @@ from pydantic import BaseModel, Field
 from drskill import tokens
 from drskill.harnesses import HarnessDef
 from drskill.mcp import MCPServer
+from drskill.mcp_connect import ServerSnapshot
 from drskill.models import (
     BrokenSymlink,
     BundledFile,
@@ -123,6 +124,9 @@ class World(BaseModel):
     mcp_config_errors: list[tuple[str, str, str, bool]] = Field(default_factory=list)
     mcp_connect_failures: list[tuple[str, str, str]] = Field(default_factory=list)
     mcp_snapshot_dates: dict[str, str] = Field(default_factory=dict)
+    # config_hash -> snapshot, only for currently configured servers
+    mcp_snapshots: dict[str, ServerSnapshot] = Field(default_factory=dict)
+    mcp_approved: dict[str, ServerSnapshot] = Field(default_factory=dict)
 
     def harness_loads(self, harness_id: str) -> list[tuple[Contributor, Deployment]]:
         out = [

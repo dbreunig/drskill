@@ -19,6 +19,10 @@ class ToolInfo(BaseModel):
     name: str
     description: str
     schema_tokens: int
+    # Doc strings from the input schema (property names, descriptions,
+    # titles). 0.6.0 snapshots load with the empty default and scan with
+    # no schema surface until the next --mcp-connect.
+    schema_text: list[str] = Field(default_factory=list)
 
 
 class ServerSnapshot(BaseModel):
@@ -51,20 +55,43 @@ def save_snapshot(sdir: Path, snap: ServerSnapshot) -> None:
     (sdir / f"{snap.config_hash}.json").write_text(snap.model_dump_json(indent=2) + "\n")
 
 
-def changed_tools(old: ServerSnapshot | None, new: ServerSnapshot) -> list[str]:
-    if old is None:
-        return []
-    old_desc = {t.name: t.description for t in old.tools}
-    new_desc = {t.name: t.description for t in new.tools}
+def diff_tools(
+    old: ServerSnapshot, new: ServerSnapshot
+) -> tuple[list[tuple[ToolInfo, ToolInfo]], list[ToolInfo], list[str]]:
+    """What changed between the approved snapshot and the current one:
+    (changed old/new pairs, added tools, removed tool names)."""
+    old_by = {t.name: t for t in old.tools}
+    new_by = {t.name: t for t in new.tools}
     changed = [
-        n for n in set(old_desc) | set(new_desc)
-        if old_desc.get(n) != new_desc.get(n)
+        (old_by[n], new_by[n])
+        for n in sorted(old_by.keys() & new_by.keys())
+        if (old_by[n].description, old_by[n].schema_text)
+        != (new_by[n].description, new_by[n].schema_text)
     ]
-    return sorted(changed)
+    added = [new_by[n] for n in sorted(new_by.keys() - old_by.keys())]
+    removed = sorted(old_by.keys() - new_by.keys())
+    return changed, added, removed
 
 
 def tool_fingerprint_base(snap: ServerSnapshot) -> list[str]:
+    return sorted("\n".join([t.name, t.description, *t.schema_text]) for t in snap.tools)
+
+
+def tool_description_base(snap: ServerSnapshot) -> list[str]:
+    """The pre-0.7.0 fingerprint base, names and descriptions only. Kept so
+    the unreviewed check can recognize an ack made before schema text was
+    fingerprinted (a coverage upgrade, not a rug pull)."""
     return sorted(f"{t.name}\n{t.description}" for t in snap.tools)
+
+
+def approved_dir(sdir: Path) -> Path:
+    return sdir / "approved"
+
+
+def save_approved(sdir: Path, snap: ServerSnapshot) -> None:
+    adir = approved_dir(sdir)
+    adir.mkdir(parents=True, exist_ok=True)
+    (adir / f"{snap.config_hash}.json").write_text(snap.model_dump_json(indent=2) + "\n")
 
 
 class ConnectUnavailableError(Exception):
@@ -75,6 +102,38 @@ class ConnectError(Exception):
     def __init__(self, message: str):
         super().__init__(message)
         self.message = message
+
+
+_SCHEMA_VALUE_KEYS = frozenset({"enum", "const", "default", "examples"})
+
+
+def schema_strings(schema) -> list[str]:
+    """Doc strings from a JSON schema: property names, description values,
+    and title values. Keys are visited in sorted order at every level, so
+    the output is deterministic. Data values (enum, const, default,
+    examples) are never collected, so snapshots stay value-free."""
+    out: list[str] = []
+
+    def walk(node) -> None:
+        if isinstance(node, dict):
+            for key in sorted(node):
+                val = node[key]
+                if key in _SCHEMA_VALUE_KEYS:
+                    continue
+                if key in ("description", "title") and isinstance(val, str):
+                    out.append(val)
+                elif key == "properties" and isinstance(val, dict):
+                    for pname in sorted(val):
+                        out.append(str(pname))
+                        walk(val[pname])
+                else:
+                    walk(val)
+        elif isinstance(node, list):
+            for item in node:
+                walk(item)
+
+    walk(schema)
+    return out
 
 
 def _approx_tokens(obj) -> int:
@@ -133,6 +192,7 @@ def connect_server(server: MCPServer, timeout: float = 15.0) -> ServerSnapshot:
             ToolInfo(
                 name=t.name, description=t.description or "",
                 schema_tokens=_approx_tokens(getattr(t, "inputSchema", {}) or {}),
+                schema_text=schema_strings(getattr(t, "inputSchema", {}) or {}),
             )
             for t in tools
         ],

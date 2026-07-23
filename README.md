@@ -20,8 +20,9 @@ On the MCP side it finds:
 4. Server commands that no longer exist
 5. Tools whose descriptions collide with each other or with a skill
 6. Servers that quietly change their tools after you approved them
+7. Tool text carrying hidden instructions, credential paths, or steering toward or away from other tools
 
-The last two need `drskill` to connect to the servers, which it does only when you ask.
+The last three need `drskill` to connect to the servers, which it does only when you ask.
 
 Every problem it reports ends in a command: a fix command or a command to acknowledge the problem and move on. `drskill` reads your files and never installs, edits, or deletes a skill. It makes zero calls to an LLM unless you opt in with `scan --deep`, and it never launches or connects to an MCP server unless you opt in with `scan --mcp-connect`.
 
@@ -199,6 +200,7 @@ Without `--ci`, warnings alone exit 0. This lets you run `drskill scan` locally 
 | `mcp-connect-failed` | warning | A `--mcp-connect` handshake to a server did not connect, timed out, or errored. |
 | `mcp-tool-collision` | warning | Two servers expose the same tool name into one harness's set. Which one the agent gets is client dependent. |
 | `mcp-tools-unreviewed` | note on first sight, warning on change | A server's enumerated tool set. On first sight it is a note asking you to record an approved baseline. If the server later changes a tool's description, it becomes a warning. |
+| `mcp-tool-poisoning` | error for hidden-Unicode and credential-path hits, warning otherwise | Scans tool names, descriptions, and schema doc strings for injection surfaces: hidden instructions, credential paths, invisible Unicode, encoded blobs, remote-fetch directives, and text that steers the agent toward or away from other tools. Runs from committed snapshots, so the whole team gets findings after one person runs `--mcp-connect`. |
 
 ## Deep checks
 
@@ -266,7 +268,11 @@ Each successful handshake writes a snapshot of the server's tools into `.drskill
 
 Once tools are known, three things happen. Their descriptions flow through the same `description-overlap` and deep checks as skills, so a tool that collides with another tool or with a skill is flagged. The scan header gains the context bill: the size of the largest harness's starting context, split between its skill catalog and its MCP tool definitions.
 
-And `mcp-tools-unreviewed` handles the tool descriptions themselves. A tool description is text the server writes, not you, and the agent loads it as instructions, so a server you trust can quietly rewrite it later. The first time drskill sees a server's tools it prints a note asking you to record them as an approved baseline. Acking saves that exact set. If the server then changes a tool's description, the note becomes a warning that fails `--ci`, so you find out that a server changed what it tells your agent after you trusted it.
+And `mcp-tools-unreviewed` handles the tool descriptions themselves. A tool description is text the server writes, not you, and the agent loads it as instructions, so a server you trust can quietly rewrite it later. The first time drskill sees a server's tools it prints a note asking you to record them as an approved baseline. Acking saves that exact set. If the server later changes a tool's description or schema, the note becomes a warning that fails `--ci`, and the warning names each changed tool and shows its old text next to its new text, so you find out that a server changed what it tells your agent after you trusted it.
+
+Snapshots fingerprint schema text as well as descriptions, and that coverage has grown over time. If you upgrade drskill and it now fingerprints more of a server's text than it did when you approved it, an unchanged server does not come back as a rug-pull warning. You get a one-time note instead, asking you to re-ack once to extend your approved baseline to the new fingerprint.
+
+`mcp-tool-poisoning` reads the same committed snapshots and scans tool names, descriptions, and schema doc strings for injection surfaces: hidden instructions, credential paths, invisible Unicode, encoded blobs, remote-fetch directives, and text that steers the agent toward or away from other tools. Like the other MCP checks it is static and reads only what was captured at connect time, so the whole team gets findings the moment one person runs `--mcp-connect`, with no reconnect required. A server that legitimately manages credentials, e.g. an AWS or Kubernetes tool whose parameter docs name `~/.aws/credentials`, will trip the credential-path error on first connect. That is the check working as designed: read the quoted text, and if the mention is expected, `drskill ack mcp-tool-poisoning <server>` records your decision and the error stays silent until that tool's text changes.
 
 ## The ledger
 

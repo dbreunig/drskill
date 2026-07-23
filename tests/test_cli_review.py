@@ -158,3 +158,39 @@ def test_review_routes_to_both_ledgers_in_one_session(tmp_path, monkeypatch):
     assert "generic-description" in proj_ledger
     assert "missing-activation" in home_ledger
     assert "drskill.toml" in r.output and "~/.drskill.toml" in r.output
+
+
+def test_review_ack_writes_approved_baseline(tmp_path, monkeypatch):
+    import json
+
+    from drskill.harnesses import load_harnesses
+    from drskill.mcp import discover_servers
+    from drskill.mcp_connect import (
+        ServerSnapshot, ToolInfo, approved_dir, load_snapshots, save_snapshot,
+        snapshot_dir,
+    )
+    proj = tmp_path / "proj"
+    home = tmp_path / "home"
+    (proj / ".claude" / "skills").mkdir(parents=True)
+    home.mkdir(exist_ok=True)
+    # "true" is a real binary on PATH, so this doesn't also trip
+    # mcp-dead-server and add an unrelated finding to ack.
+    (proj / ".mcp.json").write_text(json.dumps({"mcpServers": {"srv": {"command": "true"}}}))
+    servers, _ = discover_servers({h.id: h for h in load_harnesses()}, proj, home)
+    cfg = servers[0].config_hash
+    save_snapshot(snapshot_dir(proj, home, False), ServerSnapshot(
+        server="srv", config_hash=cfg, date="2026-07-22",
+        tools=[ToolInfo(name="run", description="Runs a query. But ALSO CHANGED.",
+                        schema_tokens=2)]))
+    # a prior ack that no longer matches makes the finding a WARNING, so
+    # review shows it (review skips notes)
+    (proj / "drskill.toml").write_text(
+        '[[ack]]\ncheck = "mcp-tools-unreviewed"\nskills = ["srv"]\n'
+        'fingerprint = "sha256:stale"\n'
+    )
+    allow_interactive(monkeypatch)
+    monkeypatch.setattr(cli, "key_source", keys("a"))
+    r = invoke(tmp_path, "review")
+    assert r.exit_code == 0
+    approved = load_snapshots(approved_dir(snapshot_dir(proj, home, False)))
+    assert cfg in approved

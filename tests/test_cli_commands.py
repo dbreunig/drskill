@@ -285,3 +285,79 @@ def test_show_does_not_write_state(tmp_path):
     r = invoke(tmp_path, "show", "missing-activation")
     assert r.exit_code == 0
     assert not (tmp_path / "home" / ".drskill").exists()
+
+
+def _mcp_ack_project(tmp_path):
+    import json
+
+    from drskill.harnesses import load_harnesses
+    from drskill.mcp import discover_servers
+    from drskill.mcp_connect import ServerSnapshot, ToolInfo, save_snapshot, snapshot_dir
+
+    proj, home = tmp_path / "proj", tmp_path / "home"
+    (proj / ".claude" / "skills").mkdir(parents=True)
+    home.mkdir(exist_ok=True)
+    # "true" is a real binary on PATH, so this doesn't also trip
+    # mcp-dead-server and add an unrelated finding to ack.
+    (proj / ".mcp.json").write_text(json.dumps({"mcpServers": {"srv": {"command": "true"}}}))
+    servers, _ = discover_servers({h.id: h for h in load_harnesses()}, proj, home)
+    cfg = servers[0].config_hash
+    save_snapshot(snapshot_dir(proj, home, False), ServerSnapshot(
+        server="srv", config_hash=cfg, date="2026-07-22",
+        tools=[ToolInfo(name="run", description="Runs a query.", schema_tokens=2)]))
+    return proj, home, cfg
+
+
+def test_ack_unreviewed_writes_approved_baseline(tmp_path):
+    from drskill.mcp_connect import approved_dir, load_snapshots, snapshot_dir
+
+    proj, home, cfg = _mcp_ack_project(tmp_path)
+    r = invoke(tmp_path, "ack", "mcp-tools-unreviewed", "srv")
+    assert r.exit_code == 0
+    approved = load_snapshots(approved_dir(snapshot_dir(proj, home, False)))
+    assert cfg in approved and approved[cfg].tools[0].name == "run"
+
+
+def test_ack_hook_ignores_other_checks(tmp_path):
+    # unit-level: the hook only acts on mcp-tools-unreviewed findings
+    from drskill.cli import _save_approved_baseline
+    from drskill.mcp_connect import approved_dir, snapshot_dir
+    from drskill.models import Finding
+    from drskill.resolution import World
+
+    proj, home = tmp_path / "proj", tmp_path / "home"
+    f = Finding(check_id="generic-description", severity="warning",
+                contributors=[], contributor_names=[], harnesses=[],
+                message="m", fingerprint="sha256:x")
+    _save_approved_baseline(World(), f, proj, home, False)
+    assert not approved_dir(snapshot_dir(proj, home, False)).exists()
+
+
+def test_cache_stats_counts_snapshots_and_approved(tmp_path, monkeypatch):
+    monkeypatch.setenv("DRSKILL_HOME", str(tmp_path / "home"))
+    from drskill.mcp_connect import save_approved, snapshot_dir
+    proj, home, cfg = _mcp_ack_project(tmp_path)
+    sd = snapshot_dir(proj, home, False)
+    from drskill.mcp_connect import load_snapshots
+    save_approved(sd, load_snapshots(sd)[cfg])
+    r = runner.invoke(app, ["cache", "stats", "--root", str(proj)],
+                      env={"DRSKILL_HOME": str(home)})
+    assert "1 tool snapshot" in r.output and "1 approved baseline" in r.output
+
+
+def test_cache_prune_removes_stale_approved(tmp_path, monkeypatch):
+    monkeypatch.setenv("DRSKILL_HOME", str(tmp_path / "home"))
+    from drskill.mcp_connect import (
+        ServerSnapshot, approved_dir, save_approved, snapshot_dir,
+    )
+    proj, home, cfg = _mcp_ack_project(tmp_path)
+    sd = snapshot_dir(proj, home, False)
+    from drskill.mcp_connect import load_snapshots
+    save_approved(sd, load_snapshots(sd)[cfg])  # live: kept
+    save_approved(sd, ServerSnapshot(server="gone", config_hash="stale",
+                                     date="2026-07-01"))  # stale: removed
+    r = runner.invoke(app, ["cache", "prune", "--root", str(proj)],
+                      env={"DRSKILL_HOME": str(home)})
+    assert r.exit_code == 0
+    kept = {p.stem for p in approved_dir(sd).glob("*.json")}
+    assert kept == {cfg}

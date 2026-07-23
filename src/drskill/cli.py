@@ -91,6 +91,20 @@ def main() -> None:
     pass
 
 
+def _save_approved_baseline(world, f, root: Path, home: Path, global_mode: bool) -> None:
+    """Acking the MCP tool baseline approves that exact snapshot; keep a
+    copy so a later rug-pull warning can name and quote what changed."""
+    if f.check_id != "mcp-tools-unreviewed":
+        return
+    from drskill import mcp_connect as mcpc
+    from drskill.checks.mcp_tools import unreviewed_fingerprint
+
+    sdir = mcpc.snapshot_dir(root, home, global_mode)
+    for snap in world.mcp_snapshots.values():
+        if unreviewed_fingerprint(snap) == f.fingerprint:
+            mcpc.save_approved(sdir, snap)
+
+
 def _resolve_refs(refs: list[str], active: list) -> list:
     """Resolve 4-hex finding ids and bare check ids to active findings.
     Exits 1 on no match or on an ambiguous id. Shared by ack and show."""
@@ -339,6 +353,7 @@ def ack(
             Ack(check=f.check_id, skills=sorted(f.contributor_names),
                 fingerprint=f.fingerprint, note=note, date=dt.date.today()),
         )
+        _save_approved_baseline(world, f, root, home, global_mode)
         dest_counts[dest] = dest_counts.get(dest, 0) + 1
         label = f"{f.check_id} " + ", ".join(f.contributor_names) if f.contributor_names else f.check_id
         suffix = ""
@@ -421,6 +436,7 @@ def review(
                     fingerprint=f.fingerprint, note=ack_note,
                     date=dt.date.today(),
                 ))
+                _save_approved_baseline(world, f, root, home, global_mode)
                 acked.append((f, dest))
                 break
             if key == "f":
@@ -540,14 +556,22 @@ def cache(
     entries = deep.load_cache(cdir)
     if action == "stats":
         console.print(f"{len(entries)} cached verdicts in {escape(str(cdir))}")
-        if not entries:
-            return
-        for name, count in sorted(Counter(v.verdict for v in entries.values()).items()):
-            console.print(f"  {escape(name)}: {count}")
-        for name, count in sorted(Counter(v.model for v in entries.values()).items()):
-            console.print(f"  {escape(name)}: {count}")
-        dates = sorted(v.date for v in entries.values())
-        console.print(f"  oldest {escape(dates[0])}, newest {escape(dates[-1])}")
+        if entries:
+            for name, count in sorted(Counter(v.verdict for v in entries.values()).items()):
+                console.print(f"  {escape(name)}: {count}")
+            for name, count in sorted(Counter(v.model for v in entries.values()).items()):
+                console.print(f"  {escape(name)}: {count}")
+            dates = sorted(v.date for v in entries.values())
+            console.print(f"  oldest {escape(dates[0])}, newest {escape(dates[-1])}")
+        sdir = mcp_connect_mod.snapshot_dir(root, home, global_mode)
+        snaps = mcp_connect_mod.load_snapshots(sdir)
+        approved = mcp_connect_mod.load_snapshots(mcp_connect_mod.approved_dir(sdir))
+        if snaps or approved:
+            console.print(
+                f"{len(snaps)} tool snapshot{'s' if len(snaps) != 1 else ''}, "
+                f"{len(approved)} approved baseline"
+                f"{'s' if len(approved) != 1 else ''} in {escape(str(sdir))}"
+            )
     elif action == "prune":
         config = _load_effective_config_or_exit(root, home, global_mode)
         world, findings = run_scan(root, home, global_mode, config)
@@ -568,6 +592,13 @@ def cache(
         live_cfgs = {s.config_hash for s in world.mcp_servers}
         snap_removed = snap_kept = 0
         for p in sorted(sdir.glob("*.json")) if sdir.is_dir() else []:
+            if p.stem in live_cfgs:
+                snap_kept += 1
+            else:
+                p.unlink()
+                snap_removed += 1
+        adir = mcpc.approved_dir(sdir)
+        for p in sorted(adir.glob("*.json")) if adir.is_dir() else []:
             if p.stem in live_cfgs:
                 snap_kept += 1
             else:

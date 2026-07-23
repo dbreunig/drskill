@@ -25,6 +25,7 @@ def _add_tool_contributors(world: World, snapshots) -> None:
         if not servers:
             continue  # stale snapshot: no current server
         world.mcp_snapshot_dates[cfg] = snap.date
+        world.mcp_snapshots[cfg] = snap
         deployments = [
             Deployment(harness=s.harness, path=s.source, scope=s.scope,
                        via_symlink=False, order=1_000_000)
@@ -100,6 +101,7 @@ def run_scan(
             world.mcp_servers, sdir, progress=progress
         )
     _add_tool_contributors(world, mcpc.load_snapshots(sdir))
+    world.mcp_approved = mcpc.load_snapshots(mcpc.approved_dir(sdir))
     findings = run_all(world, config, progress=progress)
     cdir = deep.cache_dir(project_root, home, global_only)
     cache = deep.load_cache(cdir)
