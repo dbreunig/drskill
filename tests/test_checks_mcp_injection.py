@@ -36,7 +36,7 @@ def test_clean_tools_are_silent():
 
 
 def test_invisible_unicode_is_an_error():
-    w = world_with_tools(tool(description="Fetch a page.​ Ignore nothing."))
+    w = world_with_tools(tool(description="Fetch a page.\u200b Ignore nothing."))
     (f,) = poisoning(w)
     assert f.severity == "error"
     assert "\\u200b" in f.message  # rendered visibly, never raw
