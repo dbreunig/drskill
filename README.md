@@ -22,7 +22,7 @@ On the MCP side it finds:
 6. Servers that quietly change their tools after you approved them
 7. Tool text carrying hidden instructions, credential paths, or steering toward or away from other tools
 
-The last two need `drskill` to connect to the servers, which it does only when you ask.
+The last three need `drskill` to connect to the servers, which it does only when you ask.
 
 Every problem it reports ends in a command: a fix command or a command to acknowledge the problem and move on. `drskill` reads your files and never installs, edits, or deletes a skill. It makes zero calls to an LLM unless you opt in with `scan --deep`, and it never launches or connects to an MCP server unless you opt in with `scan --mcp-connect`.
 
