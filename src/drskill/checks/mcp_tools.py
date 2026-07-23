@@ -6,7 +6,7 @@ from __future__ import annotations
 import hashlib
 from collections import defaultdict
 
-from drskill import text
+from drskill import mcp_connect, text
 from drskill.checks import check
 from drskill.ledger import Config
 from drskill.models import Contributor, Finding
@@ -64,42 +64,56 @@ def tool_collision(world: World, config: Config) -> list[Finding]:
     return out
 
 
+def unreviewed_fingerprint(snap) -> str:
+    """The rug-pull fingerprint of a snapshot. Public because the ack path
+    uses it to find which snapshot a finding approved (cli Task 5)."""
+    return _fp(
+        "mcp-tools-unreviewed",
+        [snap.server, snap.config_hash, *mcp_connect.tool_fingerprint_base(snap)],
+    )
+
+
 @check("mcp-tools-unreviewed")
 def tools_unreviewed(world: World, config: Config) -> list[Finding]:
     out = []
-    by_cfg: dict[str, list[Contributor]] = defaultdict(list)
-    for c in _tools(world):
-        by_cfg[c.id.split(":", 1)[0]].append(c)
     servers_by_cfg: dict[str, list] = defaultdict(list)
     for s in world.mcp_servers:
         servers_by_cfg[s.config_hash].append(s)
-    for cfg, tools in sorted(by_cfg.items()):
+    for cfg, snap in sorted(world.mcp_snapshots.items()):
         servers = servers_by_cfg.get(cfg)
         if not servers:
             continue
         server = servers[0]
         harnesses = sorted({s.harness for s in servers})
-        # The fingerprint still hashes the full descriptions, so a later
-        # edit to any of them resurfaces the finding. The displayed line is
-        # truncated to one clause per tool so the report stays readable.
-        pairs = sorted(f"{c.name}\n{c.routing_text}" for c in tools)
         lines = "".join(
-            f"\n        {c.name}: {text.one_line(c.routing_text)}"
-            for c in sorted(tools, key=lambda c: c.name)
+            f"\n        {t.name}: {text.one_line(t.description)}"
+            for t in sorted(snap.tools, key=lambda t: t.name)
         )
-        date = world.mcp_snapshot_dates.get(cfg, "unknown")
-        n = len(tools)
-        fp = _fp("mcp-tools-unreviewed", [server.name, cfg, *pairs])
-        # First sight of a server is a low-key note: it only asks you to
-        # record a baseline. A server that CHANGED its tools since you
-        # approved them is a warning: that is the rug-pull the check exists
-        # to catch, and it should fail CI.
+        date = snap.date
+        n = len(snap.tools)
+        fp = unreviewed_fingerprint(snap)
+        old_fp = _fp(
+            "mcp-tools-unreviewed",
+            [snap.server, cfg, *mcp_connect.tool_description_base(snap)],
+        )
         prior = [
             a for a in config.ack
             if a.check == "mcp-tools-unreviewed" and server.name in a.skills
         ]
-        changed = bool(prior) and fp not in {a.fingerprint for a in prior}
-        if changed:
+        prior_fps = {a.fingerprint for a in prior}
+        changed = bool(prior) and fp not in prior_fps
+        if changed and old_fp in prior_fps:
+            # The descriptions the user approved are unchanged; drskill
+            # grew to fingerprint schema text. One re-ack extends the
+            # baseline. Not a rug pull, must not fail CI.
+            head = (
+                f"server '{server.name}' ({', '.join(harnesses)}) is "
+                f"unchanged, but drskill now also fingerprints tool schema "
+                f"text. Re-ack once to extend your approved baseline "
+                f"(seen {date}):"
+            )
+            severity = "note"
+        elif changed:
             when = next((str(a.date) for a in prior if a.date), "earlier")
             head = (
                 f"server '{server.name}' ({', '.join(harnesses)}) CHANGED its "
