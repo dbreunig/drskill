@@ -335,3 +335,24 @@ def test_first_sight_note_is_ackable_by_check_name(tmp_path, monkeypatch):
     assert r.exit_code == 0, r.output  # a note, but explicitly ackable
     # a project-scope .mcp.json server acks to the project ledger
     assert (proj / "drskill.toml").is_file()
+
+
+def test_world_exposes_snapshots_and_approved(tmp_path, monkeypatch):
+    monkeypatch.setenv("DRSKILL_HOME", str(tmp_path / "home"))
+    proj, home = _mcp_project(tmp_path, {"srv": {"command": "srv-bin"}})
+    from drskill.mcp import discover_servers
+    from drskill.harnesses import load_harnesses
+    import drskill.mcp_connect as mcpc
+    servers, _ = discover_servers({h.id: h for h in load_harnesses()}, proj, home)
+    cfg = servers[0].config_hash
+    sd = snapshot_dir(proj, home, False)
+    s = ServerSnapshot(server="srv", config_hash=cfg, date="2026-07-21",
+                       tools=[ToolInfo(name="run", description="Run.", schema_tokens=2)])
+    save_snapshot(sd, s)
+    mcpc.save_approved(sd, s)
+    # a stale snapshot for a server that is no longer configured is excluded
+    save_snapshot(sd, ServerSnapshot(server="gone", config_hash="stale", date="2026-07-21"))
+    world, _ = run_scan(proj, home, config=Config())
+    assert set(world.mcp_snapshots) == {cfg}
+    assert world.mcp_snapshots[cfg].tools[0].name == "run"
+    assert set(world.mcp_approved) == {cfg}
