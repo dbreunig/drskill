@@ -331,3 +331,33 @@ def test_ack_hook_ignores_other_checks(tmp_path):
                 message="m", fingerprint="sha256:x")
     _save_approved_baseline(World(), f, proj, home, False)
     assert not approved_dir(snapshot_dir(proj, home, False)).exists()
+
+
+def test_cache_stats_counts_snapshots_and_approved(tmp_path, monkeypatch):
+    monkeypatch.setenv("DRSKILL_HOME", str(tmp_path / "home"))
+    from drskill.mcp_connect import save_approved, snapshot_dir
+    proj, home, cfg = _mcp_ack_project(tmp_path)
+    sd = snapshot_dir(proj, home, False)
+    from drskill.mcp_connect import load_snapshots
+    save_approved(sd, load_snapshots(sd)[cfg])
+    r = runner.invoke(app, ["cache", "stats", "--root", str(proj)],
+                      env={"DRSKILL_HOME": str(home)})
+    assert "1 tool snapshot" in r.output and "1 approved baseline" in r.output
+
+
+def test_cache_prune_removes_stale_approved(tmp_path, monkeypatch):
+    monkeypatch.setenv("DRSKILL_HOME", str(tmp_path / "home"))
+    from drskill.mcp_connect import (
+        ServerSnapshot, approved_dir, save_approved, snapshot_dir,
+    )
+    proj, home, cfg = _mcp_ack_project(tmp_path)
+    sd = snapshot_dir(proj, home, False)
+    from drskill.mcp_connect import load_snapshots
+    save_approved(sd, load_snapshots(sd)[cfg])  # live: kept
+    save_approved(sd, ServerSnapshot(server="gone", config_hash="stale",
+                                     date="2026-07-01"))  # stale: removed
+    r = runner.invoke(app, ["cache", "prune", "--root", str(proj)],
+                      env={"DRSKILL_HOME": str(home)})
+    assert r.exit_code == 0
+    kept = {p.stem for p in approved_dir(sd).glob("*.json")}
+    assert kept == {cfg}
