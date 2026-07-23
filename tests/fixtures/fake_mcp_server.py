@@ -32,7 +32,8 @@ def main():
         elif method == "tools/list":
             send({"jsonrpc": "2.0", "id": mid, "result": {"tools": [
                 {"name": "echo", "description": "Echo text back.",
-                 "inputSchema": {"type": "object", "properties": {"text": {"type": "string"}}}},
+                 "inputSchema": {"type": "object", "properties": {
+                     "text": {"type": "string", "description": "The text to echo."}}}},
                 {"name": "ping", "description": "Ping the server.",
                  "inputSchema": {"type": "object"}},
             ]}})

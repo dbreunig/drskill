@@ -19,6 +19,10 @@ class ToolInfo(BaseModel):
     name: str
     description: str
     schema_tokens: int
+    # Doc strings from the input schema (property names, descriptions,
+    # titles). 0.6.0 snapshots load with the empty default and scan with
+    # no schema surface until the next --mcp-connect.
+    schema_text: list[str] = Field(default_factory=list)
 
 
 class ServerSnapshot(BaseModel):
@@ -77,6 +81,38 @@ class ConnectError(Exception):
         self.message = message
 
 
+_SCHEMA_VALUE_KEYS = frozenset({"enum", "const", "default", "examples"})
+
+
+def schema_strings(schema) -> list[str]:
+    """Doc strings from a JSON schema: property names, description values,
+    and title values. Keys are visited in sorted order at every level, so
+    the output is deterministic. Data values (enum, const, default,
+    examples) are never collected, so snapshots stay value-free."""
+    out: list[str] = []
+
+    def walk(node) -> None:
+        if isinstance(node, dict):
+            for key in sorted(node):
+                val = node[key]
+                if key in _SCHEMA_VALUE_KEYS:
+                    continue
+                if key in ("description", "title") and isinstance(val, str):
+                    out.append(val)
+                elif key == "properties" and isinstance(val, dict):
+                    for pname in sorted(val):
+                        out.append(str(pname))
+                        walk(val[pname])
+                else:
+                    walk(val)
+        elif isinstance(node, list):
+            for item in node:
+                walk(item)
+
+    walk(schema)
+    return out
+
+
 def _approx_tokens(obj) -> int:
     # schema token cost, approximate: 1 token per ~4 chars of compact JSON
     return max(0, len(json.dumps(obj, separators=(",", ":"))) // 4)
@@ -133,6 +169,7 @@ def connect_server(server: MCPServer, timeout: float = 15.0) -> ServerSnapshot:
             ToolInfo(
                 name=t.name, description=t.description or "",
                 schema_tokens=_approx_tokens(getattr(t, "inputSchema", {}) or {}),
+                schema_text=schema_strings(getattr(t, "inputSchema", {}) or {}),
             )
             for t in tools
         ],
