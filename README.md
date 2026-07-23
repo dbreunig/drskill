@@ -1,4 +1,4 @@
-### 🎶 They Call Me Dr. Skill 🎶
+### `drskill` Spots Context Issues
 
 `drskill` is `brew doctor` for your agent's loadout. Coding agents load Skills and connect to MCP servers before you type a word. `drskill` looks at every agent on your machine or in your repo, works out exactly which skills and which servers each one loads, and checks the whole set for problems.
 
