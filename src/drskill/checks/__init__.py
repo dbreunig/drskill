@@ -63,7 +63,7 @@ def make_finding(
 
 def run_all(world: World, config: Config, progress=None) -> list[Finding]:
     # Import registers every check module exactly once.
-    from drskill.checks import budget, duplicates, filesystem, heuristics, injection, lockfile, mcp, mcp_tools, shadowing, spec  # noqa: F401
+    from drskill.checks import budget, duplicates, filesystem, heuristics, injection, lockfile, mcp, mcp_injection, mcp_tools, shadowing, spec  # noqa: F401
 
     findings: list[Finding] = []
     for check_id, fn in REGISTRY.items():
