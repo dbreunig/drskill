@@ -73,6 +73,34 @@ def unreviewed_fingerprint(snap) -> str:
     )
 
 
+def _diff_lines(approved, snap) -> str:
+    """Evidence lines for a rug pull: one entry per changed, added, or
+    removed tool, capped at five entries. Old and new text is truncated to
+    one line each, the diff form the description-rewrite findings use."""
+    changed, added, removed = mcp_connect.diff_tools(approved, snap)
+    entries: list[str] = []
+    for old_t, new_t in changed:
+        if old_t.description != new_t.description:
+            entries.append(
+                f"\n        {new_t.name}:"
+                f"\n          - {text.one_line(old_t.description)}"
+                f"\n          + {text.one_line(new_t.description)}"
+            )
+        else:
+            diff = [s for s in new_t.schema_text if s not in old_t.schema_text]
+            diff += [s for s in old_t.schema_text if s not in new_t.schema_text]
+            quoted = ", ".join(f'"{text.one_line(s, 60)}"' for s in diff[:3])
+            entries.append(f"\n        {new_t.name}: schema text changed ({quoted})")
+    for t in added:
+        entries.append(f"\n        + new tool '{t.name}': {text.one_line(t.description)}")
+    for name in removed:
+        entries.append(f"\n        - removed tool '{name}'")
+    shown = entries[:5]
+    if len(entries) > 5:
+        shown.append(f"\n        (and {len(entries) - 5} more)")
+    return "".join(shown)
+
+
 @check("mcp-tools-unreviewed")
 def tools_unreviewed(world: World, config: Config) -> list[Finding]:
     out = []
@@ -122,6 +150,9 @@ def tools_unreviewed(world: World, config: Config) -> list[Finding]:
                 f"Re-ack once you have reviewed the current set (seen {date}):"
             )
             severity = "warning"
+            approved = world.mcp_approved.get(cfg)
+            if approved is not None:
+                lines = _diff_lines(approved, snap)
         else:
             head = (
                 f"server '{server.name}' ({', '.join(harnesses)}) has "
