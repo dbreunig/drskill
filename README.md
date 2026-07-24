@@ -32,6 +32,7 @@ Use `drskill` to:
 - Catch config risks before they ship, e.g. a secret in a committed file or an unpinned server package
 - Notice when your loadout changes (without you doing anything), e.g. a skill that drifted from its lockfile or a server that rewrote a tool description
 - Write skill and tool descriptions that do not clash with other libraries
+- See which skills and MCP tools your agents actually use, and read the queries that triggered them
 
 ## Install
 
@@ -154,7 +155,7 @@ drskill scan --deep --mcp-connect --ci
 
 ## Audit your usage
 
-`drskill scan` looks at the loadout as configured. `drskill audit` looks at how you actually used it. It reads the local session traces that Claude Code, Codex, Pi, and Copilot already write to disk, and ranks which skills and MCP tools actually got invoked. `drskill audit <name>` drills into one skill or tool and shows the queries behind each invocation, and the agent's reasoning right before it, on harnesses that record reasoning.
+`drskill scan` looks at the loadout as configured. `drskill audit` looks at how you actually used it. It reads the local session traces that Claude Code, Codex, Pi, and Copilot already write to disk, and ranks which skills and MCP tools actually got invoked. `drskill audit <name>` drills into one skill or tool and shows each invocation in context: the full user message that preceded it, how it was triggered (an explicit tool call, a slash command, or a SKILL.md read), the agent's reasoning right before it on harnesses that record reasoning, and the exact trace file and line so you can open the transcript at that moment.
 
 Run it in a project to see that project's usage:
 
@@ -185,8 +186,9 @@ drskill audit overturemaps
 ```
 overturemaps (skill)  codex 1
   2026-07-12 17:56  codex  ~/project
+    via: SKILL.md read
     query: I need to find coffee shops near a set of addresses…
-    trace: ~/.codex/sessions/2026/07/12/rollout-2026-07-12T10-54-06.jsonl
+    trace: ~/.codex/sessions/2026/07/12/rollout-2026-07-12T10-54-06.jsonl:214
 ```
 
 A skill name and an MCP tool name can collide, so `drskill audit <name>` also takes the form `server:tool` to say which one you mean:
