@@ -83,6 +83,19 @@ def test_mcp_style_toolcall_reserved_pattern(tmp_path):
     assert inv.detection == "explicit"
 
 
+def test_query_is_always_user_sourced(tmp_path):
+    f = _write(tmp_path, [
+        _header(),
+        _msg("user", [{"type": "text", "text": "use the maps skill"}]),
+        _msg("assistant", [
+            {"type": "toolCall", "id": "read_0", "name": "read",
+             "arguments": {"path": "/Users/d/.pi/agent/skills/overturemaps/SKILL.md"}},
+        ]),
+    ])
+    [inv] = pi.extract(f).invocations
+    assert inv.query_source == "user"
+
+
 def test_builtin_tools_ignored_and_toolresults_not_queries(tmp_path):
     f = _write(tmp_path, [
         _header(),

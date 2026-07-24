@@ -15,7 +15,7 @@ from drskill.traces.common import excerpt, parse_ts
 from drskill.traces.model import ExtractResult, Invocation
 
 HARNESS = "claude-code"
-VERSION = 5
+VERSION = 6
 
 _COMMAND = re.compile(r"<command-name>/?([^<\s]+)</command-name>")
 
@@ -47,6 +47,7 @@ def extract(path: Path) -> ExtractResult:
     out: list[Invocation] = []
     recognized = 0
     last_query: str | None = None
+    last_sidechain_query: str | None = None
     prev_thinking: str | None = None  # from the previous assistant message
     lines = path.read_text(errors="replace").splitlines()
     for lineno, line in enumerate(lines, start=1):
@@ -79,8 +80,11 @@ def extract(path: Path) -> ExtractResult:
             continue
         if etype == "user":
             texts = _text_blocks(content)
-            if texts and not event.get("isSidechain") and not event.get("isMeta"):
-                last_query = texts[0]
+            if texts and not event.get("isMeta"):
+                if event.get("isSidechain"):
+                    last_sidechain_query = texts[0]
+                else:
+                    last_query = texts[0]
             for text in texts:
                 for m in _COMMAND.finditer(text):
                     name = m.group(1)
@@ -88,12 +92,20 @@ def extract(path: Path) -> ExtractResult:
                         continue
                     out.append(Invocation(
                         **base, kind="skill", name=name,
-                        query=last_query, detection="command-marker",
+                        query=last_query,
+                        query_source="user" if last_query is not None else None,
+                        detection="command-marker",
                     ))
             continue
         # assistant: walk blocks in order so thinking precedes its tool_use
         current_thinking = prev_thinking
         saw_thinking = False
+        if base["sidechain"] and last_sidechain_query is not None:
+            query, query_source = last_sidechain_query, "agent"
+        elif last_query is not None:
+            query, query_source = last_query, "user"
+        else:
+            query, query_source = None, None
         for block in content:
             if not isinstance(block, dict):
                 continue
@@ -110,7 +122,7 @@ def extract(path: Path) -> ExtractResult:
             if name == "Skill" and isinstance(inp, dict) and inp.get("skill"):
                 out.append(Invocation(
                     **base, kind="skill", name=str(inp["skill"]),
-                    query=last_query,
+                    query=query, query_source=query_source,
                     reasoning=excerpt(current_thinking), detection="explicit",
                 ))
             elif name.startswith("mcp__"):
@@ -119,7 +131,7 @@ def extract(path: Path) -> ExtractResult:
                     out.append(Invocation(
                         **base, kind="mcp_tool", server=parts[1],
                         name="__".join(parts[2:]),
-                        query=last_query,
+                        query=query, query_source=query_source,
                         reasoning=excerpt(current_thinking), detection="explicit",
                     ))
         # Only a message that had real thinking feeds the fallback for the next one.

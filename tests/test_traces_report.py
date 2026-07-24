@@ -11,11 +11,12 @@ UTC = dt.timezone.utc
 
 def _inv(harness="claude-code", name="release", kind="skill", server=None,
          day=1, sidechain=False, detection="explicit", session="s1",
-         query="the question", reasoning=None, source_line=None):
+         query="the question", query_source=None, reasoning=None, source_line=None):
     return Invocation(
         harness=harness, session_id=session, project="/p",
         timestamp=dt.datetime(2026, 7, day, tzinfo=UTC), kind=kind, name=name,
-        server=server, query=query, reasoning=reasoning, sidechain=sidechain,
+        server=server, query=query, query_source=query_source, reasoning=reasoning,
+        sidechain=sidechain,
         detection=detection, source_file="/t/s.jsonl", source_line=source_line,
     )
 
@@ -175,6 +176,23 @@ def test_harness_names_escaped_in_audit_and_drilldown():
     drilldown_text = _render(areport.render_drilldown, "test", data)
     assert "​" not in drilldown_text
     assert "[red]h" in drilldown_text
+
+
+def test_drilldown_shows_query_source_when_present():
+    data = AuditData(invocations=[
+        _inv(name="release", query="dispatch text", query_source="agent", day=1),
+        _inv(name="other", query="typed text", query_source="user", day=1),
+        _inv(name="legacy", query="old cache entry", query_source=None, day=1),
+    ])
+    agent_text = _render(areport.render_drilldown, "release", data)
+    assert "query (agent): dispatch text" in agent_text
+
+    user_text = _render(areport.render_drilldown, "other", data)
+    assert "query (user): typed text" in user_text
+
+    legacy_text = _render(areport.render_drilldown, "legacy", data)
+    assert "query: old cache entry" in legacy_text
+    assert "query (" not in legacy_text
 
 
 def test_drilldown_shows_trigger_via_line():

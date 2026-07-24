@@ -17,6 +17,7 @@ class Invocation(BaseModel):
     name: str
     server: str | None = None  # MCP server, only when kind == "mcp_tool"
     query: str | None = None  # excerpt of the user message that opened the turn
+    query_source: Literal["user", "agent"] | None = None  # who authored query text
     reasoning: str | None = None  # excerpt of the nearest preceding thinking text
     sidechain: bool = False
     detection: Literal["explicit", "skill-read", "command-marker"]

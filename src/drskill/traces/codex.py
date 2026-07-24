@@ -15,7 +15,7 @@ from drskill.traces.common import parse_ts, skill_md_names
 from drskill.traces.model import ExtractResult, Invocation
 
 HARNESS = "codex"
-VERSION = 3
+VERSION = 4
 
 
 def discover(home: Path) -> list[Path]:
@@ -74,7 +74,10 @@ def extract(path: Path) -> ExtractResult:
             if isinstance(server, str) and isinstance(tool, str):
                 out.append(Invocation(
                     **base, kind="mcp_tool", server=server, name=tool,
-                    query=last_query, detection="explicit",
+                    query=last_query,
+                    query_source=(("agent" if sidechain else "user")
+                                  if last_query is not None else None),
+                    detection="explicit",
                 ))
         elif etype == "response_item" and ptype in ("function_call", "custom_tool_call"):
             recognized += 1
@@ -83,6 +86,9 @@ def extract(path: Path) -> ExtractResult:
                 for skill in skill_md_names(text):
                     out.append(Invocation(
                         **base, kind="skill", name=skill,
-                        query=last_query, detection="skill-read",
+                        query=last_query,
+                        query_source=(("agent" if sidechain else "user")
+                                      if last_query is not None else None),
+                        detection="skill-read",
                     ))
     return ExtractResult(invocations=out, recognized=recognized)
