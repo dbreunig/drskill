@@ -545,6 +545,65 @@ def list_cmd(
 
 
 @app.command()
+def audit(
+    name: str | None = typer.Argument(
+        None, help="skill or MCP tool to drill into (server:tool to disambiguate)"
+    ),
+    root: Path = typer.Option(Path("."), "--root", hidden=True),
+    global_mode: bool = typer.Option(
+        False, "--global", help="all traces on this machine, not just this project"
+    ),
+    harness: str | None = typer.Option(None, "--harness", help="one harness only"),
+    since: str | None = typer.Option(
+        None, "--since", help="window: 7d, 30d, or YYYY-MM-DD"
+    ),
+    json_out: bool = typer.Option(False, "--json", help="machine-readable output"),
+) -> None:
+    """Report how skills and MCP tools actually get used, from local agent traces."""
+    import json as json_mod
+
+    from drskill.traces import pipeline as tpipeline
+    from drskill.traces import report as treport
+    from drskill.traces.common import parse_since
+
+    home = _home()
+    if harness is not None and harness not in tpipeline.ADAPTERS:
+        valid = ", ".join(sorted(tpipeline.ADAPTERS))
+        console.print(
+            f"[red]error:[/red] unknown harness {escape(harness)}; "
+            f"valid ids: {valid}"
+        )
+        raise typer.Exit(1)
+    cutoff = None
+    if since is not None:
+        try:
+            cutoff = parse_since(since, dt.datetime.now(dt.timezone.utc))
+        except ValueError:
+            console.print("[red]error:[/red] invalid --since (use 7d, 30d, or YYYY-MM-DD)")
+            raise typer.Exit(1)
+    data = tpipeline.run_audit(home, root, global_mode, harness, cutoff)
+    if name is not None and not json_out:
+        treport.render_drilldown(console, name, data)
+        return
+    if json_out:
+        records = data.invocations
+        if name is not None:
+            records = [i for i in records if treport._matches(i, name)]
+        payload = {
+            "invocations": [i.model_dump(mode="json") for i in records],
+            "coverage": {
+                h: c.model_dump(mode="json")
+                for h, c in treport.coverage(records).items()
+            },
+            "unreadable": data.unreadable,
+            "drifted": data.drifted,
+        }
+        print(json_mod.dumps(payload, indent=2))
+        return
+    treport.render_audit(console, data)
+
+
+@app.command()
 def cache(
     action: str = typer.Argument(..., help="stats or prune"),
     root: Path = typer.Option(Path("."), "--root", hidden=True),
@@ -571,6 +630,15 @@ def cache(
                 f"{len(snaps)} tool snapshot{'s' if len(snaps) != 1 else ''}, "
                 f"{len(approved)} approved baseline"
                 f"{'s' if len(approved) != 1 else ''} in {escape(str(sdir))}"
+            )
+        from drskill.traces import cache as tcache
+
+        adir = tcache.audit_cache_dir(home)
+        audit_entries = list(adir.glob("*.json")) if adir.is_dir() else []
+        if audit_entries:
+            console.print(
+                f"{len(audit_entries)} audit extraction"
+                f"{'s' if len(audit_entries) != 1 else ''} in {escape(str(adir))}"
             )
     elif action == "prune":
         config = _load_effective_config_or_exit(root, home, global_mode)
@@ -607,6 +675,26 @@ def cache(
         if snap_removed or snap_kept:
             console.print(
                 f"removed {snap_removed} stale tool snapshots, kept {snap_kept}"
+            )
+        from drskill.traces import cache as tcache
+
+        adir = tcache.audit_cache_dir(home)
+        a_removed = a_kept = 0
+        for p in sorted(adir.glob("*.json")) if adir.is_dir() else []:
+            try:
+                entry = tcache.TraceCacheEntry.model_validate_json(p.read_text())
+                alive = Path(entry.trace_path).exists()
+            except (OSError, ValueError):
+                alive = False  # corrupt entries go, same rule as verdicts
+            if alive:
+                a_kept += 1
+            else:
+                p.unlink()
+                a_removed += 1
+        if a_removed or a_kept:
+            console.print(
+                f"removed {a_removed} stale audit extraction"
+                f"{'s' if a_removed != 1 else ''}, kept {a_kept}"
             )
     else:
         console.print(
