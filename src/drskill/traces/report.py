@@ -114,6 +114,18 @@ def _clean(text: str) -> str:
     return escape(_sanitize(text))
 
 
+def _get_via_text(inv: Invocation) -> str:
+    """Generate the 'via' text based on detection type."""
+    if inv.detection == "explicit":
+        return "explicit tool call"
+    elif inv.detection == "command-marker":
+        return f"/{_clean(inv.name)} slash command"
+    elif inv.detection == "skill-read":
+        return "SKILL.md read"
+    else:
+        return "unknown"
+
+
 def _uses_cell(s: NameStats) -> str:
     if s.sidechain:
         return f"{s.count} (+{s.sidechain} subagent)"
@@ -220,6 +232,7 @@ def render_drilldown(console: Console, name: str, data: AuditData) -> None:
             where = inv.project or "unknown project"
             side = "  [dim](subagent)[/dim]" if inv.sidechain else ""
             console.print(f"  {when}  {_clean(inv.harness)}  {_clean(where)}{side}")
+            console.print(f"    [dim]via: {_get_via_text(inv)}[/dim]")
             if inv.query:
                 console.print(f"    query: {_clean(one_line(inv.query, 200))}")
             if inv.reasoning:

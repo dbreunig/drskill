@@ -153,3 +153,15 @@ def test_harness_names_escaped_in_audit_and_drilldown():
     drilldown_text = _render(areport.render_drilldown, "test", data)
     assert "​" not in drilldown_text
     assert "[red]h" in drilldown_text
+
+
+def test_drilldown_shows_trigger_via_line():
+    data = AuditData(invocations=[
+        _inv(name="release", detection="explicit", day=1),
+        _inv(name="release", detection="command-marker", day=2),
+        _inv(name="release", detection="skill-read", day=3),
+    ])
+    text = _render(areport.render_drilldown, "release", data)
+    assert "via: explicit tool call" in text
+    assert "via: /release slash command" in text
+    assert "via: SKILL.md read" in text
