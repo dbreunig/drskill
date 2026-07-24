@@ -46,6 +46,20 @@ def test_mcp_tool_call_end_is_explicit(tmp_path):
     assert inv.session_id == "c1"
 
 
+def test_mcp_tool_call_end_records_source_line(tmp_path):
+    f = _write(tmp_path, [
+        _meta(),
+        {"timestamp": "2026-07-14T15:01:00.000Z", "type": "event_msg",
+         "payload": {"type": "user_message", "message": "map the coffee shops"}},
+        {"timestamp": "2026-07-14T15:01:08.659Z", "type": "event_msg",
+         "payload": {"type": "mcp_tool_call_end", "call_id": "x",
+                     "invocation": {"server": "overture", "tool": "places",
+                                    "arguments": {"q": "coffee"}}}},
+    ])
+    [inv] = codex.extract(f).invocations
+    assert inv.source_line == 3  # 1-based: line 3 holds mcp_tool_call_end
+
+
 def test_skill_md_read_in_custom_tool_call_is_heuristic(tmp_path):
     f = _write(tmp_path, [
         _meta(),

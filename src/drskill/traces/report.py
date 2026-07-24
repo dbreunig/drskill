@@ -237,5 +237,7 @@ def render_drilldown(console: Console, name: str, data: AuditData) -> None:
                 console.print(f"    query: {_clean(one_line(inv.query, 200))}")
             if inv.reasoning:
                 console.print(f"    reasoning: {_clean(one_line(inv.reasoning, 200))}")
-            console.print(f"    [dim]trace: {_clean(inv.source_file)}[/dim]")
+            trace = (f"{inv.source_file}:{inv.source_line}"
+                     if inv.source_line is not None else inv.source_file)
+            console.print(f"    [dim]trace: {_clean(trace)}[/dim]")
     _footer(console, data)

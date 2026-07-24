@@ -21,6 +21,7 @@ class Invocation(BaseModel):
     sidechain: bool = False
     detection: Literal["explicit", "skill-read", "command-marker"]
     source_file: str  # the trace file, evidence for drill-downs
+    source_line: int | None = None  # 1-based JSONL line of the producing event
 
 
 class ExtractResult(BaseModel):

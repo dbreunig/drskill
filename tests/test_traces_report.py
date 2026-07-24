@@ -11,12 +11,12 @@ UTC = dt.timezone.utc
 
 def _inv(harness="claude-code", name="release", kind="skill", server=None,
          day=1, sidechain=False, detection="explicit", session="s1",
-         query="the question", reasoning=None):
+         query="the question", reasoning=None, source_line=None):
     return Invocation(
         harness=harness, session_id=session, project="/p",
         timestamp=dt.datetime(2026, 7, day, tzinfo=UTC), kind=kind, name=name,
         server=server, query=query, reasoning=reasoning, sidechain=sidechain,
-        detection=detection, source_file="/t/s.jsonl",
+        detection=detection, source_file="/t/s.jsonl", source_line=source_line,
     )
 
 
@@ -127,6 +127,18 @@ def test_trace_text_is_escaped_and_sanitized():
     text = _render(areport.render_drilldown, "release", data)
     assert "​" not in text
     assert "[red]x" in text  # markup neutralized, printed literally
+
+
+def test_drilldown_trace_line_shows_line_number_when_present():
+    data = AuditData(invocations=[
+        _inv(name="release", day=1, source_line=42),
+        _inv(name="other", day=1, source_line=None),
+    ])
+    text_with_line = _render(areport.render_drilldown, "release", data)
+    assert "/t/s.jsonl:42" in text_with_line
+    text_without_line = _render(areport.render_drilldown, "other", data)
+    assert "/t/s.jsonl" in text_without_line
+    assert "/t/s.jsonl:" not in text_without_line
 
 
 def test_drilldown_unknown_name_says_so():

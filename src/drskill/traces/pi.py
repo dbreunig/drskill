@@ -15,7 +15,7 @@ from drskill.traces.common import excerpt, parse_ts, skill_md_names
 from drskill.traces.model import ExtractResult, Invocation
 
 HARNESS = "pi"
-VERSION = 1
+VERSION = 2
 
 
 def discover(home: Path) -> list[Path]:
@@ -32,7 +32,7 @@ def extract(path: Path) -> ExtractResult:
     project: str | None = None
     last_query: str | None = None
     prev_thinking: str | None = None
-    for line in path.read_text(errors="replace").splitlines():
+    for lineno, line in enumerate(path.read_text(errors="replace").splitlines(), start=1):
         try:
             event = json.loads(line)
         except ValueError:
@@ -67,6 +67,7 @@ def extract(path: Path) -> ExtractResult:
         base = dict(
             harness=HARNESS, session_id=session_id, project=project,
             timestamp=ts, sidechain=False, source_file=str(path),
+            source_line=lineno,
         )
         for block in content:
             if not isinstance(block, dict):

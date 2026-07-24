@@ -87,5 +87,5 @@ def test_query_and_reasoning_are_the_only_trace_text_stored(tmp_path):
     raw = json.loads((cdir / f"{cache.entry_key(trace)}.json").read_text())
     allowed = {"harness", "session_id", "project", "timestamp", "kind", "name",
                "server", "query", "reasoning", "sidechain", "detection",
-               "source_file"}
+               "source_file", "source_line"}
     assert set(raw["invocations"][0]) <= allowed

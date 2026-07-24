@@ -15,7 +15,7 @@ from drskill.traces.common import excerpt, parse_ts
 from drskill.traces.model import ExtractResult, Invocation
 
 HARNESS = "claude-code"
-VERSION = 3
+VERSION = 4
 
 _COMMAND = re.compile(r"<command-name>/?([^<\s]+)</command-name>")
 
@@ -49,7 +49,7 @@ def extract(path: Path) -> ExtractResult:
     last_query: str | None = None
     prev_thinking: str | None = None  # from the previous assistant message
     lines = path.read_text(errors="replace").splitlines()
-    for line in lines:
+    for lineno, line in enumerate(lines, start=1):
         try:
             event = json.loads(line)
         except ValueError:
@@ -73,6 +73,7 @@ def extract(path: Path) -> ExtractResult:
             timestamp=parse_ts(event.get("timestamp")),
             sidechain=bool(event.get("isSidechain")),
             source_file=str(path),
+            source_line=lineno,
         )
         if base["timestamp"] is None:
             continue

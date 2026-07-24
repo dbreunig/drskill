@@ -44,6 +44,20 @@ def test_read_of_skill_md_is_heuristic_skill_with_reasoning(tmp_path):
     assert inv.session_id == "p1"
 
 
+def test_skill_read_records_source_line(tmp_path):
+    f = _write(tmp_path, [
+        _header(),
+        _msg("user", [{"type": "text", "text": "use the maps skill"}]),
+        _msg("assistant", [
+            {"type": "thinking", "thinking": "Load overturemaps first."},
+            {"type": "toolCall", "id": "read_0", "name": "read",
+             "arguments": {"path": "/Users/d/.pi/agent/skills/overturemaps/SKILL.md"}},
+        ]),
+    ])
+    [inv] = pi.extract(f).invocations
+    assert inv.source_line == 3  # 1-based: line 3 holds the assistant message
+
+
 def test_bash_touching_skill_md_counts(tmp_path):
     f = _write(tmp_path, [
         _header(),

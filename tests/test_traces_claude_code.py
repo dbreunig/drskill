@@ -174,6 +174,17 @@ def test_meta_user_events_do_not_become_queries(tmp_path):
     assert inv.query == "do the release"
 
 
+def test_skill_invocation_records_source_line(tmp_path):
+    f = _write(tmp_path / ".claude" / "projects" / "-proj-x", "s1", [
+        _user("first"),
+        _assistant([{"type": "text", "text": "ok"}], ts="2026-07-01T10:00:03.000Z"),
+        _assistant([{"type": "tool_use", "id": "t1", "name": "Skill",
+                     "input": {"skill": "release"}}]),
+    ])
+    [inv] = claude_code.extract(f).invocations
+    assert inv.source_line == 3  # 1-based: line 3 holds the tool_use event
+
+
 def test_command_markers_still_detected_in_meta_events(tmp_path):
     meta_user = _user("<command-name>/release</command-name>")
     meta_user["isMeta"] = True
