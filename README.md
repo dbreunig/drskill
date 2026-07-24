@@ -194,7 +194,7 @@ overturemaps (skill)  codex 1
 A skill name and an MCP tool name can collide, so `drskill audit <name>` also takes the form `server:tool` to say which one you mean:
 
 ```
-drskill audit pencil:get_screenshot --global
+drskill audit browser:get_screenshot --global
 ```
 
 A few things to know about the numbers:
