@@ -5,10 +5,10 @@
 
 [project]
 name = "drskill"
-version = "0.6.2"
+version = "0.6.3"
 description = "brew doctor for your AI agent's skill loadout"
 requires-python = ">=3.11"
-dependencies = ["drskill-core[deep,connect]==0.6.2"]
+dependencies = ["drskill-core[deep,connect]==0.6.3"]
 
 # uv tool install requires the requested package itself to expose an
 # executable; re-declare core's entry point here (the module resolves from
