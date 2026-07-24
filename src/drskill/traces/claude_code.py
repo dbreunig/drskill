@@ -15,7 +15,7 @@ from drskill.traces.common import excerpt, parse_ts
 from drskill.traces.model import ExtractResult, Invocation
 
 HARNESS = "claude-code"
-VERSION = 4
+VERSION = 5
 
 _COMMAND = re.compile(r"<command-name>/?([^<\s]+)</command-name>")
 
@@ -88,7 +88,7 @@ def extract(path: Path) -> ExtractResult:
                         continue
                     out.append(Invocation(
                         **base, kind="skill", name=name,
-                        query=excerpt(last_query), detection="command-marker",
+                        query=last_query, detection="command-marker",
                     ))
             continue
         # assistant: walk blocks in order so thinking precedes its tool_use
@@ -110,7 +110,7 @@ def extract(path: Path) -> ExtractResult:
             if name == "Skill" and isinstance(inp, dict) and inp.get("skill"):
                 out.append(Invocation(
                     **base, kind="skill", name=str(inp["skill"]),
-                    query=excerpt(last_query),
+                    query=last_query,
                     reasoning=excerpt(current_thinking), detection="explicit",
                 ))
             elif name.startswith("mcp__"):
@@ -119,7 +119,7 @@ def extract(path: Path) -> ExtractResult:
                     out.append(Invocation(
                         **base, kind="mcp_tool", server=parts[1],
                         name="__".join(parts[2:]),
-                        query=excerpt(last_query),
+                        query=last_query,
                         reasoning=excerpt(current_thinking), detection="explicit",
                     ))
         # Only a message that had real thinking feeds the fallback for the next one.

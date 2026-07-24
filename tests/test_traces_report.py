@@ -129,6 +129,16 @@ def test_trace_text_is_escaped_and_sanitized():
     assert "[red]x" in text  # markup neutralized, printed literally
 
 
+def test_drilldown_renders_full_query_not_truncated():
+    sentinel = "TAIL_SENTINEL"
+    long_query = ("a" * 260) + sentinel
+    data = AuditData(invocations=[_inv(query=long_query, day=1)])
+    console = Console(record=True, width=400)
+    areport.render_drilldown(console, "release", data)
+    text = console.export_text()
+    assert sentinel in text
+
+
 def test_drilldown_trace_line_shows_line_number_when_present():
     data = AuditData(invocations=[
         _inv(name="release", day=1, source_line=42),

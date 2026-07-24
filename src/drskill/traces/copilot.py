@@ -12,11 +12,10 @@ import json
 from pathlib import Path
 from urllib.parse import unquote, urlparse
 
-from drskill.traces.common import excerpt
 from drskill.traces.model import ExtractResult, Invocation
 
 HARNESS = "copilot"
-VERSION = 1
+VERSION = 2
 
 
 def discover(home: Path) -> list[Path]:
@@ -85,13 +84,13 @@ def extract(path: Path) -> ExtractResult:
                 if server and tool:
                     out.append(Invocation(
                         **base, kind="mcp_tool", server=server, name=tool,
-                        query=excerpt(query), detection="explicit",
+                        query=query, detection="explicit",
                     ))
             elif tool_id == "skill":
                 name = part.get("toolSpecificData")
                 if isinstance(name, str) and name:
                     out.append(Invocation(
                         **base, kind="skill", name=name,
-                        query=excerpt(query), detection="explicit",
+                        query=query, detection="explicit",
                     ))
     return ExtractResult(invocations=out, recognized=recognized)

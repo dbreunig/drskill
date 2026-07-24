@@ -70,8 +70,8 @@ class Invocation(BaseModel):
     kind: Literal["skill", "mcp_tool"]
     name: str                     # skill name, or tool name for MCP
     server: str | None            # MCP server, only when kind == "mcp_tool"
-    query: str | None             # excerpt of the user message that opened the turn
-    reasoning: str | None         # excerpt of the nearest preceding thinking text
+    query: str | None             # full text of the user message that opened the turn
+    reasoning: str | None         # excerpt of the nearest preceding thinking text, about 200 characters
     sidechain: bool               # True when a subagent made the call
     detection: Literal["explicit", "skill-read", "command-marker"]
     source_file: Path             # the trace file, shown as evidence in drill-downs
@@ -107,7 +107,7 @@ Each cache entry is one JSON file named by the sha256 of the trace file's absolu
 
 A run works in five steps: discover trace files per harness, compare each file's `mtime_ns` and `size` against its cache entry, run the adapter on files that are new or changed, load the cached invocations, then aggregate and render. When a trace file has been deleted, its cache entry is pruned on sight. Each adapter has an `adapter_version`, and bumping it forces re-extraction, so improved heuristics never mix with stale extractions. The active session's own transcript changes constantly, so that one file re-extracts each run.
 
-Only two kinds of trace text enter the cache: the query excerpt and the reasoning excerpt, each truncated to about 200 characters. Nothing else from a transcript is stored.
+Only two kinds of trace text enter the cache: the full query text and the reasoning excerpt, the reasoning truncated to about 200 characters. Nothing else from a transcript is stored.
 
 `drskill cache stats` and `drskill cache prune` cover this directory with the same rules as the existing caches.
 

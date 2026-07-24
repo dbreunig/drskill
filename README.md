@@ -204,7 +204,7 @@ A few things to know about the numbers:
 
 Audit only reads trace files. It writes nothing to the ledger, creates no findings, and has no effect on `--ci`.
 
-Parsing every trace on every run would be slow, so audit caches what it extracts from each trace file at `~/.drskill/cache/audit/`. This cache is machine state and is never committed, because it holds short excerpts of your prompts, each cut to about 200 characters. Nothing else from a transcript is stored. `drskill cache prune` clears entries for trace files that no longer exist.
+Parsing every trace on every run would be slow, so audit caches what it extracts from each trace file at `~/.drskill/cache/audit/`. This cache is machine state and is never committed, because it holds the full text of the user messages that preceded each invocation, plus 200-character reasoning excerpts. The same text already exists in the agent trace files it was read from. `drskill cache prune` clears entries for trace files that no longer exist.
 
 ## Exit codes
 

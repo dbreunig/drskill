@@ -54,6 +54,21 @@ def test_skill_tool_use_is_explicit_with_query_and_reasoning(tmp_path):
     assert result.recognized >= 2
 
 
+def test_query_is_stored_verbatim_not_truncated(tmp_path):
+    long_query = "please brainstorm the feature " + ("x" * 400)
+    f = _write(tmp_path / ".claude" / "projects" / "-proj-x", "s1", [
+        _user(long_query),
+        _assistant([
+            {"type": "tool_use", "id": "t1", "name": "Skill",
+             "input": {"skill": "superpowers:brainstorming"}},
+        ]),
+    ])
+    result = claude_code.extract(f)
+    [inv] = result.invocations
+    assert inv.query == long_query
+    assert len(inv.query) > 400
+
+
 def test_mcp_tool_use_splits_server_and_tool(tmp_path):
     f = _write(tmp_path / ".claude" / "projects" / "-proj-x", "s1", [
         _user("screenshot please"),

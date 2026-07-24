@@ -15,7 +15,7 @@ from drskill.traces.common import excerpt, parse_ts, skill_md_names
 from drskill.traces.model import ExtractResult, Invocation
 
 HARNESS = "pi"
-VERSION = 2
+VERSION = 3
 
 
 def discover(home: Path) -> list[Path]:
@@ -87,7 +87,7 @@ def extract(path: Path) -> ExtractResult:
                 if len(parts) >= 3:
                     out.append(Invocation(
                         **base, kind="mcp_tool", server=parts[1],
-                        name="__".join(parts[2:]), query=excerpt(last_query),
+                        name="__".join(parts[2:]), query=last_query,
                         reasoning=excerpt(current_thinking), detection="explicit",
                     ))
                 continue
@@ -96,7 +96,7 @@ def extract(path: Path) -> ExtractResult:
                 for skill in skill_md_names(text):
                     out.append(Invocation(
                         **base, kind="skill", name=skill,
-                        query=excerpt(last_query),
+                        query=last_query,
                         reasoning=excerpt(current_thinking), detection="skill-read",
                     ))
         prev_thinking = current_thinking if saw_thinking else prev_thinking

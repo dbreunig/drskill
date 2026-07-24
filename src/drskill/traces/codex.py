@@ -11,11 +11,11 @@ from __future__ import annotations
 import json
 from pathlib import Path
 
-from drskill.traces.common import excerpt, parse_ts, skill_md_names
+from drskill.traces.common import parse_ts, skill_md_names
 from drskill.traces.model import ExtractResult, Invocation
 
 HARNESS = "codex"
-VERSION = 2
+VERSION = 3
 
 
 def discover(home: Path) -> list[Path]:
@@ -74,7 +74,7 @@ def extract(path: Path) -> ExtractResult:
             if isinstance(server, str) and isinstance(tool, str):
                 out.append(Invocation(
                     **base, kind="mcp_tool", server=server, name=tool,
-                    query=excerpt(last_query), detection="explicit",
+                    query=last_query, detection="explicit",
                 ))
         elif etype == "response_item" and ptype in ("function_call", "custom_tool_call"):
             recognized += 1
@@ -83,6 +83,6 @@ def extract(path: Path) -> ExtractResult:
                 for skill in skill_md_names(text):
                     out.append(Invocation(
                         **base, kind="skill", name=skill,
-                        query=excerpt(last_query), detection="skill-read",
+                        query=last_query, detection="skill-read",
                     ))
     return ExtractResult(invocations=out, recognized=recognized)
