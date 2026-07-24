@@ -253,3 +253,29 @@ def test_command_marker_invocation_is_user_sourced(tmp_path):
     ])
     [inv] = claude_code.extract(f).invocations
     assert inv.query_source == "user"
+
+
+def test_task_notification_events_do_not_become_queries(tmp_path):
+    f = _write(tmp_path / ".claude" / "projects" / "-proj-x", "s1", [
+        _user("build the thing"),
+        _user("<task-notification>\n<task-id>x</task-id>\n</task-notification>",
+              ts="2026-07-01T10:00:02.000Z"),
+        _assistant([{"type": "tool_use", "id": "t1", "name": "Skill",
+                     "input": {"skill": "release"}}]),
+    ])
+    [inv] = claude_code.extract(f).invocations
+    assert inv.query == "build the thing"
+    assert inv.query_source == "user"
+
+
+def test_system_reminder_events_do_not_become_queries(tmp_path):
+    f = _write(tmp_path / ".claude" / "projects" / "-proj-x", "s1", [
+        _user("build the thing"),
+        _user("<system-reminder>\nSome system message\n</system-reminder>",
+              ts="2026-07-01T10:00:02.000Z"),
+        _assistant([{"type": "tool_use", "id": "t1", "name": "Skill",
+                     "input": {"skill": "release"}}]),
+    ])
+    [inv] = claude_code.extract(f).invocations
+    assert inv.query == "build the thing"
+    assert inv.query_source == "user"
