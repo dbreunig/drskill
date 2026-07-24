@@ -152,6 +152,60 @@ Gate a pull request. This connects to servers, judges overlaps, and fails the bu
 drskill scan --deep --mcp-connect --ci
 ```
 
+## Audit your usage
+
+`drskill scan` looks at the loadout as configured. `drskill audit` looks at how you actually used it. It reads the local session traces that Claude Code, Codex, Pi, and Copilot already write to disk, and ranks which skills and MCP tools actually got invoked. `drskill audit <name>` drills into one skill or tool and shows the queries behind each invocation, and the agent's reasoning right before it, on harnesses that record reasoning.
+
+Run it in a project to see that project's usage:
+
+```
+drskill audit
+```
+
+```
+claude-code  coverage: 2026-07-20 to 2026-07-24 · 6 sessions · 57 invocations
+name                        kind   uses  share  sessions  last used
+superpowers:brainstorming  skill  14    25%    6         2026-07-23
+superpowers:writing-plans  skill  8     14%    5         2026-07-23
+plain-writing              skill  6     11%    5         2026-07-23
+```
+
+Widen to every project on the machine, and look at the last 30 days only:
+
+```
+drskill audit --global --since 30d
+```
+
+Drill into one skill to see the queries that led to it:
+
+```
+drskill audit overturemaps
+```
+
+```
+overturemaps (skill)  codex 1
+  2026-07-12 17:56  codex  ~/project
+    query: I need to find coffee shops near a set of addresses…
+    trace: ~/.codex/sessions/2026/07/12/rollout-2026-07-12T10-54-06.jsonl
+```
+
+A skill name and an MCP tool name can collide, so `drskill audit <name>` also takes the form `server:tool` to say which one you mean:
+
+```
+drskill audit pencil:get_screenshot --global
+```
+
+A few things to know about the numbers:
+
+- On Codex and Pi, a skill count comes from seeing the agent read that skill's SKILL.md file, not from an explicit invocation event. These rows carry a `~` marker and the report explains it.
+- Codex encrypts its reasoning, so audit cannot show reasoning for Codex invocations.
+- Copilot records neither reasoning nor the structured arguments of a tool call, so its drill-downs are thinner than the other harnesses.
+- Each harness keeps traces for a different length of time, so a raw count comparison across harnesses can mislead. The cross-harness rollup at the bottom of the report ranks by invocations per week within each harness's own coverage window instead, and says so when the windows differ a lot.
+
+Audit only reads trace files. It writes nothing to the ledger, creates no findings, and has no effect on `--ci`.
+
+Parsing every trace on every run would be slow, so audit caches what it extracts from each trace file at `~/.drskill/cache/audit/`. This cache is machine state and is never committed, because it holds short excerpts of your prompts, each cut to about 200 characters. Nothing else from a transcript is stored. `drskill cache prune` clears entries for trace files that no longer exist.
+
 ## Exit codes
 
 | code | meaning |
