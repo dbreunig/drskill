@@ -48,10 +48,7 @@ def extract(path: Path) -> ExtractResult:
     recognized = 0
     last_query: str | None = None
     prev_thinking: str | None = None  # from the previous assistant message
-    try:
-        lines = path.read_text(errors="replace").splitlines()
-    except OSError:
-        raise
+    lines = path.read_text(errors="replace").splitlines()
     for line in lines:
         try:
             event = json.loads(line)

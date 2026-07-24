@@ -588,7 +588,7 @@ def audit(
     if json_out:
         records = data.invocations
         if name is not None:
-            records = [i for i in records if treport._matches(i, name)]
+            records = [i for i in records if treport.matches(i, name)]
         payload = {
             "invocations": [i.model_dump(mode="json") for i in records],
             "coverage": {

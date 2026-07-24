@@ -44,11 +44,11 @@ def run_audit(
             entry = cache.load_entry(cdir, trace)
             if entry is None or entry.adapter_version != adapter.VERSION:
                 try:
+                    st = trace.stat()
                     result = adapter.extract(trace)
                 except Exception:
                     data.unreadable.append(str(trace))
                     continue
-                st = trace.stat()
                 entry = cache.TraceCacheEntry(
                     trace_path=str(trace), mtime_ns=st.st_mtime_ns,
                     size=st.st_size, adapter=adapter.HARNESS,

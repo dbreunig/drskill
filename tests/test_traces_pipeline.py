@@ -119,3 +119,56 @@ def test_zero_recognized_counts_as_drift(tmp_path):
     root.mkdir()
     data = pipeline.run_audit(tmp_path, root, True, None, None)
     assert data.drifted.get("claude-code") == 1
+
+
+def test_extract_success_after_file_deleted_does_not_crash_on_stat(tmp_path, monkeypatch):
+    """stat() must be taken before extract(), so a file that vanishes during
+    (but not because of) extraction doesn't crash run_audit when the pipeline
+    tries to stat it afterward."""
+    root = tmp_path / "repo"
+    root.mkdir()
+    trace = _write_claude(tmp_path, "-a", str(root))
+    from drskill.traces import claude_code
+    from drskill.traces.model import ExtractResult
+
+    def deletes_but_succeeds(p):
+        p.unlink()
+        return ExtractResult(invocations=[], recognized=1)
+
+    monkeypatch.setattr(claude_code, "extract", deletes_but_succeeds)
+    data = pipeline.run_audit(tmp_path, root, False, None, None)  # must not raise
+    assert data.unreadable == []
+
+
+def test_file_vanishing_during_extract_is_unreadable_not_a_crash(tmp_path, monkeypatch):
+    root = tmp_path / "repo"
+    root.mkdir()
+    trace = _write_claude(tmp_path, "-a", str(root))
+    from drskill.traces import claude_code
+
+    def boom(p):
+        p.unlink()
+        raise OSError("vanished mid-read")
+
+    monkeypatch.setattr(claude_code, "extract", boom)
+    data = pipeline.run_audit(tmp_path, root, False, None, None)
+    assert len(data.unreadable) == 1
+    assert str(trace) in data.unreadable
+    assert data.invocations == []
+
+
+def test_adapter_version_bump_forces_reextraction(tmp_path, monkeypatch):
+    root = tmp_path / "repo"
+    root.mkdir()
+    _write_claude(tmp_path, "-a", str(root))
+    from drskill.traces import claude_code
+
+    pipeline.run_audit(tmp_path, root, False, None, None)
+    real = claude_code.extract
+    calls = []
+    monkeypatch.setattr(claude_code, "VERSION", 99)
+    monkeypatch.setattr(claude_code, "extract",
+                        lambda p: calls.append(p) or real(p))
+    data = pipeline.run_audit(tmp_path, root, False, None, None)
+    assert len(calls) > 0
+    assert len(data.invocations) == 1

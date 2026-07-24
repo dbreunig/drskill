@@ -10,6 +10,7 @@ from __future__ import annotations
 import datetime as dt
 import json
 from pathlib import Path
+from urllib.parse import unquote, urlparse
 
 from drskill.traces.common import excerpt
 from drskill.traces.model import ExtractResult, Invocation
@@ -42,7 +43,7 @@ def _project_for(path: Path) -> str | None:
         return None
     folder = data.get("folder")
     if isinstance(folder, str) and folder.startswith("file://"):
-        return folder[len("file://"):]
+        return unquote(urlparse(folder).path)
     return None
 
 
@@ -81,10 +82,11 @@ def extract(path: Path) -> ExtractResult:
                 continue
             if tool_id.startswith("mcp_") and tool_id.count("_") >= 2:
                 _, server, tool = tool_id.split("_", 2)
-                out.append(Invocation(
-                    **base, kind="mcp_tool", server=server, name=tool,
-                    query=excerpt(query), detection="explicit",
-                ))
+                if server and tool:
+                    out.append(Invocation(
+                        **base, kind="mcp_tool", server=server, name=tool,
+                        query=excerpt(query), detection="explicit",
+                    ))
             elif tool_id == "skill":
                 name = part.get("toolSpecificData")
                 if isinstance(name, str) and name:

@@ -113,6 +113,27 @@ def test_skill_invocation_skips_missing_or_invalid_toolspecificdata(tmp_path):
     assert copilot.extract(f2).invocations == []
 
 
+def test_project_percent_decodes_file_uri(tmp_path):
+    f = _write(tmp_path, _session([{
+        "message": {"text": "q"},
+        "timestamp": 1782900060000,
+        "response": [{"kind": "toolInvocationSerialized",
+                      "toolId": "mcp_s_t", "toolCallId": "tc1"}],
+    }]), folder="file:///proj/My%20Project")
+    [inv] = copilot.extract(f).invocations
+    assert inv.project == "/proj/My Project"
+
+
+def test_mcp_tool_id_with_empty_server_or_tool_produces_no_invocation(tmp_path):
+    f = _write(tmp_path, _session([{
+        "message": {"text": "q"},
+        "timestamp": 1782900060000,
+        "response": [{"kind": "toolInvocationSerialized",
+                      "toolId": "mcp_s_", "toolCallId": "tc1"}],
+    }]))
+    assert copilot.extract(f).invocations == []
+
+
 def test_non_dict_workspace_json_crash(tmp_path):
     """workspace.json with list content should not crash; project should be None."""
     f = _write(tmp_path, _session([{

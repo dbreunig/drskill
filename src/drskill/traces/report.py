@@ -189,7 +189,7 @@ def _footer(console: Console, data: AuditData) -> None:
         )
 
 
-def _matches(inv: Invocation, name: str) -> bool:
+def matches(inv: Invocation, name: str) -> bool:
     if inv.name == name:
         return True
     if ":" in name:
@@ -199,7 +199,7 @@ def _matches(inv: Invocation, name: str) -> bool:
 
 
 def render_drilldown(console: Console, name: str, data: AuditData) -> None:
-    hits = [i for i in data.invocations if _matches(i, name)]
+    hits = [i for i in data.invocations if matches(i, name)]
     if not hits:
         console.print(f"no invocations of {_clean(name)} found")
         _footer(console, data)
