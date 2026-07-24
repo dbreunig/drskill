@@ -15,7 +15,7 @@ from drskill.traces.common import excerpt, parse_ts
 from drskill.traces.model import ExtractResult, Invocation
 
 HARNESS = "claude-code"
-VERSION = 2
+VERSION = 3
 
 _COMMAND = re.compile(r"<command-name>/?([^<\s]+)</command-name>")
 
@@ -78,7 +78,7 @@ def extract(path: Path) -> ExtractResult:
             continue
         if etype == "user":
             texts = _text_blocks(content)
-            if texts and not event.get("isSidechain"):
+            if texts and not event.get("isSidechain") and not event.get("isMeta"):
                 last_query = texts[0]
             for text in texts:
                 for m in _COMMAND.finditer(text):

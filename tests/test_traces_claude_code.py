@@ -157,3 +157,28 @@ def test_malformed_lines_and_unknown_events_are_skipped(tmp_path):
     result = claude_code.extract(f)
     assert result.invocations == []
     assert result.recognized == 1  # only the user event
+
+
+def test_meta_user_events_do_not_become_queries(tmp_path):
+    real_user = _user("do the release")
+    meta_user = _user("Base directory for this skill: /x/y # Skill body...",
+                      ts="2026-07-01T10:00:02.000Z")
+    meta_user["isMeta"] = True
+    f = _write(tmp_path / ".claude" / "projects" / "-proj-x", "s1", [
+        real_user,
+        meta_user,
+        _assistant([{"type": "tool_use", "id": "t1", "name": "Skill",
+                     "input": {"skill": "release"}}], ts="2026-07-01T10:00:03.000Z"),
+    ])
+    [inv] = claude_code.extract(f).invocations
+    assert inv.query == "do the release"
+
+
+def test_command_markers_still_detected_in_meta_events(tmp_path):
+    meta_user = _user("<command-name>/release</command-name>")
+    meta_user["isMeta"] = True
+    f = _write(tmp_path / ".claude" / "projects" / "-proj-x", "s1", [meta_user])
+    [inv] = claude_code.extract(f).invocations
+    assert inv.kind == "skill"
+    assert inv.name == "release"
+    assert inv.detection == "command-marker"
