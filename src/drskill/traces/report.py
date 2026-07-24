@@ -154,7 +154,7 @@ def render_audit(console: Console, data: AuditData) -> None:
     if len(per_harness) > 1:
         spans = {h: cov[h].span_days for h in per_harness}
         if max(spans.values()) / min(spans.values()) > 2:
-            parts = ", ".join(f"{h} {spans[h]:.0f}d" for h in sorted(spans))
+            parts = ", ".join(f"{_clean(h)} {spans[h]:.0f}d" for h in sorted(spans))
             console.print(
                 f"[dim]windows differ ({parts}); ranks compare rates, "
                 "not raw counts[/dim]"
@@ -211,7 +211,7 @@ def render_drilldown(console: Console, name: str, data: AuditData) -> None:
         by_harness = defaultdict(int)
         for i in invs:
             by_harness[i.harness] += 1
-        counts = ", ".join(f"{h} {n}" for h, n in sorted(by_harness.items()))
+        counts = ", ".join(f"{_clean(h)} {n}" for h, n in sorted(by_harness.items()))
         console.print(f"\n[bold]{_clean(label)}[/bold]  {counts}")
         for inv in sorted(invs, key=lambda i: i.timestamp, reverse=True):
             when = inv.timestamp.strftime("%Y-%m-%d %H:%M")

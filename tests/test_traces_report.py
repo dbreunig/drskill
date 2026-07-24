@@ -117,3 +117,24 @@ def test_trace_text_is_escaped_and_sanitized():
 def test_drilldown_unknown_name_says_so():
     text = _render(areport.render_drilldown, "nope", AuditData())
     assert "no invocations" in text.lower()
+
+
+def test_harness_names_escaped_in_audit_and_drilldown():
+    # Hostile harness name with markup and invisible character
+    evil = "evil[red]h[/red]​x"
+    invs = [
+        _inv(harness=evil, name="test", day=1),
+        _inv(harness=evil, name="test", day=28),
+        _inv(harness="copilot", name="other", day=1),
+    ]
+    data = AuditData(invocations=invs)
+
+    # Test render_audit: window-mismatch note should have escaped harness names
+    audit_text = _render(areport.render_audit, data)
+    assert "​" not in audit_text  # invisible character should be removed
+    assert "[red]h" in audit_text  # markup should be escaped/literal
+
+    # Test render_drilldown: per-group counts should have escaped harness names
+    drilldown_text = _render(areport.render_drilldown, "test", data)
+    assert "​" not in drilldown_text
+    assert "[red]h" in drilldown_text
