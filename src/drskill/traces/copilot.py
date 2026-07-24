@@ -38,6 +38,8 @@ def _project_for(path: Path) -> str | None:
         data = json.loads(ws.read_text())
     except (OSError, ValueError):
         return None
+    if not isinstance(data, dict):
+        return None
     folder = data.get("folder")
     if isinstance(folder, str) and folder.startswith("file://"):
         return folder[len("file://"):]

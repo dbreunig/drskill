@@ -67,3 +67,64 @@ def test_malformed_session_file_raises_oserror_free_valueerror(tmp_path):
     f.write_text("{not json")
     result = copilot.extract(f)
     assert result.invocations == [] and result.recognized == 0
+
+
+def test_skill_invocation_with_name(tmp_path):
+    """Skill invocation with toolSpecificData as non-empty string."""
+    f = _write(tmp_path, _session([{
+        "message": {"text": "simplify this"},
+        "timestamp": 1782900060000,
+        "response": [
+            {"kind": "toolInvocationSerialized",
+             "toolId": "skill", "toolCallId": "tc1",
+             "toolSpecificData": "plain-writing"},
+        ],
+    }]))
+    [inv] = copilot.extract(f).invocations
+    assert inv.kind == "skill"
+    assert inv.name == "plain-writing"
+    assert inv.detection == "explicit"
+    assert inv.server is None
+
+
+def test_skill_invocation_skips_missing_or_invalid_toolspecificdata(tmp_path):
+    """Skill invocation without or with non-string toolSpecificData produces no invocation."""
+    # Test 1: missing toolSpecificData
+    f1 = _write(tmp_path, _session([{
+        "message": {"text": "do something"},
+        "timestamp": 1782900060000,
+        "response": [
+            {"kind": "toolInvocationSerialized",
+             "toolId": "skill", "toolCallId": "tc1"},
+        ],
+    }]))
+    assert copilot.extract(f1).invocations == []
+
+    # Test 2: non-string toolSpecificData
+    f2 = _write(tmp_path, _session([{
+        "message": {"text": "do something"},
+        "timestamp": 1782900060000,
+        "response": [
+            {"kind": "toolInvocationSerialized",
+             "toolId": "skill", "toolCallId": "tc2",
+             "toolSpecificData": {"x": 1}},
+        ],
+    }]))
+    assert copilot.extract(f2).invocations == []
+
+
+def test_non_dict_workspace_json_crash(tmp_path):
+    """workspace.json with list content should not crash; project should be None."""
+    f = _write(tmp_path, _session([{
+        "message": {"text": "invoke mcp"},
+        "timestamp": 1782900060000,
+        "response": [
+            {"kind": "toolInvocationSerialized",
+             "toolId": "mcp_server_tool", "toolCallId": "tc1"},
+        ],
+    }]))
+    # Overwrite workspace.json with array content
+    (f.parent.parent / "workspace.json").write_text(json.dumps([]))
+    result = copilot.extract(f)
+    assert len(result.invocations) == 1
+    assert result.invocations[0].project is None
