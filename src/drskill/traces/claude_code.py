@@ -15,19 +15,9 @@ from drskill.traces.common import excerpt, parse_ts
 from drskill.traces.model import ExtractResult, Invocation
 
 HARNESS = "claude-code"
-VERSION = 7
+VERSION = 6
 
 _COMMAND = re.compile(r"<command-name>/?([^<\s]+)</command-name>")
-
-# Harness-injected user events carry no isMeta flag; the only signal is the
-# wrapper the text opens with.
-SYSTEM_PREFIXES = (
-    "<task-notification>",
-    "<system-reminder>",
-    "<local-command-stdout>",
-    "<command-message>",
-    "[SYSTEM NOTIFICATION",
-)
 
 # Claude Code built-in CLI commands are not skills. Not exhaustive; unknown
 # builtins surface as low-count command-marker rows a user can ignore.
@@ -91,12 +81,10 @@ def extract(path: Path) -> ExtractResult:
         if etype == "user":
             texts = _text_blocks(content)
             if texts and not event.get("isMeta"):
-                text = texts[0]
-                if not text.strip().startswith(SYSTEM_PREFIXES):
-                    if event.get("isSidechain"):
-                        last_sidechain_query = text
-                    else:
-                        last_query = text
+                if event.get("isSidechain"):
+                    last_sidechain_query = texts[0]
+                else:
+                    last_query = texts[0]
             for text in texts:
                 for m in _COMMAND.finditer(text):
                     name = m.group(1)
