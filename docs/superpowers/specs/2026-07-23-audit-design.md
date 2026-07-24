@@ -94,7 +94,7 @@ One adapter per harness. Each adapter is a pure function from one trace file to 
 
 Parsing every trace on every run is too slow. The inspected machine held about 300 MB of traces across roughly 750 files. Audit therefore caches extracted invocations per trace file.
 
-The cache lives at `~/.drskill/cache/audit/`, under `DRSKILL_HOME`. It is machine state and is never committed, because it contains excerpts of the user's prompts. This is the opposite of the verdict cache, which is committed by design.
+The cache lives at `~/.drskill/cache/audit/`, under `DRSKILL_HOME`. It is machine state and is never committed, because it contains the text of the user's prompts. This is the opposite of the verdict cache, which is committed by design.
 
 Each cache entry is one JSON file named by the sha256 of the trace file's absolute path:
 
