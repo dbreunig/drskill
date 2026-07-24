@@ -125,6 +125,29 @@ def test_tool_result_user_events_do_not_become_queries(tmp_path):
     assert inv.query == "real question"
 
 
+def test_string_content_user_message_is_tracked_as_query(tmp_path):
+    f = _write(tmp_path / ".claude" / "projects" / "-proj-x", "s1", [
+        {"type": "user", "sessionId": "s1", "timestamp": "2026-07-01T10:00:00.000Z",
+         "cwd": "/proj/x", "isSidechain": False,
+         "message": {"role": "user", "content": "please release it"}},
+        _assistant([{"type": "tool_use", "id": "t1", "name": "Skill",
+                     "input": {"skill": "release"}}]),
+    ])
+    [inv] = claude_code.extract(f).invocations
+    assert inv.query == "please release it"
+
+
+def test_string_content_user_message_detects_command_marker(tmp_path):
+    f = _write(tmp_path / ".claude" / "projects" / "-proj-x", "s1", [
+        {"type": "user", "sessionId": "s1", "timestamp": "2026-07-01T10:00:00.000Z",
+         "cwd": "/proj/x", "isSidechain": False,
+         "message": {"role": "user",
+                      "content": "<command-name>/release</command-name>"}},
+    ])
+    [inv] = claude_code.extract(f).invocations
+    assert (inv.kind, inv.name, inv.detection) == ("skill", "release", "command-marker")
+
+
 def test_malformed_lines_and_unknown_events_are_skipped(tmp_path):
     d = tmp_path / ".claude" / "projects" / "-proj-x"
     d.mkdir(parents=True)

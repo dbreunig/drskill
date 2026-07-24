@@ -190,10 +190,12 @@ def _footer(console: Console, data: AuditData) -> None:
 
 
 def _matches(inv: Invocation, name: str) -> bool:
+    if inv.name == name:
+        return True
     if ":" in name:
         server, _, tool = name.partition(":")
         return inv.kind == "mcp_tool" and inv.server == server and inv.name == tool
-    return inv.name == name
+    return False
 
 
 def render_drilldown(console: Console, name: str, data: AuditData) -> None:

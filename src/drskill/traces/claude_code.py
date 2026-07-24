@@ -15,7 +15,7 @@ from drskill.traces.common import excerpt, parse_ts
 from drskill.traces.model import ExtractResult, Invocation
 
 HARNESS = "claude-code"
-VERSION = 1
+VERSION = 2
 
 _COMMAND = re.compile(r"<command-name>/?([^<\s]+)</command-name>")
 
@@ -64,6 +64,8 @@ def extract(path: Path) -> ExtractResult:
             continue
         message = event.get("message") or {}
         content = message.get("content")
+        if etype == "user" and isinstance(content, str):
+            content = [{"type": "text", "text": content}]
         if not isinstance(content, list):
             continue
         recognized += 1

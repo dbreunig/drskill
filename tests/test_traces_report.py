@@ -106,6 +106,21 @@ def test_drilldown_server_tool_form_filters():
     assert "from b" in text and "the question" not in text
 
 
+def test_drilldown_finds_plugin_qualified_skill_name():
+    data = AuditData(invocations=[
+        _inv(name="superpowers:brainstorming", kind="skill", query="brainstorm ask")])
+    text = _render(areport.render_drilldown, "superpowers:brainstorming", data)
+    assert "brainstorm ask" in text
+
+
+def test_drilldown_colon_name_matches_both_skill_and_mcp_tool():
+    data = AuditData(invocations=[
+        _inv(name="b:shot", kind="skill", query="skill query"),
+        _inv(name="shot", kind="mcp_tool", server="b", query="mcp query")])
+    text = _render(areport.render_drilldown, "b:shot", data)
+    assert "skill query" in text and "mcp query" in text
+
+
 def test_trace_text_is_escaped_and_sanitized():
     evil = "[red]x[/red] hidden​ end"
     data = AuditData(invocations=[_inv(query=evil, day=5)])
