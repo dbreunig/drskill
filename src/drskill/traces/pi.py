@@ -15,7 +15,7 @@ from drskill.traces.common import excerpt, parse_ts, skill_md_names
 from drskill.traces.model import ExtractResult, Invocation
 
 HARNESS = "pi"
-VERSION = 4
+VERSION = 3
 
 
 def discover(home: Path) -> list[Path]:
@@ -88,7 +88,6 @@ def extract(path: Path) -> ExtractResult:
                     out.append(Invocation(
                         **base, kind="mcp_tool", server=parts[1],
                         name="__".join(parts[2:]), query=last_query,
-                        query_source="user" if last_query is not None else None,
                         reasoning=excerpt(current_thinking), detection="explicit",
                     ))
                 continue
@@ -98,7 +97,6 @@ def extract(path: Path) -> ExtractResult:
                     out.append(Invocation(
                         **base, kind="skill", name=skill,
                         query=last_query,
-                        query_source="user" if last_query is not None else None,
                         reasoning=excerpt(current_thinking), detection="skill-read",
                     ))
         prev_thinking = current_thinking if saw_thinking else prev_thinking

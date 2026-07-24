@@ -114,7 +114,7 @@ def test_reasoning_falls_back_to_previous_assistant_message(tmp_path):
     assert inv.reasoning == "Prior thought."
 
 
-def test_sidechain_flag_prefers_sidechain_dispatch_query(tmp_path):
+def test_sidechain_flag_and_query_skips_sidechain_users(tmp_path):
     f = _write(tmp_path / ".claude" / "projects" / "-proj-x", "s1", [
         _user("main thread question"),
         _user("subagent prompt", sidechain=True, ts="2026-07-01T10:00:02.000Z"),
@@ -123,8 +123,7 @@ def test_sidechain_flag_prefers_sidechain_dispatch_query(tmp_path):
     ])
     [inv] = claude_code.extract(f).invocations
     assert inv.sidechain is True
-    assert inv.query == "subagent prompt"
-    assert inv.query_source == "agent"
+    assert inv.query == "main thread question"
 
 
 def test_tool_result_user_events_do_not_become_queries(tmp_path):
@@ -209,47 +208,3 @@ def test_command_markers_still_detected_in_meta_events(tmp_path):
     assert inv.kind == "skill"
     assert inv.name == "release"
     assert inv.detection == "command-marker"
-
-
-def test_main_thread_skill_invocation_is_user_sourced(tmp_path):
-    f = _write(tmp_path / ".claude" / "projects" / "-proj-x", "s1", [
-        _user("please brainstorm the feature"),
-        _assistant([{"type": "tool_use", "id": "t1", "name": "Skill",
-                     "input": {"skill": "release"}}]),
-    ])
-    [inv] = claude_code.extract(f).invocations
-    assert inv.query_source == "user"
-
-
-def test_sidechain_dispatch_prompt_is_agent_sourced(tmp_path):
-    f = _write(tmp_path / ".claude" / "projects" / "-proj-x", "s1", [
-        _user("main thread question"),
-        _user("Implement task 3 exactly as specified in the plan.",
-              sidechain=True, ts="2026-07-01T10:00:02.000Z"),
-        _assistant([{"type": "tool_use", "id": "t1", "name": "Skill",
-                     "input": {"skill": "release"}}], sidechain=True),
-    ])
-    [inv] = claude_code.extract(f).invocations
-    assert inv.sidechain is True
-    assert inv.query == "Implement task 3 exactly as specified in the plan."
-    assert inv.query_source == "agent"
-
-
-def test_sidechain_without_prior_sidechain_query_falls_back_to_user(tmp_path):
-    f = _write(tmp_path / ".claude" / "projects" / "-proj-x", "s1", [
-        _user("main thread question"),
-        _assistant([{"type": "tool_use", "id": "t1", "name": "Skill",
-                     "input": {"skill": "release"}}], sidechain=True),
-    ])
-    [inv] = claude_code.extract(f).invocations
-    assert inv.sidechain is True
-    assert inv.query == "main thread question"
-    assert inv.query_source == "user"
-
-
-def test_command_marker_invocation_is_user_sourced(tmp_path):
-    f = _write(tmp_path / ".claude" / "projects" / "-proj-x", "s1", [
-        _user("<command-name>/release</command-name> now"),
-    ])
-    [inv] = claude_code.extract(f).invocations
-    assert inv.query_source == "user"

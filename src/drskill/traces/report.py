@@ -234,12 +234,7 @@ def render_drilldown(console: Console, name: str, data: AuditData) -> None:
             console.print(f"  {when}  {_clean(inv.harness)}  {_clean(where)}{side}")
             console.print(f"    [dim]via: {_get_via_text(inv)}[/dim]")
             if inv.query:
-                if inv.query_source:
-                    console.print(
-                        f"    query ({inv.query_source}): {_clean(inv.query)}"
-                    )
-                else:
-                    console.print(f"    query: {_clean(inv.query)}")
+                console.print(f"    query: {_clean(inv.query)}")
             if inv.reasoning:
                 console.print(f"    reasoning: {_clean(one_line(inv.reasoning, 200))}")
             trace = (f"{inv.source_file}:{inv.source_line}"

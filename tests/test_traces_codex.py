@@ -96,34 +96,6 @@ def test_subagent_session_meta_marks_all_sidechain(tmp_path):
     assert inv.sidechain is True
 
 
-def test_main_thread_query_is_user_sourced(tmp_path):
-    f = _write(tmp_path, [
-        _meta(),
-        {"timestamp": "2026-07-14T15:01:00.000Z", "type": "event_msg",
-         "payload": {"type": "user_message", "message": "map the coffee shops"}},
-        {"timestamp": "2026-07-14T15:01:08.659Z", "type": "event_msg",
-         "payload": {"type": "mcp_tool_call_end", "call_id": "x",
-                     "invocation": {"server": "overture", "tool": "places",
-                                    "arguments": {"q": "coffee"}}}},
-    ])
-    [inv] = codex.extract(f).invocations
-    assert inv.query_source == "user"
-
-
-def test_subagent_thread_query_is_agent_sourced(tmp_path):
-    f = _write(tmp_path, [
-        _meta(thread_source="subagent", source={"subagent": {"other": "guardian"}}),
-        {"timestamp": "2026-07-14T15:01:00.000Z", "type": "event_msg",
-         "payload": {"type": "user_message", "message": "implement task 3"}},
-        {"timestamp": "2026-07-14T15:01:08.000Z", "type": "event_msg",
-         "payload": {"type": "mcp_tool_call_end",
-                     "invocation": {"server": "s", "tool": "t", "arguments": {}}}},
-    ])
-    [inv] = codex.extract(f).invocations
-    assert inv.sidechain is True
-    assert inv.query_source == "agent"
-
-
 def test_malformed_lines_skipped_and_recognized_counts(tmp_path):
     f = _write(tmp_path, [_meta()])
     f.write_text(f.read_text() + "garbage\n")

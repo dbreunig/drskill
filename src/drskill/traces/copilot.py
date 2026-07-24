@@ -15,7 +15,7 @@ from urllib.parse import unquote, urlparse
 from drskill.traces.model import ExtractResult, Invocation
 
 HARNESS = "copilot"
-VERSION = 3
+VERSION = 2
 
 
 def discover(home: Path) -> list[Path]:
@@ -79,19 +79,18 @@ def extract(path: Path) -> ExtractResult:
             tool_id = part.get("toolId", "")
             if not isinstance(tool_id, str):
                 continue
-            query_source = "user" if query is not None else None
             if tool_id.startswith("mcp_") and tool_id.count("_") >= 2:
                 _, server, tool = tool_id.split("_", 2)
                 if server and tool:
                     out.append(Invocation(
                         **base, kind="mcp_tool", server=server, name=tool,
-                        query=query, query_source=query_source, detection="explicit",
+                        query=query, detection="explicit",
                     ))
             elif tool_id == "skill":
                 name = part.get("toolSpecificData")
                 if isinstance(name, str) and name:
                     out.append(Invocation(
                         **base, kind="skill", name=name,
-                        query=query, query_source=query_source, detection="explicit",
+                        query=query, detection="explicit",
                     ))
     return ExtractResult(invocations=out, recognized=recognized)
