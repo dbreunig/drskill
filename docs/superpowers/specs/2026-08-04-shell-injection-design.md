@@ -85,3 +85,11 @@ Findings render through the existing escape and `_sanitize` path, so hostile com
 
 - `.claude/commands/` discovery as a claude-code skill surface (project, user, nested namespace directories), which would put command files in front of every existing check.
 - Awareness of `disableSkillShellExecution` in settings, which would let the report say the commands are policy-disabled on this machine.
+
+## Tuning
+
+Tuning outcome (2026-08-04, corpora: anthropics/skills at 18 skills, vercel-labs/agent-skills at 9, NousResearch/hermes-agent at 183). Both checks were run over all three corpora with the same ad hoc harness `scripts/corpus.py` uses (a single recursive project path over the checkout, matching plain `.claude/skills`-shaped directories aside).
+
+`injection-shell-unreviewed` fired on 0 skills in all three corpora, and `injection-shell-dangerous` produced 0 findings. A direct grep of every `SKILL.md` in all three checkouts for the inline `` !`...` `` form and the ```` ```! ```` fence confirms why: none of the 210 SKILL.md files across the three corpora use the dynamic-context shell syntax at all. This is expected. The feature is a Claude Code extension documented as of this cycle, and none of these corpora (a first-party sample set, a small agent-skills repo, and a large general-purpose collection) had reason to adopt it yet.
+
+With zero findings there was nothing to triage, so no false-positive class was found and no lexicon or extraction guard changed as a result of this sweep. `injection-shell-dangerous` reuses the `injection.py` lexicons, which already carry their own corpus-tuned guards (credential-store `.key` removal, egress's `urllib.request`/`AF_INET` narrowing, the localhost exclusion) from the 2026-07-20 tuning pass on the same corpora; those guards apply unchanged to shell-command text. Noise accepted by decision: none, since there was no noise to accept. The clean result is recorded here rather than skipped, so a future re-run over a corpus that has adopted the syntax has a documented baseline to compare against.
