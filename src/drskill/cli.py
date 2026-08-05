@@ -255,7 +255,7 @@ def scan(
                 world, console, tokens=False, harness=harness, show_all=show_all
             )
     if any(f.severity == "error" for f in active):
-        raise typer.Exit(2 if ci else 1)
+        raise typer.Exit(1)
     if ci and any(f.severity == "warning" for f in active):
         raise typer.Exit(2)
 
