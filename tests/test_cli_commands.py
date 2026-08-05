@@ -424,3 +424,22 @@ def test_dangerous_multi_category_ack(tmp_path):
     # After acking both dangerous errors and the remote-fetch warning,
     # scan --ci should exit 0 (no active errors or warnings)
     assert invoke(tmp_path, "scan", "--ci").exit_code == 0
+
+
+def test_cache_stats_and_prune_cover_shell_baselines(tmp_path):
+    proj = tmp_path / "proj"
+    write(proj, "sheller", "Use when the user asks for git state.",
+          "Current: !`git status`")
+    invoke(tmp_path, "ack", "injection-shell-unreviewed", "sheller")
+    bdir = proj / ".drskill" / "cache" / "skill-shell"
+    assert len(list(bdir.glob("*.json"))) == 1
+    out = invoke(tmp_path, "cache", "stats").output
+    assert "1 shell-command baseline" in out
+    # plant a stale baseline (no matching skill) and a corrupt file
+    (bdir / ("ab" * 32 + ".json")).write_text(
+        '{"name": "gone", "path": "./x", "commands": [], "date": "2026-08-01"}'
+    )
+    (bdir / "corrupt.json").write_text("{nope")
+    r = invoke(tmp_path, "cache", "prune")
+    assert r.exit_code == 0
+    assert len(list(bdir.glob("*.json"))) == 1  # live baseline kept, rest gone

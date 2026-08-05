@@ -640,6 +640,15 @@ def cache(
                 f"{len(approved)} approved baseline"
                 f"{'s' if len(approved) != 1 else ''} in {escape(str(sdir))}"
             )
+        from drskill.checks import skill_shell
+
+        bdir = skill_shell.shell_dir(root, home, global_mode)
+        baselines = skill_shell.load_baselines(bdir)
+        if baselines:
+            console.print(
+                f"{len(baselines)} shell-command baseline"
+                f"{'s' if len(baselines) != 1 else ''} in {escape(str(bdir))}"
+            )
         from drskill.traces import cache as tcache
 
         adir = tcache.audit_cache_dir(home)
@@ -684,6 +693,28 @@ def cache(
         if snap_removed or snap_kept:
             console.print(
                 f"removed {snap_removed} stale tool snapshots, kept {snap_kept}"
+            )
+        from drskill.checks import skill_shell
+
+        bdir = skill_shell.shell_dir(root, home, global_mode)
+        valid_keys = {
+            skill_shell.baseline_key(c, root, home)
+            for c in world.contributors.values()
+            if c.kind == "skill"
+        }
+        loaded = skill_shell.load_baselines(bdir)
+        b_removed = b_kept = 0
+        # Walk the files, not the parsed entries, so corrupt files go too.
+        for p in sorted(bdir.glob("*.json")) if bdir.is_dir() else []:
+            if p.stem in valid_keys and p.stem in loaded:
+                b_kept += 1
+            else:
+                p.unlink()
+                b_removed += 1
+        if b_removed or b_kept:
+            console.print(
+                f"removed {b_removed} stale shell-command baseline"
+                f"{'s' if b_removed != 1 else ''}, kept {b_kept}"
             )
         from drskill.traces import cache as tcache
 
