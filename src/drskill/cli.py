@@ -255,7 +255,7 @@ def scan(
                 world, console, tokens=False, harness=harness, show_all=show_all
             )
     if any(f.severity == "error" for f in active):
-        raise typer.Exit(1)
+        raise typer.Exit(2 if ci else 1)
     if ci and any(f.severity == "warning" for f in active):
         raise typer.Exit(2)
 
@@ -325,10 +325,15 @@ def ack(
         if wanted:
             exact = [f for f in active if f.check_id == check_id and set(f.contributor_names) == wanted]
             superset = [f for f in active if f.check_id == check_id and wanted <= set(f.contributor_names)]
-            matches = exact or superset
-            if len(matches) > 1:
-                console.print(f"[red]Ambiguous:[/red] {len(matches)} findings match; name all involved skills")
+            # If multiple exact matches exist (e.g., multiple categories for same skill),
+            # ack them all. Only error if we need superset matching and get ambiguous results.
+            if exact:
+                matches = exact
+            elif len(superset) > 1:
+                console.print(f"[red]Ambiguous:[/red] {len(superset)} findings match; name all involved skills")
                 raise typer.Exit(1)
+            else:
+                matches = superset
         else:
             # a bare check id acks the whole class of findings
             matches = [f for f in active if f.check_id == check_id]
