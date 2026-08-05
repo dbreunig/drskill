@@ -17,6 +17,7 @@ from drskill.models import (
     Deployment,
     Provenance,
     RawInstance,
+    ShellBaseline,
     TokenCost,
 )
 
@@ -127,6 +128,8 @@ class World(BaseModel):
     # config_hash -> snapshot, only for currently configured servers
     mcp_snapshots: dict[str, ServerSnapshot] = Field(default_factory=dict)
     mcp_approved: dict[str, ServerSnapshot] = Field(default_factory=dict)
+    # contributor id -> approved invocation-time command baseline
+    shell_approved: dict[str, ShellBaseline] = Field(default_factory=dict)
 
     def harness_loads(self, harness_id: str) -> list[tuple[Contributor, Deployment]]:
         out = [

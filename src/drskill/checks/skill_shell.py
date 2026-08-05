@@ -8,10 +8,12 @@ lexicons in checks/injection.py."""
 
 from __future__ import annotations
 
+import hashlib
 import re
+from pathlib import Path
 
 from drskill.checks import injection
-from drskill.models import Contributor
+from drskill.models import Contributor, ShellBaseline
 
 # The harness only recognizes `!` at line start or immediately after
 # whitespace; KEY=!`cmd` stays literal text and never runs.
@@ -41,3 +43,40 @@ def _skillmd(c: Contributor) -> injection.Source | None:
     """The SKILL.md source from the shared scan-view cache; None for MCP
     tools and unreadable skills."""
     return next((s for s in injection.scan_view(c) if s.kind == "skillmd"), None)
+
+
+def shell_dir(project_root: Path, home: Path, global_mode: bool) -> Path:
+    base = home if global_mode else project_root
+    return base / ".drskill" / "cache" / "skill-shell"
+
+
+def _norm_path(p: Path, project_root: Path, home: Path) -> str:
+    """Portable form of a skill path: project checkouts and home dirs move
+    between machines, so the key must not bake in either prefix."""
+    try:
+        return "./" + p.relative_to(project_root.resolve()).as_posix()
+    except ValueError:
+        pass
+    try:
+        return "~/" + p.relative_to(home.resolve()).as_posix()
+    except ValueError:
+        return p.as_posix()
+
+
+def baseline_key(c: Contributor, project_root: Path, home: Path) -> str:
+    """Identity hash for the baseline file: survives command changes (it is
+    content-free) and machine moves (the path is normalized)."""
+    ident = c.name + "\n" + _norm_path(Path(c.id), project_root, home)
+    return hashlib.sha256(ident.encode()).hexdigest()
+
+
+def load_baselines(bdir: Path) -> dict[str, ShellBaseline]:
+    out: dict[str, ShellBaseline] = {}
+    if not bdir.is_dir():
+        return out
+    for p in sorted(bdir.glob("*.json")):
+        try:
+            out[p.stem] = ShellBaseline.model_validate_json(p.read_text())
+        except (OSError, ValueError):
+            continue  # corrupt entries are prune's job
+    return out

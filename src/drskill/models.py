@@ -45,6 +45,17 @@ class BundledFile(BaseModel):
     oversize: bool  # larger than the scan cap; recorded, never content-scanned
 
 
+class ShellBaseline(BaseModel):
+    """The invocation-time shell commands a user approved for one skill.
+    Written when the user acks injection-shell-unreviewed; a later scan
+    diffs the current commands against this copy to name what changed."""
+
+    name: str
+    path: str  # normalized: ./project-relative, ~/home-relative, or absolute
+    commands: list[str]  # file order, not sorted
+    date: str  # ISO date of the ack
+
+
 class Contributor(BaseModel):
     id: str  # str(realpath of the skill file)
     kind: Literal["skill", "mcp_tool"] = "skill"

@@ -102,6 +102,17 @@ def run_scan(
         )
     _add_tool_contributors(world, mcpc.load_snapshots(sdir))
     world.mcp_approved = mcpc.load_snapshots(mcpc.approved_dir(sdir))
+    from drskill.checks import skill_shell
+
+    baselines = skill_shell.load_baselines(
+        skill_shell.shell_dir(project_root, home, global_only)
+    )
+    for c in world.contributors.values():
+        if c.kind != "skill":
+            continue
+        b = baselines.get(skill_shell.baseline_key(c, project_root, home))
+        if b is not None:
+            world.shell_approved[c.id] = b
     findings = run_all(world, config, progress=progress)
     cdir = deep.cache_dir(project_root, home, global_only)
     cache = deep.load_cache(cdir)

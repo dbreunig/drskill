@@ -91,3 +91,57 @@ def test_skillmd_source_none_for_mcp_tools(tmp_path):
     tool = c.model_copy(update={"kind": "mcp_tool"})
     assert skill_shell._skillmd(tool) is None
     assert skill_shell._skillmd(c) is not None
+
+
+# ---- baseline storage ----
+
+def test_baseline_key_is_portable(tmp_path):
+    # project-relative identity: same key from any machine's checkout
+    write_skill(tmp_path, "keyed", "!`git status`\n")
+    c = the_contributor(make_world(tmp_path))
+    home = tmp_path / "no-home"
+    k1 = skill_shell.baseline_key(c, tmp_path, home)
+    assert k1 == skill_shell.baseline_key(c, tmp_path, home)  # stable
+    assert len(k1) == 64
+    # a home-scope skill keys ~-relative: independent of where home sits
+    ident = skill_shell._norm_path(Path(c.id), tmp_path, home)
+    assert ident.startswith("./")
+
+
+def test_load_baselines_skips_corrupt(tmp_path):
+    from drskill.models import ShellBaseline
+
+    bdir = tmp_path / "skill-shell"
+    bdir.mkdir()
+    good = ShellBaseline(name="a", path="./x", commands=["git status"], date="2026-08-04")
+    (bdir / "aa11.json").write_text(good.model_dump_json())
+    (bdir / "bad.json").write_text("{not json")
+    loaded = skill_shell.load_baselines(bdir)
+    assert list(loaded) == ["aa11"]
+    assert loaded["aa11"].commands == ["git status"]
+    assert skill_shell.load_baselines(tmp_path / "missing") == {}
+
+
+def test_run_scan_loads_matching_baseline(tmp_path):
+    import json
+
+    from drskill.pipeline import run_scan
+
+    proj = tmp_path / "proj"
+    home = tmp_path / "home"
+    home.mkdir()
+    write_skill(proj, "loader", "!`git status`\n")
+    # compute the key the pipeline will look for, then plant a baseline
+    world = make_world(proj)
+    c = the_contributor(world)
+    key = skill_shell.baseline_key(c, proj, home)
+    bdir = skill_shell.shell_dir(proj, home, False)
+    bdir.mkdir(parents=True)
+    (bdir / f"{key}.json").write_text(json.dumps({
+        "name": "loader", "path": "./.claude/skills/loader/SKILL.md",
+        "commands": ["git status"], "date": "2026-08-04",
+    }))
+    world2, _findings = run_scan(proj, home)
+    approved = {c2.name: b for cid, b in world2.shell_approved.items()
+                for c2 in [world2.contributors[cid]]}
+    assert approved["loader"].commands == ["git status"]
