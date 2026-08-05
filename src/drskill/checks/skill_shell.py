@@ -15,6 +15,7 @@ import shlex
 from collections import Counter
 from pathlib import Path
 
+from drskill import mcp
 from drskill.checks import check, fingerprint, injection, make_finding
 from drskill.ledger import Config
 from drskill.models import Contributor, Finding, ShellBaseline
@@ -199,11 +200,35 @@ def save_approved(world, f, project_root: Path, home: Path, global_mode: bool) -
 # pipe-to-shell wins over egress for the same command: it is the stronger
 # claim, and one command should not produce two findings.
 _SUMMARIES = {
-    "credential-read": "embeds invocation-time shell commands that reference credential paths",
+    "credential-read": "reads credentials from a file path or the environment",
     "pipe-to-shell": "embeds an invocation-time shell command that pipes remote content to a shell",
     "egress": "embeds invocation-time shell commands that talk to the network",
     "encoded-blob": "embeds invocation-time shell commands containing long encoded blobs",
 }
+
+# Regex to extract environment variable references: $NAME or ${NAME}
+_ENV_VAR_REF = re.compile(r"\$\{?(\w+)\}?")
+
+# Regex to detect bare printenv (not followed by a single variable name)
+_BARE_PRINTENV = re.compile(r"\bprintenv\b(?!\s+\w)")
+
+
+def _reads_env_secret(cmd: str) -> bool:
+    """True if the command reads an environment variable with a secret-like name
+    or does a bare printenv dump."""
+    # Detect bare printenv (environment dump)
+    if _BARE_PRINTENV.search(cmd):
+        return True
+    # Detect secret-named variable references
+    for match in _ENV_VAR_REF.finditer(cmd):
+        name = match.group(1)
+        # Skip if it matches public material patterns
+        if mcp._PUBLIC_NAME.search(name):
+            continue
+        # Fire if it matches secret-name patterns
+        if mcp._SECRET_NAME.search(name):
+            return True
+    return False
 
 
 @check("injection-shell-dangerous")
@@ -224,6 +249,8 @@ def shell_dangerous(world: World, config: Config) -> list[Finding]:
         for ln, cmd in cmds:
             hit = (src, ln, cmd)
             if any(p.search(cmd) for p in injection._CRED_STORE):
+                store_hits.append(hit)
+            elif _reads_env_secret(cmd):
                 store_hits.append(hit)
             elif injection._ENV_FILE.search(cmd):
                 env_hits.append(hit)

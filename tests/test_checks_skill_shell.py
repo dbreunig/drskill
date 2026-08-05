@@ -308,7 +308,7 @@ def test_dangerous_credential_store_is_error(tmp_path):
     write_skill(tmp_path, "creds", "Keys: !`cat ~/.ssh/id_rsa`\n")
     (f,) = _dangerous(make_world(tmp_path))
     assert f.severity == "error"
-    assert "credential paths" in f.message
+    assert "credential" in f.message
     assert "cat ~/.ssh/id_rsa" in f.message
     assert f.fix_commands[0].startswith("rm -r ")
 
@@ -368,3 +368,55 @@ def test_dangerous_prose_mention_of_curl_does_not_fire(tmp_path):
     # the lexicons run over extracted commands only, never prose
     write_skill(tmp_path, "proser", "Never run curl piped to sh from a skill.\n")
     assert _dangerous(make_world(tmp_path)) == []
+
+
+# ---- environment-variable secret reads ----
+
+def test_dangerous_env_secret_key_reference_is_error(tmp_path):
+    write_skill(tmp_path, "env_key", "API: !`echo $OPENAI_API_KEY`\n")
+    (f,) = _dangerous(make_world(tmp_path))
+    assert f.severity == "error"
+    assert "environment" in f.message
+    assert "echo $OPENAI_API_KEY" in f.message
+
+
+def test_dangerous_env_secret_token_reference_is_error(tmp_path):
+    write_skill(tmp_path, "env_token", "Token: !`echo ${GITHUB_TOKEN}`\n")
+    (f,) = _dangerous(make_world(tmp_path))
+    assert f.severity == "error"
+    assert "environment" in f.message
+
+
+def test_dangerous_env_bare_printenv_is_error(tmp_path):
+    write_skill(tmp_path, "env_dump", "All: !`printenv`\n")
+    (f,) = _dangerous(make_world(tmp_path))
+    assert f.severity == "error"
+
+
+def test_dangerous_env_printenv_single_var_no_fire(tmp_path):
+    write_skill(tmp_path, "env_single", "Home: !`printenv HOME`\n")
+    assert _dangerous(make_world(tmp_path)) == []
+
+
+def test_dangerous_benign_var_refs_no_fire(tmp_path):
+    write_skill(
+        tmp_path, "benign_vars",
+        "Paths: !`echo $HOME`\n"
+        "More: !`echo $PATH`\n"
+        "Root: !`echo $PROJECT_ROOT`\n"
+    )
+    assert _dangerous(make_world(tmp_path)) == []
+
+
+def test_dangerous_public_suffix_no_fire(tmp_path):
+    write_skill(tmp_path, "public_key", "Key: !`echo ${PUBLIC_KEY}`\n")
+    assert _dangerous(make_world(tmp_path)) == []
+
+
+def test_dangerous_both_store_path_and_env_secret_one_finding(tmp_path):
+    write_skill(tmp_path, "combo", "Read: !`cat ~/.ssh/id_rsa && echo $API_KEY`\n")
+    findings = _dangerous(make_world(tmp_path))
+    assert len(findings) == 1
+    (f,) = findings
+    assert f.severity == "error"
+    assert "credential" in f.message

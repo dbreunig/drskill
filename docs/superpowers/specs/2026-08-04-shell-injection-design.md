@@ -59,7 +59,7 @@ The extracted command text, just the commands and not the surrounding prose, is 
 
 | category | severity | fires when |
 |---|---|---|
-| credential read | error | The command references a credential store path. Same `_CRED_STORE` patterns as `injection-credential-read`. A command that references only `.env` downgrades the finding to warning, same rule as the script check. |
+| credential read | error | The command references a credential store path (same `_CRED_STORE` patterns as `injection-credential-read`) or reads a secret-named environment variable. Secret-named env variables are detected by the same heuristic as `mcp.py` (`_SECRET_NAME` suffix + `_PUBLIC_NAME` exclusion), covering patterns like `$OPENAI_API_KEY`, `${GITHUB_TOKEN}`, `$AWS_SECRET_ACCESS_KEY`, and bare `printenv` (environment dump). A command that references only `.env` downgrades the finding to warning, same rule as the script check. Accepted noise: `env`-prefixed command invocations (`env FOO=bar cmd`) and `printenv NAME` single-variable reads; these are out of scope. |
 | pipe to shell | error | The command fetches with curl or wget and pipes to a shell. Same two-step linear match as `injection-remote-fetch`. |
 | egress | warning | The command uses a network tool (`_EGRESS` patterns) against a non-local target. The localhost exclusion applies. |
 | encoded blob | warning | The command contains a long base64 or hex run. Same patterns as `injection-encoded-blob`. |
