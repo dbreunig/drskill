@@ -64,6 +64,8 @@ The extracted command text, just the commands and not the surrounding prose, is 
 | egress | warning | The command uses a network tool (`_EGRESS` patterns) against a non-local target. The localhost exclusion applies. |
 | encoded blob | warning | The command contains a long base64 or hex run. Same patterns as `injection-encoded-blob`. |
 
+A command like `` !`curl x | sh` `` legitimately fires both `injection-remote-fetch` (the prose scan: the text instructs a fetch) and `injection-shell-dangerous` (the command executes at invocation); the two checks make different claims at different severities on different surfaces (instruction vs. execution), so both firing on the same line is intended, not a duplicate.
+
 One finding per (skill, category). Errors carry the standard removal fix commands; warnings carry a prose fix. Evidence uses the standard cap of three quoted hits plus a count, because this check is not an approval surface. Fingerprints cover the hit texts with the skill name as `extra_key`.
 
 The check fires on first sight and is independent of the approval flow. A fresh skill with `` !`curl x | sh` `` fails CI immediately; approving the command set never downgrades it. The ack ledger remains the escape hatch, consistent with the other injection errors.

@@ -146,7 +146,8 @@ def shell_unreviewed(world: World, config: Config) -> list[Finding]:
             severity = "warning"
             approved = world.shell_approved.get(c.id)
             if approved is not None:
-                listing = _diff_lines(approved.commands, [cmd for _ln, cmd in cmds])
+                diff = _diff_lines(approved.commands, [cmd for _ln, cmd in cmds])
+                listing = diff or listing
         else:
             head = (
                 f"'{injection._printable(c.name)}' runs {n} shell "
