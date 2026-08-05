@@ -10,10 +10,14 @@ from __future__ import annotations
 
 import hashlib
 import re
+import shlex
+from collections import Counter
 from pathlib import Path
 
-from drskill.checks import injection
-from drskill.models import Contributor, ShellBaseline
+from drskill.checks import check, fingerprint, injection, make_finding
+from drskill.ledger import Config
+from drskill.models import Contributor, Finding, ShellBaseline
+from drskill.resolution import World
 
 # The harness only recognizes `!` at line start or immediately after
 # whitespace; KEY=!`cmd` stays literal text and never runs.
@@ -79,4 +83,85 @@ def load_baselines(bdir: Path) -> dict[str, ShellBaseline]:
             out[p.stem] = ShellBaseline.model_validate_json(p.read_text())
         except (OSError, ValueError):
             continue  # corrupt entries are prune's job
+    return out
+
+
+_CMD_MAX = 100
+
+
+def _cmd_line(cmd: str) -> str:
+    rendered = injection._printable(cmd)
+    if len(rendered) > _CMD_MAX:
+        rendered = rendered[: _CMD_MAX - 1].rstrip() + "…"
+    return rendered
+
+
+def unreviewed_fingerprint(c: Contributor, cmds: list[tuple[int, str]]) -> str:
+    """Fingerprint of the approval surface: the command multiset only, so
+    an ack survives prose edits and reformatting. Public because the ack
+    path verifies it before saving a baseline."""
+    return fingerprint(
+        "injection-shell-unreviewed", [c], c.name, sorted(cmd for _ln, cmd in cmds)
+    )
+
+
+def _diff_lines(approved: list[str], current: list[str]) -> str:
+    old, new = Counter(approved), Counter(current)
+    lines = [f"\n        - {_cmd_line(cmd)}" for cmd in sorted((old - new).elements())]
+    lines += [f"\n        + {_cmd_line(cmd)}" for cmd in sorted((new - old).elements())]
+    return "".join(lines)
+
+
+@check("injection-shell-unreviewed")
+def shell_unreviewed(world: World, config: Config) -> list[Finding]:
+    out = []
+    for c in world.contributors.values():
+        src = _skillmd(c)
+        if src is None:
+            continue
+        cmds = extract_commands(src.text)
+        if not cmds:
+            continue
+        fp = unreviewed_fingerprint(c, cmds)
+        prior = [
+            a for a in config.ack
+            if a.check == "injection-shell-unreviewed" and c.name in a.skills
+        ]
+        changed = bool(prior) and fp not in {a.fingerprint for a in prior}
+        n = len(cmds)
+        # The approval surface: every command, no cap. You cannot approve
+        # what the report does not show.
+        listing = "".join(
+            f"\n        {src.relpath}:{ln}: {_cmd_line(cmd)}" for ln, cmd in cmds
+        )
+        if changed:
+            when = next((str(a.date) for a in prior if a.date), "earlier")
+            head = (
+                f"'{injection._printable(c.name)}' CHANGED its invocation-time "
+                f"shell commands since you approved them ({when}). A skill that "
+                f"swaps a command after you trusted it is worth a look. Re-ack "
+                f"once you have reviewed the current set:"
+            )
+            severity = "warning"
+            approved = world.shell_approved.get(c.id)
+            if approved is not None:
+                listing = _diff_lines(approved.commands, [cmd for _ln, cmd in cmds])
+        else:
+            head = (
+                f"'{injection._printable(c.name)}' runs {n} shell "
+                f"command{'s' if n != 1 else ''} at invocation, before the model "
+                f"sees the content (Claude Code dynamic context injection). "
+                f"drskill has not recorded this set yet. Acking saves it as your "
+                f"approved baseline, so drskill can flag it if a command later "
+                f"changes:"
+            )
+            severity = "note"
+        out.append(make_finding(
+            "injection-shell-unreviewed", severity, [c], head + listing,
+            fix_commands=[
+                f"drskill ack injection-shell-unreviewed {shlex.quote(c.name)}"
+            ],
+            extra_key=c.name,
+            fingerprint_texts=sorted(cmd for _ln, cmd in cmds),
+        ))
     return out
