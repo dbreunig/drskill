@@ -92,17 +92,20 @@ def main() -> None:
 
 
 def _save_approved_baseline(world, f, root: Path, home: Path, global_mode: bool) -> None:
-    """Acking the MCP tool baseline approves that exact snapshot; keep a
-    copy so a later rug-pull warning can name and quote what changed."""
-    if f.check_id != "mcp-tools-unreviewed":
-        return
-    from drskill import mcp_connect as mcpc
-    from drskill.checks.mcp_tools import unreviewed_fingerprint
+    """Acking an approval baseline records what was approved; keep a copy
+    so a later rug-pull warning can name and quote what changed."""
+    if f.check_id == "mcp-tools-unreviewed":
+        from drskill import mcp_connect as mcpc
+        from drskill.checks.mcp_tools import unreviewed_fingerprint
 
-    sdir = mcpc.snapshot_dir(root, home, global_mode)
-    for snap in world.mcp_snapshots.values():
-        if unreviewed_fingerprint(snap) == f.fingerprint:
-            mcpc.save_approved(sdir, snap)
+        sdir = mcpc.snapshot_dir(root, home, global_mode)
+        for snap in world.mcp_snapshots.values():
+            if unreviewed_fingerprint(snap) == f.fingerprint:
+                mcpc.save_approved(sdir, snap)
+    elif f.check_id == "injection-shell-unreviewed":
+        from drskill.checks import skill_shell
+
+        skill_shell.save_approved(world, f, root, home, global_mode)
 
 
 def _resolve_refs(refs: list[str], active: list) -> list:
@@ -293,9 +296,10 @@ def ack(
     # Most notes must not be acked: a deep "judged distinct" note shares a
     # fingerprint with the warning it would revert to if the verdict cache
     # is pruned, so acking it would silently pre-silence that warning. An
-    # MCP tool baseline is the exception: acking it is the whole point, and
-    # a later tool change produces a new fingerprint the ack cannot cover.
-    _ACKABLE_NOTE_CHECKS = {"mcp-tools-unreviewed"}
+    # MCP tool baseline or a skill's shell-command baseline is the
+    # exception: acking it is the whole point, and a later change produces
+    # a new fingerprint the ack cannot cover.
+    _ACKABLE_NOTE_CHECKS = {"mcp-tools-unreviewed", "injection-shell-unreviewed"}
     active = [
         f for f in active
         if f.severity != "note" or f.check_id in _ACKABLE_NOTE_CHECKS

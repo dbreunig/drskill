@@ -8,6 +8,7 @@ lexicons in checks/injection.py."""
 
 from __future__ import annotations
 
+import datetime as dt
 import hashlib
 import re
 import shlex
@@ -165,3 +166,29 @@ def shell_unreviewed(world: World, config: Config) -> list[Finding]:
             fingerprint_texts=sorted(cmd for _ln, cmd in cmds),
         ))
     return out
+
+
+def save_approved(world, f, project_root: Path, home: Path, global_mode: bool) -> None:
+    """Acking the note approves the exact command set the finding showed;
+    keep a copy so a later rug-pull warning can name what changed."""
+    for cid in f.contributors:
+        c = world.contributors.get(cid)
+        if c is None:
+            continue
+        src = _skillmd(c)
+        if src is None:
+            continue
+        cmds = extract_commands(src.text)
+        if unreviewed_fingerprint(c, cmds) != f.fingerprint:
+            continue  # the file changed since the scan; never approve unseen text
+        bdir = shell_dir(project_root, home, global_mode)
+        bdir.mkdir(parents=True, exist_ok=True)
+        baseline = ShellBaseline(
+            name=c.name,
+            path=_norm_path(Path(c.id), project_root, home),
+            commands=[cmd for _ln, cmd in cmds],
+            date=dt.date.today().isoformat(),
+        )
+        (bdir / f"{baseline_key(c, project_root, home)}.json").write_text(
+            baseline.model_dump_json(indent=2) + "\n"
+        )
