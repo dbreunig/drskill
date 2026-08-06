@@ -272,21 +272,49 @@ ANTHROPIC_API_KEY=sk-ant-...
 
 `drskill` reads this file before a deep run and loads any variable your shell has not already set. The shell always wins. `drskill` never writes a key, and it never reads an env file from inside a project, because a scanned repo is untrusted content.
 
-The judge model is set in the ledger and defaults to a current Anthropic model:
+The judge model is set in the scan's ledger and defaults to a current Anthropic
+model. For a project scan, put it in the project's `drskill.toml`:
 
 ```toml
 [deep]
 model = "anthropic/claude-haiku-4-5"
 ```
 
-The model is a LiteLLM model id, so any provider LiteLLM supports works. To use an OpenAI model, set the id and put `OPENAI_API_KEY` in your environment:
+The model is a LiteLLM model id, so any provider LiteLLM supports works. OpenAI-compatible APIs use the `openai/<model>` form. Set the id and put `OPENAI_API_KEY` in your environment:
 
 ```toml
 [deep]
 model = "openai/gpt-5.6-luna"
 ```
 
-The provider is read from the id, so the only change is the model line and the matching key. Everything else, the cache, the budget, and the checks, is the same.
+To use a self-hosted or other OpenAI-compatible API, put its base URL in the
+machine ledger, `~/.drskill.toml`:
+
+```toml
+[deep]
+base_url = "http://127.0.0.1:9208/v1"
+```
+
+This example targets the local Codex OpenAI Proxy. The project still chooses
+the model, while the machine chooses where requests go. A `base_url` in a
+project's `drskill.toml` is ignored so an untrusted repository cannot redirect
+credentials loaded from your environment. Global scans already use
+`~/.drskill.toml` for both settings.
+
+drskill passes the machine `base_url` to LiteLLM unchanged: include `/v1`, or
+any other path, when the service requires it. When `base_url` is absent from
+`~/.drskill.toml`, LiteLLM uses the provider's normal endpoint.
+
+The provider is read from the model id, and the existing API-key check still
+applies when a custom endpoint is configured. Put the matching key in your
+environment or `~/.drskill/env` as described above. Only when your custom
+endpoint ignores authentication, use a non-secret placeholder such as:
+
+```
+OPENAI_API_KEY=not-used
+```
+
+Everything else, including the cache, the budget, and the checks, is the same.
 
 Verdicts are stored in `.drskill/cache/`, one small JSON file per judged pair. Commit this directory. Every scan reads it, with or without `--deep`, so one person runs the judgments and every teammate and CI run gets the verdicts for free. A verdict lasts until either description changes, and then the pair is judged again.
 

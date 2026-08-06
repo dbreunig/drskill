@@ -242,6 +242,38 @@ import pytest
 from drskill import deep_llm
 
 
+@pytest.mark.parametrize(
+    ("base_url", "expected_kwargs"),
+    [
+        (None, {"max_tokens": 1000}),
+        (
+            "http://127.0.0.1:9208/v1",
+            {
+                "max_tokens": 1000,
+                "api_base": "http://127.0.0.1:9208/v1",
+            },
+        ),
+    ],
+)
+def test_setup_conditionally_passes_api_base(monkeypatch, base_url, expected_kwargs):
+    import dspy
+    import litellm
+
+    calls = []
+    monkeypatch.setattr(
+        litellm, "validate_environment",
+        lambda model: {"keys_in_environment": True, "missing_keys": []},
+    )
+    monkeypatch.setattr(
+        dspy, "LM", lambda model, **kwargs: calls.append((model, kwargs)) or object()
+    )
+
+    _, lm = deep_llm._setup("openai/local-model", base_url)
+
+    assert lm is not None
+    assert calls == [("openai/local-model", expected_kwargs)]
+
+
 def test_build_judge_without_dspy_raises(monkeypatch):
     real_import = builtins.__import__
 
@@ -385,7 +417,9 @@ def test_build_judge_missing_key_message_names_env_file_and_console(monkeypatch)
         lambda model: {"keys_in_environment": False, "missing_keys": ["ANTHROPIC_API_KEY"]},
     )
     with pytest.raises(deep_llm.DeepUnavailableError) as e:
-        deep_llm.build_judge("anthropic/claude-haiku-4-5")
+        deep_llm.build_judge(
+            "anthropic/claude-haiku-4-5", "http://127.0.0.1:9208/v1"
+        )
     msg = str(e.value)
     assert "ANTHROPIC_API_KEY" in msg
     assert "~/.drskill/env" in msg

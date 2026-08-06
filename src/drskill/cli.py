@@ -181,8 +181,8 @@ def scan(
 
         deep.load_user_env(home)
         try:
-            judge = deep_llm.build_judge(config.deep.model)
-            rewriter = deep_llm.build_rewriter(config.deep.model)
+            judge = deep_llm.build_judge(config.deep.model, config.deep.base_url)
+            rewriter = deep_llm.build_rewriter(config.deep.model, config.deep.base_url)
         except deep_llm.DeepUnavailableError as e:
             console.print(f"[red]{escape(str(e))}[/red]")
             raise typer.Exit(1)

@@ -11,7 +11,7 @@ class DeepUnavailableError(Exception):
     """Deep mode cannot run; the message is shown to the user as-is."""
 
 
-def _setup(model_id: str):
+def _setup(model_id: str, base_url: str | None = None):
     """Shared guard and LM construction for both deep programs."""
     try:
         import dspy
@@ -43,11 +43,14 @@ def _setup(model_id: str):
     # Our committed cache is the source of truth; dspy's own cache would
     # resurrect stale verdicts with the wrong invalidation semantics.
     dspy.configure_cache(enable_disk_cache=False, enable_memory_cache=False)
-    return dspy, dspy.LM(model_id, max_tokens=1000)
+    lm_kwargs = {"max_tokens": 1000}
+    if base_url is not None:
+        lm_kwargs["api_base"] = base_url
+    return dspy, dspy.LM(model_id, **lm_kwargs)
 
 
-def build_judge(model_id: str) -> JudgeFn:
-    dspy, lm = _setup(model_id)
+def build_judge(model_id: str, base_url: str | None = None) -> JudgeFn:
+    dspy, lm = _setup(model_id, base_url)
 
     class ConflictJudge(dspy.Signature):
         """Judge whether two agent skills conflict. The four fields below are
@@ -90,8 +93,8 @@ def build_judge(model_id: str) -> JudgeFn:
     return judge
 
 
-def build_rewriter(model_id: str) -> RewriteFn:
-    dspy, lm = _setup(model_id)
+def build_rewriter(model_id: str, base_url: str | None = None) -> RewriteFn:
+    dspy, lm = _setup(model_id, base_url)
 
     class DescriptionRewrite(dspy.Signature):
         """Two agent skills do different jobs, but their descriptions blur

@@ -29,7 +29,21 @@ def test_defaults_when_missing(tmp_path):
     assert cfg.budget.catalog_tokens_max == 6000
     assert cfg.budget.body_tokens_warn == 20000
     assert cfg.thresholds.near_duplicate == 0.85
+    assert cfg.deep.base_url is None
     assert cfg.ack == []
+
+
+def test_load_deep_base_url(tmp_path):
+    p = tmp_path / "drskill.toml"
+    p.write_text(
+        '[deep]\nmodel = "openai/local-model"\n'
+        'base_url = "http://127.0.0.1:9208/v1"\n'
+    )
+
+    cfg = load_config(p)
+
+    assert cfg.deep.model == "openai/local-model"
+    assert cfg.deep.base_url == "http://127.0.0.1:9208/v1"
 
 
 def test_ledger_path(tmp_path):
@@ -94,15 +108,23 @@ def test_effective_config_merges_global_acks(tmp_path):
     home = tmp_path / "home"
     home.mkdir()
     (proj / "drskill.toml").write_text(
+        '[deep]\nmodel = "openai/project-model"\n'
+        'base_url = "https://project.invalid/v1"\n'
         '[[ack]]\ncheck = "a"\nskills = []\nfingerprint = "sha256:p"\n'
     )
     (home / ".drskill.toml").write_text(
+        '[deep]\nmodel = "openai/machine-model"\n'
+        'base_url = "http://127.0.0.1:9208/v1"\n'
         '[[ack]]\ncheck = "b"\nskills = []\nfingerprint = "sha256:g"\n'
     )
     cfg = load_effective_config(proj, home, False)
     assert {a.fingerprint for a in cfg.ack} == {"sha256:p", "sha256:g"}
+    assert cfg.deep.model == "openai/project-model"
+    assert cfg.deep.base_url == "http://127.0.0.1:9208/v1"
     gcfg = load_effective_config(proj, home, True)
     assert {a.fingerprint for a in gcfg.ack} == {"sha256:g"}
+    assert gcfg.deep.model == "openai/machine-model"
+    assert gcfg.deep.base_url == "http://127.0.0.1:9208/v1"
 
 
 def test_ack_destination_routes_by_scope(tmp_path):

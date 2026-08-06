@@ -30,6 +30,7 @@ class Thresholds(BaseModel):
 
 class Deep(BaseModel):
     model: str = "anthropic/claude-haiku-4-5"
+    base_url: str | None = None
 
 
 class Ack(BaseModel):
@@ -72,12 +73,17 @@ def load_config(path: Path) -> Config:
 
 def load_effective_config(project_root: Path, home: Path, global_mode: bool) -> Config:
     """The config that governs a scan. In project mode, decisions merge from
-    both ledgers (a machine-level ack is honored in every project); budgets
-    and thresholds stay with the mode's own ledger."""
+    both ledgers (a machine-level ack is honored in every project); budgets,
+    thresholds, and the model stay with the project's ledger. The API endpoint
+    is always machine-owned so an untrusted project cannot redirect provider
+    credentials."""
     cfg = load_config(ledger_path(project_root, home, global_mode))
     if not global_mode:
         gcfg = load_config(ledger_path(project_root, home, True))
-        cfg = cfg.model_copy(update={"ack": [*cfg.ack, *gcfg.ack]})
+        cfg = cfg.model_copy(update={
+            "ack": [*cfg.ack, *gcfg.ack],
+            "deep": cfg.deep.model_copy(update={"base_url": gcfg.deep.base_url}),
+        })
     return cfg
 
 
