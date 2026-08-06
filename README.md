@@ -285,7 +285,13 @@ The model is a LiteLLM model id, so any provider LiteLLM supports works. OpenAI-
 ```toml
 [deep]
 model = "openai/gpt-5.6-luna"
+reasoning_effort = "high"
 ```
+
+`reasoning_effort` is optional. Its supported values depend on the chosen
+provider and model; drskill passes a non-blank value through unchanged, and an
+unsupported value fails at the provider. When the setting is omitted, the
+provider's default applies.
 
 To use a self-hosted or other OpenAI-compatible API, put its base URL in the
 machine ledger, `~/.drskill.toml`:
@@ -296,10 +302,10 @@ base_url = "http://127.0.0.1:9208/v1"
 ```
 
 This example targets the local Codex OpenAI Proxy. The project still chooses
-the model, while the machine chooses where requests go. A `base_url` in a
-project's `drskill.toml` is ignored so an untrusted repository cannot redirect
-credentials loaded from your environment. Global scans already use
-`~/.drskill.toml` for both settings.
+the model and reasoning effort, while the machine chooses where requests go.
+A `base_url` in a project's `drskill.toml` is ignored so an untrusted
+repository cannot redirect credentials loaded from your environment. Global
+scans use `~/.drskill.toml` for all deep settings.
 
 drskill passes the machine `base_url` to LiteLLM unchanged: include `/v1`, or
 any other path, when the service requires it. When `base_url` is absent from
@@ -315,6 +321,8 @@ OPENAI_API_KEY=not-used
 ```
 
 Everything else, including the cache, the budget, and the checks, is the same.
+Changing `reasoning_effort` affects new judgments but does not invalidate
+existing cached verdicts.
 
 Verdicts are stored in `.drskill/cache/`, one small JSON file per judged pair. Commit this directory. Every scan reads it, with or without `--deep`, so one person runs the judgments and every teammate and CI run gets the verdicts for free. A verdict lasts until either description changes, and then the pair is judged again.
 

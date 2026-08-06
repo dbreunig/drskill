@@ -30,6 +30,7 @@ def test_defaults_when_missing(tmp_path):
     assert cfg.budget.body_tokens_warn == 20000
     assert cfg.thresholds.near_duplicate == 0.85
     assert cfg.deep.base_url is None
+    assert cfg.deep.reasoning_effort is None
     assert cfg.ack == []
 
 
@@ -44,6 +45,30 @@ def test_load_deep_base_url(tmp_path):
 
     assert cfg.deep.model == "openai/local-model"
     assert cfg.deep.base_url == "http://127.0.0.1:9208/v1"
+
+
+def test_load_deep_reasoning_effort_trims_whitespace(tmp_path):
+    p = tmp_path / "drskill.toml"
+    p.write_text('[deep]\nreasoning_effort = "  high  "\n')
+
+    assert load_config(p).deep.reasoning_effort == "high"
+
+
+@pytest.mark.parametrize("value", ["", "   "])
+def test_load_deep_reasoning_effort_rejects_blank(tmp_path, value):
+    p = tmp_path / "drskill.toml"
+    p.write_text(f'[deep]\nreasoning_effort = "{value}"\n')
+
+    with pytest.raises(LedgerError, match="deep.reasoning_effort"):
+        load_config(p)
+
+
+def test_load_deep_reasoning_effort_rejects_non_string(tmp_path):
+    p = tmp_path / "drskill.toml"
+    p.write_text("[deep]\nreasoning_effort = 1\n")
+
+    with pytest.raises(LedgerError, match="deep.reasoning_effort"):
+        load_config(p)
 
 
 def test_ledger_path(tmp_path):
@@ -109,21 +134,25 @@ def test_effective_config_merges_global_acks(tmp_path):
     home.mkdir()
     (proj / "drskill.toml").write_text(
         '[deep]\nmodel = "openai/project-model"\n'
+        'reasoning_effort = "high"\n'
         'base_url = "https://project.invalid/v1"\n'
         '[[ack]]\ncheck = "a"\nskills = []\nfingerprint = "sha256:p"\n'
     )
     (home / ".drskill.toml").write_text(
         '[deep]\nmodel = "openai/machine-model"\n'
+        'reasoning_effort = "low"\n'
         'base_url = "http://127.0.0.1:9208/v1"\n'
         '[[ack]]\ncheck = "b"\nskills = []\nfingerprint = "sha256:g"\n'
     )
     cfg = load_effective_config(proj, home, False)
     assert {a.fingerprint for a in cfg.ack} == {"sha256:p", "sha256:g"}
     assert cfg.deep.model == "openai/project-model"
+    assert cfg.deep.reasoning_effort == "high"
     assert cfg.deep.base_url == "http://127.0.0.1:9208/v1"
     gcfg = load_effective_config(proj, home, True)
     assert {a.fingerprint for a in gcfg.ack} == {"sha256:g"}
     assert gcfg.deep.model == "openai/machine-model"
+    assert gcfg.deep.reasoning_effort == "low"
     assert gcfg.deep.base_url == "http://127.0.0.1:9208/v1"
 
 

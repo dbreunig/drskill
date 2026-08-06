@@ -14,7 +14,7 @@ import pytest
 def _stub_rewriter(monkeypatch):
     """--deep builds both programs; tests that only care about the judge get
     a rewriter that never fires (their fixtures return distinct verdicts)."""
-    def build_rewriter(model_id, base_url=None):
+    def build_rewriter(model_id, base_url=None, reasoning_effort=None):
         def rewrite(a, b, confusion):
             return None
         rewrite.last_error = None
@@ -48,7 +48,7 @@ def overlap_project(tmp_path):
 
 
 def fake_builder(result):
-    def build_judge(model_id, base_url=None):
+    def build_judge(model_id, base_url=None, reasoning_effort=None):
         return lambda a, b: result
     return build_judge
 
@@ -74,14 +74,14 @@ def test_deep_scan_downgrades_and_ci_passes(tmp_path, monkeypatch):
 def capture_builders(monkeypatch):
     calls = []
 
-    def build_judge(model_id, base_url=None):
-        calls.append(("judge", model_id, base_url))
+    def build_judge(model_id, base_url=None, reasoning_effort=None):
+        calls.append(("judge", model_id, base_url, reasoning_effort))
         return lambda a, b: deep.JudgeResult(
             verdict="distinct", rationale="r", detail="d"
         )
 
-    def build_rewriter(model_id, base_url=None):
-        calls.append(("rewriter", model_id, base_url))
+    def build_rewriter(model_id, base_url=None, reasoning_effort=None):
+        calls.append(("rewriter", model_id, base_url, reasoning_effort))
 
         def rewrite(a, b, confusion):
             return None
@@ -106,8 +106,8 @@ def test_deep_scan_ignores_project_base_url(tmp_path, monkeypatch):
 
     assert r.exit_code == 0, r.output
     assert calls == [
-        ("judge", "openai/local-model", None),
-        ("rewriter", "openai/local-model", None),
+        ("judge", "openai/local-model", None, None),
+        ("rewriter", "openai/local-model", None, None),
     ]
 
 
@@ -124,8 +124,8 @@ def test_deep_scan_passes_machine_base_url_to_both_builders(tmp_path, monkeypatc
 
     assert r.exit_code == 0, r.output
     assert calls == [
-        ("judge", "openai/local-model", "http://127.0.0.1:9208/v1"),
-        ("rewriter", "openai/local-model", "http://127.0.0.1:9208/v1"),
+        ("judge", "openai/local-model", "http://127.0.0.1:9208/v1", None),
+        ("rewriter", "openai/local-model", "http://127.0.0.1:9208/v1", None),
     ]
 
 
@@ -138,8 +138,31 @@ def test_deep_scan_without_machine_base_url_passes_none(tmp_path, monkeypatch):
 
     assert r.exit_code == 0, r.output
     assert calls == [
-        ("judge", "openai/local-model", None),
-        ("rewriter", "openai/local-model", None),
+        ("judge", "openai/local-model", None, None),
+        ("rewriter", "openai/local-model", None, None),
+    ]
+
+
+def test_deep_scan_passes_project_reasoning_effort_to_both_builders(
+    tmp_path, monkeypatch
+):
+    proj = overlap_project(tmp_path)
+    (proj / "drskill.toml").write_text(
+        '[deep]\nmodel = "openai/local-model"\nreasoning_effort = "high"\n'
+    )
+    env = env_for(tmp_path)
+    (Path(env["DRSKILL_HOME"]) / ".drskill.toml").write_text(
+        '[deep]\nreasoning_effort = "low"\n'
+        'base_url = "http://127.0.0.1:9208/v1"\n'
+    )
+    calls = capture_builders(monkeypatch)
+
+    r = runner.invoke(app, ["scan", "--root", str(proj), "--deep"], env=env)
+
+    assert r.exit_code == 0, r.output
+    assert calls == [
+        ("judge", "openai/local-model", "http://127.0.0.1:9208/v1", "high"),
+        ("rewriter", "openai/local-model", "http://127.0.0.1:9208/v1", "high"),
     ]
 
 
@@ -179,7 +202,7 @@ def test_deep_scan_budget_truncation_reported(tmp_path, monkeypatch):
 def test_deep_unavailable_exits_one(tmp_path, monkeypatch):
     proj = overlap_project(tmp_path)
 
-    def boom(model_id, base_url=None):
+    def boom(model_id, base_url=None, reasoning_effort=None):
         raise deep_llm.DeepUnavailableError("deep checks need the [deep] extra")
 
     monkeypatch.setattr(deep_llm, "build_judge", boom)
@@ -191,7 +214,7 @@ def test_deep_unavailable_exits_one(tmp_path, monkeypatch):
 def test_plain_scan_never_touches_deep_llm(tmp_path, monkeypatch):
     proj = overlap_project(tmp_path)
 
-    def boom(model_id, base_url=None):
+    def boom(model_id, base_url=None, reasoning_effort=None):
         raise AssertionError("build_judge must not be called without --deep")
 
     monkeypatch.setattr(deep_llm, "build_judge", boom)
@@ -292,7 +315,7 @@ def test_cache_prune_removes_corrupt_files(tmp_path):
 def test_deep_scan_surfaces_last_call_error(tmp_path, monkeypatch):
     proj = overlap_project(tmp_path)
 
-    def build_judge(model_id, base_url=None):
+    def build_judge(model_id, base_url=None, reasoning_effort=None):
         def judge(a, b):
             judge.last_error = "AuthenticationError: invalid x-api-key"
             return None
@@ -314,7 +337,7 @@ def test_deep_scan_loads_global_env_file(tmp_path, monkeypatch):
     monkeypatch.delenv("DRSKILL_TEST_KEY", raising=False)
     seen = {}
 
-    def build_judge(model_id, base_url=None):
+    def build_judge(model_id, base_url=None, reasoning_effort=None):
         import os
         seen["key"] = os.environ.get("DRSKILL_TEST_KEY")
         return lambda a, b: deep.JudgeResult(verdict="distinct", rationale="r", detail="d")
@@ -360,7 +383,7 @@ def test_deep_scan_shows_rewrite_diff(tmp_path, monkeypatch):
         )),
     )
 
-    def build_rewriter(model_id, base_url=None):
+    def build_rewriter(model_id, base_url=None, reasoning_effort=None):
         def rewrite(a, b, confusion):
             return deep.RewriteResult(
                 target=a.name,
@@ -388,7 +411,7 @@ def test_deep_scan_reports_rewriter_error(tmp_path, monkeypatch):
         )),
     )
 
-    def build_rewriter(model_id, base_url=None):
+    def build_rewriter(model_id, base_url=None, reasoning_effort=None):
         def rewrite(a, b, confusion):
             rewrite.last_error = "RateLimitError: slow down"
             return None

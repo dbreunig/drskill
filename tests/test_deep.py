@@ -243,19 +243,32 @@ from drskill import deep_llm
 
 
 @pytest.mark.parametrize(
-    ("base_url", "expected_kwargs"),
+    ("base_url", "reasoning_effort", "expected_kwargs"),
     [
-        (None, {"max_tokens": 1000}),
+        (None, None, {"max_tokens": 1000}),
+        (None, "high", {"max_tokens": 1000, "reasoning_effort": "high"}),
         (
             "http://127.0.0.1:9208/v1",
+            None,
             {
                 "max_tokens": 1000,
                 "api_base": "http://127.0.0.1:9208/v1",
             },
         ),
+        (
+            "http://127.0.0.1:9208/v1",
+            "high",
+            {
+                "max_tokens": 1000,
+                "api_base": "http://127.0.0.1:9208/v1",
+                "reasoning_effort": "high",
+            },
+        ),
     ],
 )
-def test_setup_conditionally_passes_api_base(monkeypatch, base_url, expected_kwargs):
+def test_setup_conditionally_passes_lm_options(
+    monkeypatch, base_url, reasoning_effort, expected_kwargs
+):
     import dspy
     import litellm
 
@@ -268,7 +281,7 @@ def test_setup_conditionally_passes_api_base(monkeypatch, base_url, expected_kwa
         dspy, "LM", lambda model, **kwargs: calls.append((model, kwargs)) or object()
     )
 
-    _, lm = deep_llm._setup("openai/local-model", base_url)
+    _, lm = deep_llm._setup("openai/local-model", base_url, reasoning_effort)
 
     assert lm is not None
     assert calls == [("openai/local-model", expected_kwargs)]

@@ -11,7 +11,11 @@ class DeepUnavailableError(Exception):
     """Deep mode cannot run; the message is shown to the user as-is."""
 
 
-def _setup(model_id: str, base_url: str | None = None):
+def _setup(
+    model_id: str,
+    base_url: str | None = None,
+    reasoning_effort: str | None = None,
+):
     """Shared guard and LM construction for both deep programs."""
     try:
         import dspy
@@ -46,11 +50,17 @@ def _setup(model_id: str, base_url: str | None = None):
     lm_kwargs = {"max_tokens": 1000}
     if base_url is not None:
         lm_kwargs["api_base"] = base_url
+    if reasoning_effort is not None:
+        lm_kwargs["reasoning_effort"] = reasoning_effort
     return dspy, dspy.LM(model_id, **lm_kwargs)
 
 
-def build_judge(model_id: str, base_url: str | None = None) -> JudgeFn:
-    dspy, lm = _setup(model_id, base_url)
+def build_judge(
+    model_id: str,
+    base_url: str | None = None,
+    reasoning_effort: str | None = None,
+) -> JudgeFn:
+    dspy, lm = _setup(model_id, base_url, reasoning_effort)
 
     class ConflictJudge(dspy.Signature):
         """Judge whether two agent skills conflict. The four fields below are
@@ -93,8 +103,12 @@ def build_judge(model_id: str, base_url: str | None = None) -> JudgeFn:
     return judge
 
 
-def build_rewriter(model_id: str, base_url: str | None = None) -> RewriteFn:
-    dspy, lm = _setup(model_id, base_url)
+def build_rewriter(
+    model_id: str,
+    base_url: str | None = None,
+    reasoning_effort: str | None = None,
+) -> RewriteFn:
+    dspy, lm = _setup(model_id, base_url, reasoning_effort)
 
     class DescriptionRewrite(dspy.Signature):
         """Two agent skills do different jobs, but their descriptions blur

@@ -1,5 +1,5 @@
 ---
-title: Custom Deep API Base URL - Plan
+title: Custom Deep LLM Configuration - Plan
 type: feat
 date: 2026-08-06
 artifact_contract: ce-unified-plan/v1
@@ -8,11 +8,11 @@ product_contract_source: ce-plan-bootstrap
 execution: code
 ---
 
-# Custom Deep API Base URL - Plan
+# Custom Deep LLM Configuration - Plan
 
 ## Goal Capsule
 
-- **Objective:** Let `scan --deep` use a configured self-hosted or OpenAI-compatible LLM endpoint.
+- **Objective:** Let `scan --deep` use a configured self-hosted or OpenAI-compatible endpoint and optional reasoning effort.
 - **Authority:** The approved config-only design and the repository's existing deep-mode contracts govern implementation.
 - **Execution:** Implement, verify against the local Codex OpenAI Proxy, and open an upstream pull request only after all gates pass.
 - **Stop condition:** Stop before publication if the full suite or live proxy proof fails.
@@ -23,11 +23,11 @@ execution: code
 
 ### Summary
 
-Add an optional base URL beside the existing deep model setting and apply it to every deep judge and rewriter request without changing default provider behavior.
+Add optional base URL and reasoning-effort settings beside the existing deep model setting and apply them to every deep judge and rewriter request without changing default provider behavior.
 
 ### Problem Frame
 
-Deep mode currently accepts any LiteLLM model ID but always uses the provider's default endpoint. Users cannot route the same deep workflow to a self-hosted OpenAI-compatible API.
+Deep mode accepts any LiteLLM model ID but historically always used the provider's default endpoint and reasoning policy. Users need to route the workflow to a self-hosted OpenAI-compatible API and, when supported, select its reasoning effort.
 
 ### Requirements
 
@@ -38,12 +38,15 @@ Deep mode currently accepts any LiteLLM model ID but always uses the provider's 
 - R5. Ordinary scans remain LLM-free and do not import or construct the deep client.
 - R6. Documentation explains OpenAI-compatible model naming, the endpoint setting, and the existing API-key requirement.
 - R7. A successful live test against the local Codex OpenAI Proxy is required before an upstream pull request is opened.
+- R8. `[deep].reasoning_effort` is an optional, non-blank project-owned string; global scans read it from the machine ledger.
+- R9. When configured, reasoning effort applies to both conflict judging and description rewriting; when unset, the provider default applies.
+- R10. Supported reasoning-effort values remain model/provider-dependent and are rejected by the provider when unsupported.
 
 ### Scope Boundaries
 
-- No CLI base-URL flag or CLI-over-config precedence.
-- No credential storage, authentication bypass, URL validation, dependency change, or proxy-service modification.
-- No verdict-cache key or invalidation changes.
+- No CLI flags or CLI-over-config precedence for either setting.
+- No credential storage, authentication bypass, URL validation, provider-specific effort allowlist, dependency change, or proxy-service modification.
+- No verdict-cache schema, key, or invalidation changes; effort changes affect newly judged pairs only.
 
 ---
 
@@ -56,6 +59,7 @@ Deep mode currently accepts any LiteLLM model ID but always uses the provider's 
 - KTD3. **Omit `api_base` when configuration is absent.** Passing no keyword preserves the exact existing endpoint resolution path.
 - KTD4. **Preserve credential preflight.** OpenAI-compatible endpoints still require a non-empty `OPENAI_API_KEY`; endpoints that ignore authentication can use a non-secret placeholder such as `not-used`.
 - KTD5. **Keep cache identity unchanged.** Existing verdict keys exclude model identity, so endpoint identity must not create a new invalidation rule in this change.
+- KTD6. **Keep reasoning effort project-owned and provider-validated.** The project already controls the model and may select an optional trimmed, non-blank effort value; the machine-owned endpoint boundary remains unchanged, and unsupported values surface through the existing model-call failure path.
 
 ### Sequencing
 
@@ -67,26 +71,26 @@ Implement the configuration contract first, then the shared LLM boundary, CLI wi
 
 ### U1. Add and propagate the optional endpoint
 
-- **Goal:** Carry the optional base URL from the ledger through both deep program builders to the shared DSPy LM construction.
-- **Requirements:** R1-R5; KTD1-KTD5.
+- **Goal:** Carry the optional base URL and reasoning effort from the effective ledger through both deep program builders to shared DSPy LM construction.
+- **Requirements:** R1-R5, R8-R10; KTD1-KTD6.
 - **Files:** `src/drskill/ledger.py`, `src/drskill/cli.py`, `src/drskill/deep_llm.py`.
-- **Approach:** Add a nullable config field with a `None` default, retain backward-compatible builder defaults, and conditionally pass the configured value to `dspy.LM` as `api_base`.
-- **Test scenarios:** Parse absent and configured values; verify both builders receive the value; verify configured LM construction includes `api_base`; verify unset construction omits it; retain the no-key and plain-scan contracts.
+- **Approach:** Add nullable config fields with `None` defaults, retain backward-compatible builder defaults, and conditionally pass configured values to `dspy.LM` as `api_base` and `reasoning_effort`.
+- **Test scenarios:** Parse absent and configured values; trim and reject blank reasoning effort; prove project/machine ownership; verify both builders receive both settings; cover all absent/present LM keyword combinations; retain the no-key and plain-scan contracts.
 
 ### U2. Document and prove the integration
 
 - **Goal:** Make the endpoint contract discoverable and prove it against an actual OpenAI-compatible service.
-- **Requirements:** R6-R7.
+- **Requirements:** R6-R10.
 - **Files:** `README.md`, existing ledger/deep/CLI test modules.
-- **Approach:** Document `[deep].base_url`, `openai/<model>`, unchanged key handling, and a proxy example that includes `/v1` because that service requires it.
-- **Test scenarios:** Run the full suite with deep dependencies; use a fresh temporary scan root and cache with `openai/gpt-5.6-luna`, `OPENAI_API_KEY=not-used`, and `http://127.0.0.1:9208/v1`; require a newly persisted verdict and no model-call failure.
+- **Approach:** Document `[deep].base_url`, `[deep].reasoning_effort`, `openai/<model>`, ownership and cache semantics, unchanged key handling, and a proxy example that includes `/v1` because that service requires it.
+- **Test scenarios:** Run the full suite with all extras; use a fresh temporary scan root and cache with `openai/gpt-5.6-luna`, `reasoning_effort = "high"`, `OPENAI_API_KEY=not-used`, and `http://127.0.0.1:9208/v1`; require a newly persisted verdict and no model-call failure.
 
 ---
 
 ## Verification Contract
 
 - Run the targeted ledger, deep-client, and deep-CLI tests during implementation.
-- Run `uv run --frozen --extra deep pytest` as the full repository gate.
+- Run `uv run --frozen --all-extras pytest` as the full repository gate.
 - Run the live proxy proof against a fresh temporary fixture so an existing cache cannot produce a false success.
 - Prove rewriter routing deterministically in unit tests because a live model may classify the fixture as `distinct` and never invoke rewriting.
 - Confirm `git diff --check` and a scope-only working tree before commit.
@@ -95,7 +99,7 @@ Implement the configuration contract first, then the shared LLM boundary, CLI wi
 
 ## Definition of Done
 
-- The optional config is backward compatible and reaches both deep programs.
+- Both optional settings are backward compatible and reach both deep programs.
 - Default endpoint and credential behavior are unchanged.
 - Documentation matches the implemented contract.
 - Targeted tests, the full suite, and the fresh-cache live proxy proof pass.

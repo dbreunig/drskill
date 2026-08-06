@@ -5,7 +5,7 @@ import tomllib
 from pathlib import Path
 
 import tomli_w
-from pydantic import BaseModel, Field, ValidationError
+from pydantic import BaseModel, Field, ValidationError, field_validator
 
 from drskill.models import Finding
 
@@ -31,6 +31,17 @@ class Thresholds(BaseModel):
 class Deep(BaseModel):
     model: str = "anthropic/claude-haiku-4-5"
     base_url: str | None = None
+    reasoning_effort: str | None = None
+
+    @field_validator("reasoning_effort")
+    @classmethod
+    def validate_reasoning_effort(cls, value: str | None) -> str | None:
+        if value is None:
+            return None
+        value = value.strip()
+        if not value:
+            raise ValueError("must not be blank")
+        return value
 
 
 class Ack(BaseModel):
@@ -74,9 +85,9 @@ def load_config(path: Path) -> Config:
 def load_effective_config(project_root: Path, home: Path, global_mode: bool) -> Config:
     """The config that governs a scan. In project mode, decisions merge from
     both ledgers (a machine-level ack is honored in every project); budgets,
-    thresholds, and the model stay with the project's ledger. The API endpoint
-    is always machine-owned so an untrusted project cannot redirect provider
-    credentials."""
+    thresholds, model, and reasoning effort stay with the project's ledger.
+    The API endpoint is always machine-owned so an untrusted project cannot
+    redirect provider credentials."""
     cfg = load_config(ledger_path(project_root, home, global_mode))
     if not global_mode:
         gcfg = load_config(ledger_path(project_root, home, True))
