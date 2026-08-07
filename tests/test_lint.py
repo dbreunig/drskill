@@ -82,6 +82,16 @@ def test_forced_type_overrides(tmp_path):
     assert classify(d, forced="skill").kind == "skill"
 
 
+def test_forced_skill_rejects_non_skill_md_file(tmp_path):
+    # Regression: forced --type skill used to accept ANY existing file, then
+    # the SKILL.md-spec checks silently skip non-SKILL.md targets, producing
+    # a false-clean lint. A forced skill file target must be named SKILL.md.
+    f = tmp_path / "some.mcp.json"
+    f.write_text("{}")
+    with pytest.raises(LintUsageError):
+        classify(f, forced="skill")
+
+
 from drskill.lint import build_lint_world
 
 

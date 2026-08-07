@@ -43,8 +43,14 @@ def classify(path: Path, forced: str | None = None) -> LintTarget:
             raise LintUsageError(f"{path} is not a plugin directory (no plugin.json)")
         return LintTarget(kind="plugin", path=p)
     if forced == "skill":
-        f = p if p.is_file() else p / "SKILL.md"
-        if not f.is_file():
+        if p.is_file():
+            if p.name != "SKILL.md":
+                raise LintUsageError(
+                    f"{path} is not a skill (a skill file target must be "
+                    "named SKILL.md)"
+                )
+            return LintTarget(kind="skill", path=p)
+        if not (p / "SKILL.md").is_file():
             raise LintUsageError(f"{path} is not a skill (no SKILL.md)")
         return LintTarget(kind="skill", path=p)
     if forced == "mcp":
