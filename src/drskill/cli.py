@@ -261,6 +261,87 @@ def scan(
 
 
 @app.command()
+def lint(
+    path: Path = typer.Argument(Path("."), help="plugin directory, skill directory or SKILL.md, or MCP config file"),
+    target_type: str | None = typer.Option(None, "--type", help="override detection: plugin, skill, or mcp"),
+    as_json: bool = typer.Option(False, "--json", help="emit findings as JSON"),
+    fail_on: str = typer.Option("error", "--fail-on", help="lowest severity that fails the build: error or warn"),
+    deep_mode: bool = typer.Option(False, "--deep", help="judge flagged pairs with the configured model"),
+    max_calls: str = typer.Option("25", "--max-calls", help="model calls per --deep run: a number, or 'all' for no limit"),
+    mcp_connect: bool = typer.Option(False, "--mcp-connect", help="connect to configured MCP servers and enumerate their tools"),
+) -> None:
+    """Check a plugin, skill, or MCP config against its standard and drskill's checks."""
+    from drskill import lint as lint_mod
+
+    if fail_on not in ("error", "warn"):
+        console.print(f"[red]--fail-on takes error or warn, not[/red] {escape(fail_on)}")
+        raise typer.Exit(2)
+    if target_type not in (None, "plugin", "skill", "mcp"):
+        console.print(f"[red]--type takes plugin, skill, or mcp, not[/red] {escape(target_type)}")
+        raise typer.Exit(2)
+    try:
+        target = lint_mod.classify(path, target_type)
+    except lint_mod.LintUsageError as e:
+        console.print(f"[red]{escape(str(e))}[/red]")
+        raise typer.Exit(2)
+    home = _home()
+    config_root = lint_mod.find_config_root(target.path)
+    config = _load_effective_config_or_exit(config_root, home, False)
+    judge = None
+    rewriter = None
+    budget: int | None = None
+    if deep_mode:
+        if max_calls == "all":
+            budget = None
+        else:
+            try:
+                budget = int(max_calls)
+                if budget < 0:
+                    raise ValueError
+            except ValueError:
+                console.print(
+                    f"[red]--max-calls takes a number or 'all', not[/red] {escape(max_calls)}"
+                )
+                raise typer.Exit(1)
+        from drskill import deep_llm
+
+        deep.load_user_env(home)
+        try:
+            judge = deep_llm.build_judge(config.deep.model)
+            rewriter = deep_llm.build_rewriter(config.deep.model)
+        except deep_llm.DeepUnavailableError as e:
+            console.print(f"[red]{escape(str(e))}[/red]")
+            raise typer.Exit(1)
+
+    def _do_lint(progress):
+        return lint_mod.run_lint(
+            target, config, config_root, home, mcp_connect=mcp_connect,
+            judge=judge, rewriter=rewriter, max_calls=budget, progress=progress,
+        )
+
+    try:
+        if not as_json:
+            with console.status("[bold]linting[/bold]", spinner="dots") as status:
+                world, findings = _do_lint(
+                    lambda m: status.update(f"[bold]{escape(m)}[/bold]")
+                )
+        else:
+            world, findings = _do_lint(None)
+    except mcp_connect_mod.ConnectUnavailableError as e:
+        console.print(f"[red]{escape(str(e))}[/red]")
+        raise typer.Exit(1)
+    active, acked = ledger.filter_findings(findings, config)
+    if as_json:
+        print(report.to_json(active))
+    else:
+        report.render_lint(world, target, active, acked, console)
+    rank = {"note": 0, "warning": 1, "error": 2}
+    threshold = 1 if fail_on == "warn" else 2
+    if any(rank[f.severity] >= threshold for f in active):
+        raise typer.Exit(1)
+
+
+@app.command()
 def ack(
     refs: list[str] = typer.Argument(
         None,

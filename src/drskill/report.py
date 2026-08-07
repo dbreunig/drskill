@@ -337,3 +337,38 @@ def render(
                 f"  [bold]{escape(short_id(f))}[/bold]{tag} "
                 f"{escape(f.check_id.ljust(width))}  {escape(_sanitize(names))}"
             )
+
+
+def render_lint(world, target, active, acked, console) -> None:
+    from drskill.lint import LintTarget  # noqa: F401  (type only)
+
+    if target.kind == "plugin":
+        name = (world.plugin.name if world.plugin and world.plugin.name
+                else target.path.name)
+        n = sum(1 for c in world.contributors.values() if c.kind == "skill")
+        head = f"[bold]drskill lint[/bold] — plugin '{escape(name)}', {n} skill{'s' if n != 1 else ''}"
+        if world.mcp_servers:
+            m = len(world.mcp_servers)
+            head += f", {m} MCP server{'s' if m != 1 else ''}"
+    elif target.kind == "skill":
+        names = [c.name for c in world.contributors.values()] or [target.path.name]
+        head = f"[bold]drskill lint[/bold] — skill '{escape(names[0])}'"
+    else:
+        m = len(world.mcp_servers)
+        flavor = "Agent Plugins" if target.mcp_flavor == "agent-plugins" else "harness"
+        head = (f"[bold]drskill lint[/bold] — MCP config ({flavor} flavor), "
+                f"{m} server{'s' if m != 1 else ''}")
+    console.print(head)
+    if not active:
+        console.print("\n[green]No findings.[/green]")
+    seen = {f.fingerprint for f in active}  # suppress 'new' tags in lint
+    for title, style, sev in (("ERRORS", "red bold", "error"),
+                              ("WARNINGS", "yellow bold", "warning"),
+                              ("NOTES", "bold", "note")):
+        group = [f for f in active if f.severity == sev]
+        if group:
+            console.print(f"\n[{style}]{title}[/{style}]")
+            print_findings(world, group, console, seen=seen)
+    if acked:
+        console.print(f"[dim]{len(acked)} acknowledged finding"
+                      f"{'s' if len(acked) != 1 else ''} hidden[/dim]")
