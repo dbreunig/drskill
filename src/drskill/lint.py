@@ -10,9 +10,11 @@ from typing import Literal
 
 from pydantic import BaseModel
 
+from drskill.checks import run_checks
 from drskill.discovery import _find_broken_symlinks
+from drskill.ledger import Config
 from drskill.mcp import _servers_from_map
-from drskill.models import BrokenSymlink, PluginManifest, PluginMcpFile
+from drskill.models import BrokenSymlink, Finding, PluginManifest, PluginMcpFile
 from drskill.resolution import World, make_contributor
 
 _ACCEPTS = (
@@ -216,3 +218,61 @@ def checks_for(target: LintTarget, mcp_connect: bool) -> list[str]:
     if mcp_connect:
         ids = ids + MCP_CONNECT_CHECKS
     return ids
+
+
+def find_config_root(start: Path) -> Path:
+    """The nearest directory at or above `start` holding a drskill.toml.
+    Falls back to `start` (or its parent for a file) so acks and budgets
+    default sanely when the author has no ledger yet."""
+    cur = (start if start.is_dir() else start.parent).resolve()
+    for d in [cur, *cur.parents]:
+        if (d / "drskill.toml").is_file():
+            return d
+    return cur
+
+
+def run_lint(
+    target: LintTarget,
+    config: Config,
+    config_root: Path,
+    home: Path,
+    mcp_connect: bool = False,
+    judge=None,
+    rewriter=None,
+    max_calls: int | None = 25,
+    progress=None,
+) -> tuple[World, list[Finding]]:
+    if progress:
+        progress(f"reading {target.kind}")
+    world = build_lint_world(target)
+    if mcp_connect and world.mcp_servers:
+        from drskill import mcp_connect as mcpc
+        from drskill.pipeline import _add_tool_contributors
+
+        sdir = mcpc.snapshot_dir(config_root, home, False)
+        _, world.mcp_connect_failures = mcpc.run_handshakes(
+            world.mcp_servers, sdir, progress=progress
+        )
+        _add_tool_contributors(world, mcpc.load_snapshots(sdir))
+        world.mcp_approved = mcpc.load_snapshots(mcpc.approved_dir(sdir))
+    findings = run_checks(
+        world, config, checks_for(target, mcp_connect), progress=progress
+    )
+    if judge is not None:
+        from drskill import deep
+
+        cdir = deep.cache_dir(config_root, home, False)
+        cache = deep.load_cache(cdir)
+        acked_fps = {a.fingerprint for a in config.ack}
+        active = [f for f in findings if f.fingerprint not in acked_fps]
+        deep.judge_pairs(
+            world, active, cache, cdir, judge, config.deep.model, max_calls,
+            rewriter=rewriter, progress=progress,
+        )
+        findings = deep.apply_verdicts(world, findings, cache, acked_fps)
+    # Lint has no harness context; strip any attribution a shared check set.
+    findings = [
+        f.model_copy(update={"harnesses": []}) if f.harnesses else f
+        for f in findings
+    ]
+    return world, findings

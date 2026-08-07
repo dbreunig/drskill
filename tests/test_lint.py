@@ -191,3 +191,49 @@ def test_checks_for_shapes():
     agent = LintTarget(kind="mcp", path=Path("."), mcp_flavor="agent-plugins")
     assert "mcp-dead-server" not in checks_for(agent, mcp_connect=False)
     assert "mcp-tool-poisoning" in checks_for(agent, mcp_connect=True)
+
+
+def test_find_config_root_walks_up(tmp_path):
+    from drskill.lint import find_config_root
+
+    (tmp_path / "drskill.toml").write_text("")
+    nested = tmp_path / "a" / "b"
+    nested.mkdir(parents=True)
+    assert find_config_root(nested) == tmp_path
+    # no drskill.toml above tmp_path's parent is not guaranteed; use an
+    # isolated dir instead
+    iso = tmp_path / "iso"
+    iso.mkdir()
+    (iso / "x").mkdir()
+    # config root falls back to the start dir when nothing is found before
+    # the filesystem root that contains one; assert the found root is an
+    # ancestor-or-self of the start
+    got = find_config_root(iso / "x")
+    assert got in [iso / "x", *(iso / "x").parents]
+
+
+def test_run_lint_skill_target(tmp_path):
+    from drskill.ledger import Config
+    from drskill.lint import run_lint
+
+    write_skill(tmp_path / "s", "other-name")  # name mismatch -> error
+    target = classify(tmp_path / "s")
+    world, findings = run_lint(target, Config(), tmp_path, tmp_path / "home")
+    assert any(f.check_id == "spec-name-mismatch" for f in findings)
+    assert all(f.harnesses == [] for f in findings)
+
+
+def test_run_lint_plugin_end_to_end(tmp_path):
+    from drskill.ledger import Config
+    from drskill.lint import run_lint
+
+    root = tmp_path / "p"
+    make_plugin(root)
+    write_skill(root / "skills" / "alpha", "alpha")
+    (root / "mcp.json").write_text(json.dumps({
+        "mcpServers": {"bad": {"type": "websocket", "url": "wss://x"}}}))
+    world, findings = run_lint(
+        classify(root), Config(), tmp_path, tmp_path / "home")
+    got = {f.check_id for f in findings}
+    assert "mcp-spec-invalid" in got  # missing $schema + bad transport
+    assert all(f.harnesses == [] for f in findings)
