@@ -63,3 +63,15 @@ def test_raw_instance_and_broken_symlink():
     )
     b = BrokenSymlink(harness="pi", path=Path("/tmp/dead"))
     assert r.order == 1 and b.harness == "pi"
+
+
+def test_plugin_models_defaults():
+    from drskill.models import PluginManifest, PluginMcpFile
+    from drskill.resolution import World
+
+    m = PluginManifest(root="/tmp/p")
+    assert m.raw == {} and m.parse_error is None and m.name is None
+    f = PluginMcpFile(path="/tmp/p/mcp.json", root="/tmp/p")
+    assert f.data is None and f.provisional_root is False
+    w = World()
+    assert w.plugin is None and w.plugin_mcp is None

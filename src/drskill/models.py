@@ -89,3 +89,26 @@ class Finding(BaseModel):
 class BrokenSymlink(BaseModel):
     harness: str
     path: Path
+
+
+class PluginManifest(BaseModel):
+    """A parsed plugin.json from an Agent Plugins 1.0.0 plugin."""
+
+    root: str  # str(resolved plugin root directory)
+    raw: dict = Field(default_factory=dict)
+    raw_text: str = ""
+    parse_error: str | None = None  # JSON error, with line info, when unparseable
+    name: str | None = None
+    version: str | None = None
+    schema_url: str | None = None
+
+
+class PluginMcpFile(BaseModel):
+    """A plugin-flavor mcp.json, kept raw because spec checks need fields
+    (type, cwd, env values, headers) that MCPServer normalizes away."""
+
+    path: str
+    text: str = ""
+    data: dict | None = None  # parsed JSON; None when it failed to parse
+    root: str  # plugin root, or the file's parent when linted standalone
+    provisional_root: bool = False

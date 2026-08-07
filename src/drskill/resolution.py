@@ -15,6 +15,8 @@ from drskill.models import (
     BundledFile,
     Contributor,
     Deployment,
+    PluginManifest,
+    PluginMcpFile,
     Provenance,
     RawInstance,
     ShellBaseline,
@@ -130,6 +132,8 @@ class World(BaseModel):
     mcp_approved: dict[str, ServerSnapshot] = Field(default_factory=dict)
     # contributor id -> approved invocation-time command baseline
     shell_approved: dict[str, ShellBaseline] = Field(default_factory=dict)
+    plugin: PluginManifest | None = None
+    plugin_mcp: PluginMcpFile | None = None
 
     def harness_loads(self, harness_id: str) -> list[tuple[Contributor, Deployment]]:
         out = [
