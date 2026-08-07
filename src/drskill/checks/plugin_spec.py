@@ -206,9 +206,9 @@ def extension_hygiene(world: World, config: Config) -> list[Finding]:
                 "for no client unless that namespace defines them",
                 key=f"{d.name}:shadow"))
         for jf in sorted(d.rglob("*.json")):
-            if jf.stat().st_size > _SECRET_SCAN_CAP:
-                continue
             try:
+                if jf.stat().st_size > _SECRET_SCAN_CAP:
+                    continue
                 data = json.loads(jf.read_text(encoding="utf-8", errors="replace"))
             except (OSError, json.JSONDecodeError):
                 continue

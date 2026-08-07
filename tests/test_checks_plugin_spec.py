@@ -113,3 +113,17 @@ def test_extension_hygiene(tmp_path):
     got = by_check(run(root))
     assert len(got["plugin-extension-hygiene"]) == 3
     assert all(f.severity == "warning" for f in got["plugin-extension-hygiene"])
+
+
+def test_extension_hygiene_survives_dangling_json_symlink(tmp_path):
+    root = plugin(tmp_path, GOOD)
+    ns = root / "com.example.client"
+    ns.mkdir()
+    # Symlink points at a nonexistent path INSIDE the root, so it resolves
+    # without escaping and plugin-path-escape has nothing to flag; only
+    # extension-hygiene's secret scan touches this file, and it must not
+    # crash on a dangling stat().
+    os.symlink(root / "nonexistent-target.json", ns / "dangling.json")
+    got = by_check(run(root))  # must not raise
+    assert "plugin-path-escape" not in got
+    assert "plugin-extension-hygiene" not in got
