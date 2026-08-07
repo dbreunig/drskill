@@ -1,0 +1,7 @@
+{
+  "$schema": "https://agent-plugins.org/schemas/9.9.9/plugin.schema.json",
+  "name": "Kitchen--Sink",
+  "version": 2,
+  "surprise": true,
+  "extensions": "not-an-object"
+}

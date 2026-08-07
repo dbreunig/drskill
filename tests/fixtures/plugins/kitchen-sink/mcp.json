@@ -1,0 +1,10 @@
+{
+  "mcpServers": {
+    "bad": {
+      "type": "websocket",
+      "command": "python -m server",
+      "env": {"PLUGIN_ROOT": "/x", "API_TOKEN": "sk-live-1234567890abcdef"},
+      "cwd": "/absolute"
+    }
+  }
+}

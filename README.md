@@ -153,6 +153,26 @@ Gate a pull request. This connects to servers, judges overlaps, and fails the bu
 drskill scan --deep --mcp-connect --ci
 ```
 
+## Lint a plugin, skill, or MCP config before you publish
+
+`drskill lint` points at one thing you are writing and checks it:
+
+```
+drskill lint ./my-plugin        # an Agent Plugins directory with plugin.json
+drskill lint ./skills/foo       # one skill folder, or its SKILL.md
+drskill lint ./mcp.json         # an MCP config file
+```
+
+A plugin is checked against the Agent Plugins 1.0.0 specification: the
+manifest, the name rules, skill discovery, mcp.json transports and
+placeholders, and path containment. On top of that, every skill and server
+inside gets the same quality and security checks `drskill scan` runs.
+
+Exit codes fit CI: 0 is clean, 1 means findings at or above the failure
+threshold (errors by default; tighten with `--fail-on warn`), 2 is a usage
+error. Use `--json` for machine-readable findings, and `drskill ack` to
+accept a finding so the build goes green until the content changes.
+
 ## Audit your usage
 
 `drskill scan` looks at the loadout as configured. `drskill audit` looks at how you actually used it. It reads the local session traces that Claude Code, Codex, Pi, and Copilot already write to disk, and ranks which skills and MCP tools actually got invoked. `drskill audit <name>` drills into one skill or tool and shows each invocation in context: the full user message that preceded it, how it was triggered (an explicit tool call, a slash command, or a SKILL.md read), the agent's reasoning right before it on harnesses that record reasoning, and the exact trace file and line so you can open the transcript at that moment.
