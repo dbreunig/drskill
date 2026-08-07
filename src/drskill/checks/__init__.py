@@ -65,7 +65,7 @@ def run_checks(
     world: World, config: Config, ids: list[str], progress=None
 ) -> list[Finding]:
     # Import registers every check module exactly once.
-    from drskill.checks import budget, duplicates, filesystem, heuristics, injection, lockfile, mcp, mcp_injection, mcp_tools, shadowing, skill_shell, spec  # noqa: F401
+    from drskill.checks import budget, duplicates, filesystem, heuristics, injection, lockfile, mcp, mcp_injection, mcp_tools, plugin_spec, shadowing, skill_shell, spec  # noqa: F401
 
     findings: list[Finding] = []
     for check_id in ids:
