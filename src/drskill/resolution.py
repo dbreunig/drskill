@@ -160,6 +160,51 @@ def _skill_name(fm: dict | None, skill_file: Path) -> str:
     return skill_file.stem
 
 
+def make_contributor(
+    skill_file: Path, scope: str = "project"
+) -> tuple[Contributor | None, list[str]]:
+    """Build a Contributor from one skill file, outside any harness.
+    Returns (None, []) when the file cannot be read; the second element
+    lists bundled files that could not be read."""
+    real = skill_file.resolve()
+    try:
+        text = real.read_text(encoding="utf-8", errors="replace")
+    except OSError:
+        return None, []
+    fm, raw_fm, body = split_frontmatter(text)
+    name = _skill_name(fm, real)
+    description = ""
+    if fm and isinstance(fm.get("description"), str):
+        description = fm["description"]
+    provenance = Provenance()
+    if fm and GH_PROVENANCE_KEYS & fm.keys():
+        provenance = Provenance(kind="gh-skill", source=fm.get("source"))
+    elif _in_agents_store(real):
+        provenance = Provenance(kind="linked")
+    bundled: list[BundledFile] = []
+    unreadable: list[str] = []
+    if real.name == "SKILL.md":
+        bundled, unreadable = collect_bundled_files(real)
+    c = Contributor(
+        id=str(real),
+        name=name,
+        scope=scope,
+        source=provenance,
+        bundled_files=bundled,
+        routing_text=description,
+        body=body,
+        token_cost=TokenCost(
+            catalog_tokens=tokens.count(f"{name}: {description}"),
+            body_tokens=tokens.count(body),
+        ),
+        content_hash=content_hash(text),
+        frontmatter_valid=fm is not None,
+        frontmatter=fm or {},
+        frontmatter_text=raw_fm,
+    )
+    return c, unreadable
+
+
 def build_world(
     instances: list[RawInstance],
     harnesses: dict[str, HarnessDef],
@@ -167,46 +212,14 @@ def build_world(
 ) -> World:
     world = World(harnesses=harnesses, broken_symlinks=broken)
     for inst in instances:
-        real = inst.skill_file.resolve()
-        cid = str(real)
+        cid = str(inst.skill_file.resolve())
         c = world.contributors.get(cid)
         if c is None:
-            try:
-                text = real.read_text(encoding="utf-8", errors="replace")
-            except OSError:
+            c, unreadable_files = make_contributor(inst.skill_file, inst.scope)
+            if c is None:
                 world.unreadable.append((inst.harness, cid))
                 continue
-            fm, raw_fm, body = split_frontmatter(text)
-            name = _skill_name(fm, real)
-            description = ""
-            if fm and isinstance(fm.get("description"), str):
-                description = fm["description"]
-            provenance = Provenance()
-            if fm and GH_PROVENANCE_KEYS & fm.keys():
-                provenance = Provenance(kind="gh-skill", source=fm.get("source"))
-            elif _in_agents_store(real):
-                provenance = Provenance(kind="linked")
-            bundled: list[BundledFile] = []
-            if real.name == "SKILL.md":
-                bundled, unreadable_files = collect_bundled_files(real)
-                world.unreadable += [(inst.harness, p) for p in unreadable_files]
-            c = Contributor(
-                id=cid,
-                name=name,
-                scope=inst.scope,
-                source=provenance,
-                bundled_files=bundled,
-                routing_text=description,
-                body=body,
-                token_cost=TokenCost(
-                    catalog_tokens=tokens.count(f"{name}: {description}"),
-                    body_tokens=tokens.count(body),
-                ),
-                content_hash=content_hash(text),
-                frontmatter_valid=fm is not None,
-                frontmatter=fm or {},
-                frontmatter_text=raw_fm,
-            )
+            world.unreadable += [(inst.harness, p) for p in unreadable_files]
             world.contributors[cid] = c
         if inst.scope == "project":
             c.scope = "project"

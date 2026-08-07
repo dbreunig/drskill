@@ -311,3 +311,18 @@ def test_system_skill_classified_by_dot_system_segment(tmp_path):
     by_name = {c.name: c for c in world.contributors.values()}
     assert by_name["vendor-skill"].system
     assert not by_name["mine"].system
+
+
+def test_make_contributor_standalone(tmp_path):
+    from drskill.resolution import make_contributor
+
+    d = tmp_path / "myskill"
+    d.mkdir()
+    f = d / "SKILL.md"
+    f.write_text("---\nname: myskill\ndescription: Use when testing.\n---\nbody\n")
+    c, unreadable = make_contributor(f)
+    assert c is not None and c.name == "myskill"
+    assert c.deployments == [] and c.scope == "project"
+    assert c.token_cost.body_tokens > 0 and unreadable == []
+    missing, u2 = make_contributor(tmp_path / "nope" / "SKILL.md")
+    assert missing is None and u2 == []
