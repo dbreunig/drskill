@@ -174,3 +174,45 @@ def _add_harness_mcp(world: World, path: Path) -> None:
         world.mcp_servers = _servers_from_map(
             servers, harness="", scope="project", source=path, in_project=True
         )
+
+
+SKILL_CONTENT_CHECKS = [
+    "spec-invalid-frontmatter", "spec-name-mismatch", "spec-missing-description",
+    "spec-description-too-long", "frontmatter-angle-brackets",
+    "missing-activation", "generic-description", "opposing-imperatives",
+    "description-overlap",
+    "budget-catalog-tokens", "budget-body-tokens",
+    "injection-unicode", "injection-encoded-blob", "injection-override",
+    "injection-remote-fetch", "injection-egress", "injection-credential-read",
+    "injection-mandatory-script",
+    "injection-shell-unreviewed", "injection-shell-dangerous",
+    "broken-symlink", "unreadable-skill",
+]
+PLUGIN_SPEC_CHECKS = [
+    "plugin-manifest-invalid", "plugin-name-invalid",
+    "plugin-manifest-unknown-field", "plugin-schema-unknown",
+    "plugin-skill-undiscoverable", "plugin-path-escape",
+    "plugin-extension-hygiene",
+]
+MCP_SPEC_CHECKS = ["mcp-spec-invalid", "mcp-spec-placeholder"]
+MCP_STATIC_CHECKS = ["mcp-config-invalid", "mcp-secret-in-config", "mcp-unpinned-server"]
+MCP_CONNECT_CHECKS = [
+    "mcp-connect-failed", "mcp-tool-collision", "mcp-tools-unreviewed",
+    "mcp-tool-poisoning",
+]
+
+
+def checks_for(target: LintTarget, mcp_connect: bool) -> list[str]:
+    if target.kind == "skill":
+        return list(SKILL_CONTENT_CHECKS)
+    if target.kind == "plugin":
+        ids = (SKILL_CONTENT_CHECKS + ["exact-duplicate", "near-duplicate"]
+               + PLUGIN_SPEC_CHECKS + MCP_SPEC_CHECKS + MCP_STATIC_CHECKS)
+    elif target.mcp_flavor == "agent-plugins":
+        ids = MCP_SPEC_CHECKS + MCP_STATIC_CHECKS
+    else:
+        # No spec to enforce; the generic URL and dead-command checks stand in.
+        ids = MCP_STATIC_CHECKS + ["mcp-insecure-url", "mcp-dead-server"]
+    if mcp_connect:
+        ids = ids + MCP_CONNECT_CHECKS
+    return ids

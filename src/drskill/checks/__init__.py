@@ -61,12 +61,15 @@ def make_finding(
     )
 
 
-def run_all(world: World, config: Config, progress=None) -> list[Finding]:
+def run_checks(
+    world: World, config: Config, ids: list[str], progress=None
+) -> list[Finding]:
     # Import registers every check module exactly once.
     from drskill.checks import budget, duplicates, filesystem, heuristics, injection, lockfile, mcp, mcp_injection, mcp_tools, shadowing, skill_shell, spec  # noqa: F401
 
     findings: list[Finding] = []
-    for check_id, fn in REGISTRY.items():
+    for check_id in ids:
+        fn = REGISTRY[check_id]
         if progress:
             progress(f"checking {check_id}")
         findings.extend(fn(world, config))
@@ -82,3 +85,10 @@ def run_all(world: World, config: Config, progress=None) -> list[Finding]:
     return sorted(
         merged.values(), key=lambda f: (f.severity, f.check_id, f.message)
     )
+
+
+def run_all(world: World, config: Config, progress=None) -> list[Finding]:
+    # Import registers every check module exactly once.
+    from drskill.checks import budget, duplicates, filesystem, heuristics, injection, lockfile, mcp, mcp_injection, mcp_tools, shadowing, skill_shell, spec  # noqa: F401
+
+    return run_checks(world, config, list(REGISTRY), progress)

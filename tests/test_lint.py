@@ -150,3 +150,44 @@ def test_build_world_harness_mcp(tmp_path):
     w = build_lint_world(classify(f))
     assert w.plugin_mcp is None
     assert [s.name for s in w.mcp_servers] == ["a"]
+
+
+def test_suites_only_name_registered_checks():
+    from drskill.checks import REGISTRY, run_all  # noqa: F401  (run_all imports all modules)
+    from drskill.resolution import World
+    from drskill.ledger import Config
+    from drskill import lint as lint_mod
+
+    run_all(World(), Config())  # force-register every check module
+    # plugin_spec / mcp_spec ids only exist after Tasks 6-7; tolerate both
+    # phases by checking the suites that must already resolve.
+    assert set(lint_mod.SKILL_CONTENT_CHECKS) <= set(REGISTRY)
+    assert set(lint_mod.MCP_STATIC_CHECKS) <= set(REGISTRY)
+    assert set(lint_mod.MCP_CONNECT_CHECKS) <= set(REGISTRY)
+
+
+def test_run_checks_runs_only_named(tmp_path):
+    from drskill.checks import run_checks
+    from drskill.ledger import Config
+
+    write_skill(tmp_path / "s", "other-name")  # folder 's', name mismatch
+    w = build_lint_world(classify(tmp_path / "s"))
+    findings = run_checks(w, Config(), ["spec-name-mismatch"])
+    assert {f.check_id for f in findings} == {"spec-name-mismatch"}
+
+
+def test_checks_for_shapes():
+    from drskill.lint import LintTarget, checks_for, SKILL_CONTENT_CHECKS
+
+    skill = LintTarget(kind="skill", path=Path("."))
+    assert checks_for(skill, mcp_connect=False) == SKILL_CONTENT_CHECKS
+    plug = LintTarget(kind="plugin", path=Path("."))
+    ids = checks_for(plug, mcp_connect=False)
+    assert "exact-duplicate" in ids and "mcp-secret-in-config" in ids
+    assert "name-shadow" not in ids and "lockfile-drift" not in ids
+    harness = LintTarget(kind="mcp", path=Path("."), mcp_flavor="harness")
+    ids = checks_for(harness, mcp_connect=False)
+    assert "mcp-dead-server" in ids and "mcp-insecure-url" in ids
+    agent = LintTarget(kind="mcp", path=Path("."), mcp_flavor="agent-plugins")
+    assert "mcp-dead-server" not in checks_for(agent, mcp_connect=False)
+    assert "mcp-tool-poisoning" in checks_for(agent, mcp_connect=True)
