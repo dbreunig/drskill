@@ -258,18 +258,19 @@ def run_lint(
     findings = run_checks(
         world, config, checks_for(target, mcp_connect), progress=progress
     )
-    if judge is not None:
-        from drskill import deep
+    from drskill import deep
 
-        cdir = deep.cache_dir(config_root, home, False)
-        cache = deep.load_cache(cdir)
-        acked_fps = {a.fingerprint for a in config.ack}
+    cdir = deep.cache_dir(config_root, home, False)
+    cache = deep.load_cache(cdir)
+    acked_fps = {a.fingerprint for a in config.ack}
+    if judge is not None:
+        # Acked clusters never spend the call budget; the user already ruled.
         active = [f for f in findings if f.fingerprint not in acked_fps]
         deep.judge_pairs(
             world, active, cache, cdir, judge, config.deep.model, max_calls,
             rewriter=rewriter, progress=progress,
         )
-        findings = deep.apply_verdicts(world, findings, cache, acked_fps)
+    findings = deep.apply_verdicts(world, findings, cache, acked_fps)
     # Lint has no harness context; strip any attribution a shared check set.
     findings = [
         f.model_copy(update={"harnesses": []}) if f.harnesses else f

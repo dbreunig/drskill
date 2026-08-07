@@ -237,3 +237,40 @@ def test_run_lint_plugin_end_to_end(tmp_path):
     got = {f.check_id for f in findings}
     assert "mcp-spec-invalid" in got  # missing $schema + bad transport
     assert all(f.harnesses == [] for f in findings)
+
+
+def test_run_lint_applies_cached_deep_verdicts_without_judge(tmp_path, monkeypatch):
+    # Regression: a plain `drskill lint` (no --deep, judge=None) must still
+    # reshape findings using a cache populated by an earlier --deep run —
+    # mirroring run_scan's tail, where cdir/cache/acked_fps are computed
+    # unconditionally and apply_verdicts always runs (only judge_pairs is
+    # gated on judge). Monkeypatch deep.apply_verdicts to record whether it
+    # was reached with judge=None, and to prove the harness-strip step runs
+    # AFTER apply_verdicts (it must clobber a harness apply_verdicts sets).
+    from drskill import deep
+    from drskill.ledger import Config
+    from drskill.lint import run_lint
+
+    write_skill(tmp_path / "s", "other-name")  # name mismatch -> error
+    target = classify(tmp_path / "s")
+
+    calls = []
+
+    def fake_apply_verdicts(world, findings, cache, acked_fps):
+        calls.append((cache, acked_fps))
+        return [
+            f.model_copy(update={"harnesses": ["fake-harness"], "message": "APPLIED"})
+            for f in findings
+        ]
+
+    monkeypatch.setattr(deep, "apply_verdicts", fake_apply_verdicts)
+
+    world, findings = run_lint(target, Config(), tmp_path, tmp_path / "home", judge=None)
+
+    assert calls, "apply_verdicts must run even without --deep (judge=None)"
+    cache, acked_fps = calls[0]
+    assert isinstance(cache, dict) and isinstance(acked_fps, set)
+    assert findings and all(f.message == "APPLIED" for f in findings)
+    # The strip-harnesses step ran after apply_verdicts: it nulled out the
+    # harness the fake apply_verdicts injected.
+    assert all(f.harnesses == [] for f in findings)
