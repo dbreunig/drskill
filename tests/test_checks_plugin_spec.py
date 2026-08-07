@@ -115,6 +115,23 @@ def test_extension_hygiene(tmp_path):
     assert all(f.severity == "warning" for f in got["plugin-extension-hygiene"])
 
 
+def test_extension_hygiene_scans_secrets_in_invalid_namespace_dir(tmp_path):
+    # Regression: after warning on an invalid namespace name, the loop used
+    # to `continue`, so secrets in a bad-namespace dir (e.g. com..bad/) went
+    # unscanned. The secret scan must still run there; only the
+    # skills/mcp.json shadow check stays namespace-valid-only.
+    root = plugin(tmp_path, GOOD)
+    bad = root / "com..bad"
+    bad.mkdir()
+    (bad / "settings.json").write_text(json.dumps(
+        {"api_key": "sk-live-1234567890abcdef"}))
+    got = by_check(run(root))["plugin-extension-hygiene"]
+    assert len(got) == 2
+    msgs = " ".join(f.message for f in got)
+    assert "not a valid reverse domain namespace" in msgs
+    assert "credential-shaped values" in msgs
+
+
 def test_extension_hygiene_survives_dangling_json_symlink(tmp_path):
     root = plugin(tmp_path, GOOD)
     ns = root / "com.example.client"

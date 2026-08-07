@@ -193,18 +193,20 @@ def extension_hygiene(world: World, config: Config) -> list[Finding]:
             continue
         if "." not in d.name:
             continue  # a plain dir (docs, tests) is not an attempted namespace
-        if not _NAMESPACE_RE.fullmatch(d.name):
+        valid_namespace = bool(_NAMESPACE_RE.fullmatch(d.name))
+        if not valid_namespace:
             out.append(_pf("plugin-extension-hygiene", "warning", world,
                 f"'{d.name}/' looks like a client extension directory but is "
                 "not a valid reverse domain namespace; clients ignore it",
                 key=d.name))
-            continue
-        if (d / "mcp.json").is_file() or any(d.glob("skills/*/SKILL.md")):
+        elif (d / "mcp.json").is_file() or any(d.glob("skills/*/SKILL.md")):
             out.append(_pf("plugin-extension-hygiene", "warning", world,
                 f"'{d.name}/' contains skills/ or mcp.json; portable "
                 "components load only from the plugin root, so these load "
                 "for no client unless that namespace defines them",
                 key=f"{d.name}:shadow"))
+        # The secret scan runs regardless of namespace validity: a bad
+        # namespace name doesn't make the secrets inside it any safer.
         for jf in sorted(d.rglob("*.json")):
             try:
                 if jf.stat().st_size > _SECRET_SCAN_CAP:
