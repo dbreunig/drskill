@@ -1,6 +1,6 @@
 [project]
 name = "drskill-core"
-version = "0.6.5"
+version = "0.6.6"
 description = "brew doctor for your AI agent's skill loadout (minimal install; `drskill` is the full package)"
 readme = "README.md"
 requires-python = ">=3.11"
@@ -14,7 +14,10 @@ dependencies = [
 ]
 
 [project.optional-dependencies]
-deep = ["dspy>=3"]
+# litellm 1.95.0 shipped without prebuilt wheels (new Rust bridge), so a
+# fresh install tries to compile it and fails on machines without a recent
+# rustc. Excluded until a wheel-bearing release exists.
+deep = ["dspy>=3", "litellm!=1.95.0"]
 connect = ["mcp>=1.2"]
 
 [project.scripts]
