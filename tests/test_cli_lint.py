@@ -72,6 +72,19 @@ def test_skill_file_target(tmp_path):
     assert "spec-name-mismatch" in r.output
 
 
+def test_bad_max_calls_exits_two(tmp_path):
+    # Regression: lint's --max-calls validation was copied from scan, which
+    # exits 1 for usage errors. lint's contract reserves exit 2 for usage
+    # errors (see test_usage_error_exits_two above), so a bad --max-calls
+    # value must exit 2, not 1. The bad-value path returns before any model
+    # setup (deep_llm import / build_judge), so this needs no API key.
+    make_plugin(tmp_path / "p")
+    r = runner.invoke(
+        app, ["lint", str(tmp_path / "p"), "--deep", "--max-calls", "bogus"]
+    )
+    assert r.exit_code == 2, r.output
+
+
 def test_ack_round_trip(tmp_path, monkeypatch):
     monkeypatch.setenv("HOME", str(tmp_path / "home"))
     root = tmp_path / "p"

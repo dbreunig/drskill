@@ -302,7 +302,10 @@ def lint(
                 console.print(
                     f"[red]--max-calls takes a number or 'all', not[/red] {escape(max_calls)}"
                 )
-                raise typer.Exit(1)
+                # lint's contract reserves exit 2 for usage errors (unlike
+                # scan, which exits 1 here); this fires before any model
+                # setup, so no API key is required to reach it.
+                raise typer.Exit(2)
         from drskill import deep_llm
 
         deep.load_user_env(home)
