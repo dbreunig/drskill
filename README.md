@@ -24,7 +24,9 @@ On the MCP side it finds:
 
 The last three need `drskill` to connect to the servers, which it does only when you ask.
 
-Every problem it reports ends in a command: a fix command or a command to acknowledge the problem and move on. `drskill` reads your files and never installs, edits, or deletes a skill. It makes zero calls to an LLM unless you opt in with `scan --deep`, and it never launches or connects to an MCP server unless you opt in with `scan --mcp-connect`.
+Every problem it reports ends in a command: a fix command or a command to acknowledge the problem and move on. `drskill` reads your files and never installs, edits, or deletes a skill. It makes zero calls to an LLM unless you opt in with `--deep`, and it never launches or connects to an MCP server unless you opt in with `--mcp-connect`.
+
+Scanning covers the loadout your agents consume. `drskill lint` covers what you author. Point it at a plugin, a skill, or an MCP config you are writing, and it checks the plugin against the [Agent Plugins specification](https://agent-plugins.org), runs the same content checks over everything inside, and exits with a code CI can gate on.
 
 Use `drskill` to:
 
@@ -32,6 +34,7 @@ Use `drskill` to:
 - Catch config risks before they ship, e.g. a secret in a committed file or an unpinned server package
 - Notice when your loadout changes (without you doing anything), e.g. a skill that drifted from its lockfile or a server that rewrote a tool description
 - Write skill and tool descriptions that do not clash with other libraries
+- Lint a plugin, skill, or MCP config before you publish it, and gate the release in CI
 - See which skills and MCP tools your agents actually use, and read the queries that triggered them
 
 ## Install
@@ -153,25 +156,31 @@ Gate a pull request. This connects to servers, judges overlaps, and fails the bu
 drskill scan --deep --mcp-connect --ci
 ```
 
-## Lint a plugin, skill, or MCP config before you publish
+## Lint what you publish
 
-`drskill lint` points at one thing you are writing and checks it:
+Everything above checks the loadout your agents consume. `drskill lint` turns the same checks on the things you author. Point it at one thing and it works out what that thing is:
 
 ```
-drskill lint ./my-plugin        # an Agent Plugins directory with plugin.json
-drskill lint ./skills/foo       # one skill folder, or its SKILL.md
+drskill lint ./my-plugin        # a plugin directory with a plugin.json
+drskill lint ./skills/foo       # a skill folder, or its SKILL.md
 drskill lint ./mcp.json         # an MCP config file
 ```
 
-A plugin is checked against the Agent Plugins 1.0.0 specification: the
-manifest, the name rules, skill discovery, mcp.json transports and
-placeholders, and path containment. On top of that, every skill and server
-inside gets the same quality and security checks `drskill scan` runs.
+A plugin is checked against the [Agent Plugins 1.0.0 specification](https://agent-plugins.org): the `plugin.json` manifest and its name rules, which skills a client will actually discover, `mcp.json` transports and placeholder rules, and symlinks that escape the plugin root. On top of the spec checks, every skill inside the plugin gets the same content checks as `scan` (the SKILL.md spec, description quality, token budget, and injection checks), and every server in its `mcp.json` gets the static MCP checks.
 
-Exit codes fit CI: 0 is clean, 1 means findings at or above the failure
-threshold (errors by default; tighten with `--fail-on warn`), 2 is a usage
-error. Use `--json` for machine-readable findings, and `drskill ack` to
-accept a finding so the build goes green until the content changes.
+A skill target runs just the skill checks. An MCP config target depends on the file. A file with the Agent Plugins `$schema`, or sitting next to a `plugin.json`, is checked against the spec's `mcp.json` rules. A plain `mcpServers` file, like a `.mcp.json`, has no spec to enforce, so it gets the structural and security checks only.
+
+Lint is built for CI:
+
+```
+drskill lint ./my-plugin --fail-on warn --json
+```
+
+Exit code 0 is clean, 1 means findings at or above the failure threshold (errors by default; `--fail-on warn` includes warnings), and 2 is a usage error. `--json` prints findings as JSON and nothing else. Acks work the same as in `scan`: `drskill ack` writes to the nearest `drskill.toml`, and the finding stays silent until the content it judged changes, so an accepted warning keeps CI green without weakening the check.
+
+`--deep` and `--mcp-connect` opt into the model-judged checks and the live server checks, exactly as they do for `scan`. Without them, lint makes no LLM calls and connects to nothing.
+
+Lint reads the Agent Plugins layout: a `plugin.json` at the directory root. Claude Code's older plugin layout, with the manifest at `.claude-plugin/plugin.json`, is not recognized yet.
 
 ## Audit your usage
 
@@ -230,6 +239,8 @@ Parsing every trace on every run would be slow, so audit caches what it extracts
 
 ## Exit codes
 
+`drskill scan`:
+
 | code | meaning |
 |---|---|
 | 0 | clean, or every finding is acknowledged |
@@ -237,6 +248,16 @@ Parsing every trace on every run would be slow, so audit caches what it extracts
 | 2 | only warnings are active, but `--ci` was passed |
 
 Without `--ci`, warnings alone exit 0. This lets you run `drskill scan` locally without it failing your shell, while still failing CI on the same warnings.
+
+`drskill lint`:
+
+| code | meaning |
+|---|---|
+| 0 | clean, or nothing at or above the failure threshold |
+| 1 | at least one finding at or above the threshold: errors by default, warnings too with `--fail-on warn` |
+| 2 | usage error, e.g. the path is not a lintable target |
+
+The two commands use exit 2 differently because they answer different questions. `scan --ci` uses it to separate "errors" from "only warnings" in an existing loadout. `lint` reserves it for "you pointed me at the wrong thing," so a build script can tell a failed check from a broken invocation.
 
 ## Checks
 
@@ -279,6 +300,20 @@ Without `--ci`, warnings alone exit 0. This lets you run `drskill scan` locally 
 | `mcp-tool-collision` | warning | Two servers expose the same tool name into one harness's set. Which one the agent gets is client dependent. |
 | `mcp-tools-unreviewed` | note on first sight, warning on change | A server's enumerated tool set. On first sight it is a note asking you to record an approved baseline. If the server later changes a tool's description, it becomes a warning. |
 | `mcp-tool-poisoning` | error for hidden-Unicode and credential-path hits, warning otherwise | Scans tool names, descriptions, and schema doc strings for injection surfaces: hidden instructions, credential paths, invisible Unicode, encoded blobs, remote-fetch directives, and text that steers the agent toward or away from other tools. Runs from committed snapshots, so the whole team gets findings after one person runs `--mcp-connect`. |
+
+These checks run only under `drskill lint`, against a plugin's manifest and layout. The error findings are the violations the Agent Plugins spec calls fatal, meaning a client rejects the whole plugin; the warnings are the ones a client tolerates or ignores.
+
+| check id | severity | fires when |
+|---|---|---|
+| `plugin-manifest-invalid` | error | `plugin.json` does not parse, misses a required field (`$schema`, `name`), or gives a field the wrong type. |
+| `plugin-name-invalid` | error | The plugin name breaks the spec's rules: 1 to 64 lowercase letters, digits, hyphens, or periods, starting and ending alphanumeric, with no doubled separators. |
+| `plugin-manifest-unknown-field` | warning | `plugin.json` carries an unknown top-level field, or `extensions` is not an object. Clients ignore both. |
+| `plugin-schema-unknown` | warning | The declared `$schema` is not the 1.0.0 schema. drskill validates against 1.0.0 and says so. |
+| `plugin-skill-undiscoverable` | warning | A `skills/` entry no client will load: a child folder without a `SKILL.md`, or a `SKILL.md` nested too deep. |
+| `plugin-path-escape` | error | A symlink resolves outside the plugin root. The spec requires clients to reject these paths. |
+| `plugin-extension-hygiene` | warning | An extension directory problem: a name that is not a valid reverse-domain namespace, a credential-shaped value in an extension file, or portable components tucked inside a namespace directory where no client loads them. |
+| `mcp-spec-invalid` | error | A plugin's `mcp.json` breaks the spec: a missing `$schema`, an unknown transport, a bad command or URL, or `args`, `env`, or `headers` with the wrong types. |
+| `mcp-spec-placeholder` | error, warning for headers | `${PLUGIN_ROOT}` or `${PLUGIN_DATA}` somewhere it never expands (the command, an env key), an env entry using a reserved name, or a `cwd` outside the allowed forms. A placeholder in a header value is a warning, because it is sent literally. |
 
 ## Deep checks
 
@@ -395,7 +430,7 @@ The `suite` column names where a row came from. For a skill it is the plugin or 
 
 ## Known limitations
 
-Claude Code skills bundled inside plugins are not scanned yet. `drskill` only walks the plain `.claude/skills` directories described in the harness table; it does not look inside installed plugin packages.
+Claude Code skills bundled inside installed plugins are not scanned yet. `drskill scan` only walks the plain `.claude/skills` directories described in the harness table; it does not look inside installed plugin packages. `drskill lint` does check a plugin directory you point it at, but only in the Agent Plugins layout with `plugin.json` at the root, not Claude Code's older `.claude-plugin` layout.
 
 `.claude/commands/` directories use the same `` !`command` `` and ```` ```! ```` invocation-time shell syntax as skills, but drskill does not discover them yet, so a command file's embedded shell commands are invisible to `injection-shell-unreviewed` and `injection-shell-dangerous`.
 
