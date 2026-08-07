@@ -88,3 +88,49 @@ def test_header_placeholder_warns(tmp_path):
 def test_standalone_notes_provisional_root(tmp_path):
     got = run(tmp_path, {"missing-rel": {"type": "stdio", "command": "./gone"}})
     assert "assuming" in got[0].message
+
+
+def test_fingerprints_are_path_independent(tmp_path):
+    # Same mcp.json content written under two different directories must
+    # fingerprint identically, or a committed ack goes red on CI (a fresh
+    # checkout lands at a different absolute path).
+    servers = {
+        "s": {"type": "websocket", "url": "wss://x"},
+        "bad-cmd": {"type": "stdio", "command": "python -m srv"},
+    }
+    dir_a = tmp_path / "checkout-a" / "nested"
+    dir_b = tmp_path / "somewhere-else" / "deeper" / "still"
+    dir_a.mkdir(parents=True)
+    dir_b.mkdir(parents=True)
+    got_a = run(dir_a, servers)
+    got_b = run(dir_b, servers)
+    assert got_a and got_b
+    assert {f.fingerprint for f in got_a} == {f.fingerprint for f in got_b}
+    # Sanity: the absolute paths genuinely differ, so this isn't vacuous.
+    assert str(dir_a) != str(dir_b)
+
+
+def test_fingerprints_unique_per_violation_of_same_entry(tmp_path):
+    # Two distinct violations on the very same entry (a bad env key that is
+    # both reserved AND a placeholder key would collide) must still produce
+    # distinct fingerprints. Use an entry with both a reserved env name and
+    # a cwd-form violation, which share the same entry-content hash input.
+    got = run(tmp_path, {
+        "multi": {"type": "stdio", "command": "srv", "cwd": "/absolute",
+                  "env": {"PLUGIN_ROOT": "/x"}},
+    })
+    assert len(got) == 2
+    assert len({f.fingerprint for f in got}) == 2
+
+
+def test_args_env_headers_type_validation(tmp_path):
+    got = run(tmp_path, {
+        "bad-args": {"type": "stdio", "command": "srv", "args": "not-a-list"},
+        "bad-env": {"type": "stdio", "command": "srv", "env": {"HOME": 5}},
+        "bad-headers": {"type": "streamable-http",
+                         "url": "https://example.com/mcp", "headers": {"X": 5}},
+    })
+    assert all(f.check_id == "mcp-spec-invalid" for f in got)
+    assert len(got) == 3
+    msgs = " ".join(f.message for f in got)
+    assert "'args'" in msgs and "'env'" in msgs and "'headers'" in msgs
