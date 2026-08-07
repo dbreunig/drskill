@@ -10,6 +10,11 @@ from typing import Literal
 
 from pydantic import BaseModel
 
+from drskill.discovery import _find_broken_symlinks
+from drskill.mcp import _servers_from_map
+from drskill.models import BrokenSymlink, PluginManifest, PluginMcpFile
+from drskill.resolution import World, make_contributor
+
 _ACCEPTS = (
     "drskill lint takes a plugin directory (with plugin.json), a skill "
     "directory or SKILL.md file, or an MCP config JSON file"
@@ -74,3 +79,98 @@ def _classify_json(p: Path) -> LintTarget:
         flavor = "agent-plugins" if sibling_manifest else "harness"
         return LintTarget(kind="mcp", path=p, mcp_flavor=flavor)
     raise LintUsageError(f"{p} is not a recognized MCP config; {_ACCEPTS}")
+
+
+def build_lint_world(target: LintTarget) -> World:
+    world = World()
+    if target.kind == "skill":
+        f = target.path if target.path.is_file() else target.path / "SKILL.md"
+        _add_skill(world, f)
+    elif target.kind == "plugin":
+        root = target.path.resolve()
+        world.plugin = _parse_manifest(root)
+        skills_dir = root / "skills"
+        if skills_dir.is_dir():
+            for child in sorted(skills_dir.iterdir()):
+                f = child / "SKILL.md"
+                if child.is_dir() and f.is_file():
+                    _add_skill(world, f)
+        mcp_path = root / "mcp.json"
+        if mcp_path.is_file():
+            _add_mcp_file(world, mcp_path, root, provisional=False)
+    else:
+        p = target.path.resolve()
+        if target.mcp_flavor == "agent-plugins":
+            root = p.parent
+            provisional = not (root / "plugin.json").is_file()
+            _add_mcp_file(world, p, root, provisional)
+        else:
+            _add_harness_mcp(world, p)
+    return world
+
+
+def _add_skill(world: World, skill_file: Path) -> None:
+    c, unreadable = make_contributor(skill_file)
+    if c is None:
+        world.unreadable.append(("", str(skill_file)))
+        return
+    world.unreadable += [("", p) for p in unreadable]
+    world.contributors[c.id] = c
+    for b in _find_broken_symlinks(skill_file.parent, recursive=True):
+        world.broken_symlinks.append(BrokenSymlink(harness="", path=b))
+
+
+def _parse_manifest(root: Path) -> PluginManifest:
+    path = root / "plugin.json"
+    text = path.read_text(encoding="utf-8", errors="replace")
+    try:
+        raw = json.loads(text)
+    except json.JSONDecodeError as e:
+        return PluginManifest(root=str(root), raw_text=text, parse_error=str(e))
+    if not isinstance(raw, dict):
+        return PluginManifest(
+            root=str(root), raw_text=text, parse_error="top level is not an object"
+        )
+    return PluginManifest(
+        root=str(root),
+        raw=raw,
+        raw_text=text,
+        name=raw.get("name") if isinstance(raw.get("name"), str) else None,
+        version=raw.get("version") if isinstance(raw.get("version"), str) else None,
+        schema_url=raw.get("$schema") if isinstance(raw.get("$schema"), str) else None,
+    )
+
+
+def _add_mcp_file(world: World, path: Path, root: Path, provisional: bool) -> None:
+    text = path.read_text(encoding="utf-8", errors="replace")
+    try:
+        data = json.loads(text)
+    except json.JSONDecodeError as e:
+        world.mcp_config_errors.append(("", str(path), str(e), True))
+        world.plugin_mcp = PluginMcpFile(
+            path=str(path), text=text, root=str(root), provisional_root=provisional
+        )
+        return
+    world.plugin_mcp = PluginMcpFile(
+        path=str(path), text=text, data=data if isinstance(data, dict) else None,
+        root=str(root), provisional_root=provisional,
+    )
+    servers = data.get("mcpServers") if isinstance(data, dict) else None
+    if isinstance(servers, dict):
+        world.mcp_servers = _servers_from_map(
+            servers, harness="", scope="project", source=path, in_project=True
+        )
+
+
+def _add_harness_mcp(world: World, path: Path) -> None:
+    text = path.read_text(encoding="utf-8", errors="replace")
+    try:
+        data = json.loads(text)
+    except json.JSONDecodeError as e:
+        world.mcp_config_errors.append(("", str(path), str(e), True))
+        return
+    servers = data.get("mcpServers") if isinstance(data, dict) else None
+    if isinstance(servers, dict):
+        world.mcp_servers = _servers_from_map(
+            servers, harness="", scope="project", source=path, in_project=True
+        )

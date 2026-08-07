@@ -80,3 +80,73 @@ def test_forced_type_overrides(tmp_path):
     (d / "SKILL.md").write_text("---\nname: s\ndescription: d\n---\nb\n")
     make_plugin(d)
     assert classify(d, forced="skill").kind == "skill"
+
+
+from drskill.lint import build_lint_world
+
+
+def write_skill(d: Path, name: str):
+    d.mkdir(parents=True)
+    (d / "SKILL.md").write_text(
+        f"---\nname: {name}\ndescription: Use when testing {name}.\n---\nbody\n"
+    )
+
+
+def test_build_world_skill_target(tmp_path):
+    write_skill(tmp_path / "s", "s")
+    w = build_lint_world(classify(tmp_path / "s"))
+    assert len(w.contributors) == 1
+    c = next(iter(w.contributors.values()))
+    assert c.name == "s" and c.deployments == []
+    assert w.plugin is None
+
+
+def test_build_world_plugin_target(tmp_path):
+    root = tmp_path / "p"
+    make_plugin(root)
+    write_skill(root / "skills" / "alpha", "alpha")
+    write_skill(root / "skills" / "beta", "beta")
+    # nested too deep: not discovered as a contributor
+    write_skill(root / "skills" / "group" / "gamma", "gamma")
+    (root / "mcp.json").write_text(json.dumps({
+        "$schema": "https://agent-plugins.org/schemas/1.0.0/mcp.schema.json",
+        "mcpServers": {"srv": {"type": "stdio", "command": "server-bin",
+                               "env": {"API_KEY": "sk-live-1234567890abcdef"}}},
+    }))
+    w = build_lint_world(classify(root))
+    assert w.plugin is not None and w.plugin.name == "demo-plugin"
+    assert sorted(c.name for c in w.contributors.values()) == ["alpha", "beta"]
+    assert len(w.mcp_servers) == 1
+    s = w.mcp_servers[0]
+    assert s.harness == "" and s.in_project is True
+    assert w.plugin_mcp is not None and w.plugin_mcp.data is not None
+
+
+def test_build_world_bad_manifest_and_bad_mcp(tmp_path):
+    root = tmp_path / "p"
+    root.mkdir()
+    (root / "plugin.json").write_text("{broken")
+    (root / "mcp.json").write_text("{also broken")
+    w = build_lint_world(classify(root))
+    assert w.plugin.parse_error is not None
+    assert w.plugin_mcp.data is None
+    assert len(w.mcp_config_errors) == 1
+
+
+def test_build_world_standalone_mcp_provisional_root(tmp_path):
+    f = tmp_path / "mcp.json"
+    f.write_text(json.dumps({
+        "$schema": "https://agent-plugins.org/schemas/1.0.0/mcp.schema.json",
+        "mcpServers": {},
+    }))
+    w = build_lint_world(classify(f))
+    assert w.plugin_mcp.provisional_root is True
+    assert w.plugin_mcp.root == str(tmp_path.resolve())
+
+
+def test_build_world_harness_mcp(tmp_path):
+    f = tmp_path / ".mcp.json"
+    f.write_text(json.dumps({"mcpServers": {"a": {"command": "foo"}}}))
+    w = build_lint_world(classify(f))
+    assert w.plugin_mcp is None
+    assert [s.name for s in w.mcp_servers] == ["a"]
