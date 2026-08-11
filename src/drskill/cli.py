@@ -650,6 +650,12 @@ def audit(
     since: str | None = typer.Option(
         None, "--since", help="window: 7d, 30d, or YYYY-MM-DD"
     ),
+    file: Path | None = typer.Option(
+        None, "--file", help="audit one trace file (see also --harness)"
+    ),
+    last: bool = typer.Option(
+        False, "--last", help="only the most recent session in scope"
+    ),
     json_out: bool = typer.Option(False, "--json", help="machine-readable output"),
 ) -> None:
     """Report how skills and MCP tools actually get used, from local agent traces."""
@@ -674,7 +680,35 @@ def audit(
         except ValueError:
             console.print("[red]error:[/red] invalid --since (use 7d, 30d, or YYYY-MM-DD)")
             raise typer.Exit(1)
-    data = tpipeline.run_audit(home, root, global_mode, harness, cutoff)
+    if file is not None and last:
+        console.print("[red]error:[/red] --file and --last cannot be combined")
+        raise typer.Exit(1)
+    if file is not None:
+        if not file.is_file():
+            console.print(
+                f"[red]error:[/red] no such trace file: {escape(str(file))}"
+            )
+            raise typer.Exit(1)
+        try:
+            data = tpipeline.run_audit_file(home, file, harness, cutoff)
+        except tpipeline.UnknownTraceLocation:
+            valid = ", ".join(sorted(tpipeline.ADAPTERS))
+            console.print(
+                f"[red]error:[/red] {escape(str(file))} is outside every "
+                f"known trace location; pass --harness to pick the parser "
+                f"(valid ids: {valid})"
+            )
+            raise typer.Exit(1)
+        except Exception as exc:
+            console.print(
+                f"[red]error:[/red] could not read {escape(str(file))}: "
+                f"{escape(str(exc))}"
+            )
+            raise typer.Exit(1)
+    else:
+        data = tpipeline.run_audit(
+            home, root, global_mode, harness, cutoff, last=last
+        )
     if name is not None and not json_out:
         treport.render_drilldown(console, name, data)
         return
