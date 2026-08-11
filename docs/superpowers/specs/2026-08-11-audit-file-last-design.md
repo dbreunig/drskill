@@ -64,8 +64,7 @@ today.
 
 ## Code changes
 
-- `run_audit()` in `src/drskill/traces/pipeline.py` gains parameters for the
-  explicit file and the last-session flag.
+- `run_audit()` in `src/drskill/traces/pipeline.py` gains a parameter for the last-session flag. A separate new function `run_audit_file()` handles audits of an explicit file.
 - A small helper maps a path to an adapter by checking each adapter's
   discovery root.
 - `src/drskill/cli.py` adds the two options, the mutual exclusion check, and

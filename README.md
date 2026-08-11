@@ -210,7 +210,7 @@ To audit only your most recent session, pass `--last`. It applies the normal
 scope filters first, so it means the newest session for this project, or the
 newest session anywhere when combined with `--global`:
 
-```bash
+```
 drskill audit --last
 drskill audit --last --global --harness claude-code
 ```
@@ -221,7 +221,7 @@ Claude Code trace. For a file outside the known trace locations, add
 `--harness` to name the parser. A `--file` audit reads the whole file even
 when its sessions belong to another project, and it skips the audit cache:
 
-```bash
+```
 drskill audit --file ~/.claude/projects/-Users-you-proj/abc123.jsonl
 drskill audit --file ./exported-session.jsonl --harness claude-code
 ```
