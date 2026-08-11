@@ -19,6 +19,18 @@ ADAPTERS = {
 }
 
 
+class UnknownTraceLocation(Exception):
+    """A --file path outside every adapter's trace root."""
+
+
+def infer_adapter(path: Path, home: Path):
+    resolved = path.resolve()
+    for adapter in ADAPTERS.values():
+        if resolved.is_relative_to(adapter.trace_root(home).resolve()):
+            return adapter
+    raise UnknownTraceLocation(str(path))
+
+
 class AuditData(BaseModel):
     invocations: list[Invocation] = Field(default_factory=list)
     unreadable: list[str] = Field(default_factory=list)

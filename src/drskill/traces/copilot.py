@@ -18,9 +18,13 @@ HARNESS = "copilot"
 VERSION = 2
 
 
-def discover(home: Path) -> list[Path]:
-    root = (home / "Library" / "Application Support" / "Code" / "User"
+def trace_root(home: Path) -> Path:
+    return (home / "Library" / "Application Support" / "Code" / "User"
             / "workspaceStorage")
+
+
+def discover(home: Path) -> list[Path]:
+    root = trace_root(home)
     if not root.is_dir():
         return []
     return sorted(root.glob("*/chatSessions/*.json"))

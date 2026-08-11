@@ -1,6 +1,8 @@
 import datetime as dt
 import json
 
+import pytest
+
 from drskill.traces import cache, pipeline
 
 UTC = dt.timezone.utc
@@ -172,3 +174,22 @@ def test_adapter_version_bump_forces_reextraction(tmp_path, monkeypatch):
     data = pipeline.run_audit(tmp_path, root, False, None, None)
     assert len(calls) > 0
     assert len(data.invocations) == 1
+
+
+def test_infer_adapter_maps_known_roots(tmp_path):
+    cases = {
+        "claude-code": tmp_path / ".claude" / "projects" / "-a" / "s1.jsonl",
+        "codex": (tmp_path / ".codex" / "sessions" / "2026" / "08" / "11"
+                  / "rollout-1.jsonl"),
+        "pi": tmp_path / ".pi" / "agent" / "sessions" / "-a" / "s1.jsonl",
+        "copilot": (tmp_path / "Library" / "Application Support" / "Code"
+                    / "User" / "workspaceStorage" / "w1" / "chatSessions"
+                    / "s1.json"),
+    }
+    for harness, path in cases.items():
+        assert pipeline.infer_adapter(path, tmp_path).HARNESS == harness
+
+
+def test_infer_adapter_unknown_location_raises(tmp_path):
+    with pytest.raises(pipeline.UnknownTraceLocation):
+        pipeline.infer_adapter(tmp_path / "elsewhere" / "t.jsonl", tmp_path)
