@@ -29,8 +29,12 @@ BUILTIN_COMMANDS = frozenset({
 })
 
 
+def trace_root(home: Path) -> Path:
+    return home / ".claude" / "projects"
+
+
 def discover(home: Path) -> list[Path]:
-    root = home / ".claude" / "projects"
+    root = trace_root(home)
     if not root.is_dir():
         return []
     return sorted(root.glob("*/*.jsonl"))

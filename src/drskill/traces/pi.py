@@ -18,8 +18,12 @@ HARNESS = "pi"
 VERSION = 3
 
 
+def trace_root(home: Path) -> Path:
+    return home / ".pi" / "agent" / "sessions"
+
+
 def discover(home: Path) -> list[Path]:
-    root = home / ".pi" / "agent" / "sessions"
+    root = trace_root(home)
     if not root.is_dir():
         return []
     return sorted(root.glob("*/*.jsonl"))

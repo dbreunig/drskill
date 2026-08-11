@@ -18,8 +18,12 @@ HARNESS = "codex"
 VERSION = 3
 
 
+def trace_root(home: Path) -> Path:
+    return home / ".codex" / "sessions"
+
+
 def discover(home: Path) -> list[Path]:
-    root = home / ".codex" / "sessions"
+    root = trace_root(home)
     if not root.is_dir():
         return []
     return sorted(root.glob("*/*/*/rollout-*.jsonl"))

@@ -1,6 +1,8 @@
 import datetime as dt
 import json
 
+import pytest
+
 from drskill.traces import cache, pipeline
 
 UTC = dt.timezone.utc
@@ -172,3 +174,69 @@ def test_adapter_version_bump_forces_reextraction(tmp_path, monkeypatch):
     data = pipeline.run_audit(tmp_path, root, False, None, None)
     assert len(calls) > 0
     assert len(data.invocations) == 1
+
+
+def test_infer_adapter_maps_known_roots(tmp_path):
+    cases = {
+        "claude-code": tmp_path / ".claude" / "projects" / "-a" / "s1.jsonl",
+        "codex": (tmp_path / ".codex" / "sessions" / "2026" / "08" / "11"
+                  / "rollout-1.jsonl"),
+        "pi": tmp_path / ".pi" / "agent" / "sessions" / "-a" / "s1.jsonl",
+        "copilot": (tmp_path / "Library" / "Application Support" / "Code"
+                    / "User" / "workspaceStorage" / "w1" / "chatSessions"
+                    / "s1.json"),
+    }
+    for harness, path in cases.items():
+        assert pipeline.infer_adapter(path, tmp_path).HARNESS == harness
+
+
+def test_infer_adapter_unknown_location_raises(tmp_path):
+    with pytest.raises(pipeline.UnknownTraceLocation):
+        pipeline.infer_adapter(tmp_path / "elsewhere" / "t.jsonl", tmp_path)
+
+
+def test_run_audit_file_bypasses_project_scope(tmp_path):
+    f = _write_claude(tmp_path, "-b", "/somewhere/else", skill="outproj")
+    data = pipeline.run_audit_file(tmp_path, f, harness=None, since=None)
+    assert [i.name for i in data.invocations] == ["outproj"]
+
+
+def test_run_audit_file_applies_since(tmp_path):
+    d = tmp_path / ".claude" / "projects" / "-a"
+    d.mkdir(parents=True)
+    f = d / "s1.jsonl"
+    events = [_claude_event("/p", "old", ts="2026-01-01T00:00:00.000Z"),
+              _claude_event("/p", "new", ts="2026-07-20T00:00:00.000Z")]
+    f.write_text("\n".join(json.dumps(e) for e in events) + "\n")
+    cutoff = dt.datetime(2026, 6, 1, tzinfo=UTC)
+    data = pipeline.run_audit_file(tmp_path, f, harness=None, since=cutoff)
+    assert [i.name for i in data.invocations] == ["new"]
+
+
+def test_run_audit_file_harness_overrides_inference(tmp_path):
+    d = tmp_path / "exports"
+    d.mkdir()
+    f = d / "t.jsonl"
+    f.write_text(json.dumps(_claude_event("/p", "moved")) + "\n")
+    data = pipeline.run_audit_file(tmp_path, f, harness="claude-code",
+                                   since=None)
+    assert [i.name for i in data.invocations] == ["moved"]
+
+
+def test_run_audit_file_writes_no_cache(tmp_path):
+    f = _write_claude(tmp_path, "-a", "/p", skill="release")
+    pipeline.run_audit_file(tmp_path, f, harness=None, since=None)
+    cdir = cache.audit_cache_dir(tmp_path)
+    assert not (cdir.is_dir() and list(cdir.glob("*.json")))
+
+
+def test_last_keeps_only_newest_session(tmp_path):
+    root = tmp_path / "repo"
+    root.mkdir()
+    _write_claude(tmp_path, "-a", str(root), skill="older", session="s1",
+                  ts="2026-07-01T10:00:00.000Z")
+    _write_claude(tmp_path, "-a", str(root), skill="newer", session="s2",
+                  ts="2026-07-02T10:00:00.000Z")
+    data = pipeline.run_audit(tmp_path, root, global_mode=False,
+                              harness=None, since=None, last=True)
+    assert [i.name for i in data.invocations] == ["newer"]

@@ -19,6 +19,18 @@ ADAPTERS = {
 }
 
 
+class UnknownTraceLocation(Exception):
+    """A --file path outside every adapter's trace root."""
+
+
+def infer_adapter(path: Path, home: Path):
+    resolved = path.resolve()
+    for adapter in ADAPTERS.values():
+        if resolved.is_relative_to(adapter.trace_root(home).resolve()):
+            return adapter
+    raise UnknownTraceLocation(str(path))
+
+
 class AuditData(BaseModel):
     invocations: list[Invocation] = Field(default_factory=list)
     unreadable: list[str] = Field(default_factory=list)
@@ -31,6 +43,7 @@ def run_audit(
     global_mode: bool,
     harness: str | None,
     since: dt.datetime | None,
+    last: bool = False,
 ) -> AuditData:
     cdir = cache.audit_cache_dir(home)
     data = AuditData()
@@ -62,6 +75,31 @@ def run_audit(
             data.invocations.extend(entry.invocations)
     cache.prune_vanished(cdir, live_keys)
     data.invocations = _filtered(data.invocations, root, global_mode, since)
+    data.invocations.sort(key=lambda i: i.timestamp)
+    if last and data.invocations:
+        newest = data.invocations[-1].source_file
+        data.invocations = [
+            i for i in data.invocations if i.source_file == newest
+        ]
+    return data
+
+
+def run_audit_file(
+    home: Path,
+    path: Path,
+    harness: str | None,
+    since: dt.datetime | None,
+) -> AuditData:
+    """Audit one explicit trace file: no cache, no project-scope filter."""
+    adapter = ADAPTERS[harness] if harness else infer_adapter(path, home)
+    result = adapter.extract(path)
+    data = AuditData()
+    data.invocations = [
+        i for i in result.invocations
+        if since is None or i.timestamp >= since
+    ]
+    if result.recognized == 0 and path.stat().st_size > 0:
+        data.drifted[adapter.HARNESS] = 1
     data.invocations.sort(key=lambda i: i.timestamp)
     return data
 
