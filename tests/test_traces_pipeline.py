@@ -228,3 +228,15 @@ def test_run_audit_file_writes_no_cache(tmp_path):
     pipeline.run_audit_file(tmp_path, f, harness=None, since=None)
     cdir = cache.audit_cache_dir(tmp_path)
     assert not (cdir.is_dir() and list(cdir.glob("*.json")))
+
+
+def test_last_keeps_only_newest_session(tmp_path):
+    root = tmp_path / "repo"
+    root.mkdir()
+    _write_claude(tmp_path, "-a", str(root), skill="older", session="s1",
+                  ts="2026-07-01T10:00:00.000Z")
+    _write_claude(tmp_path, "-a", str(root), skill="newer", session="s2",
+                  ts="2026-07-02T10:00:00.000Z")
+    data = pipeline.run_audit(tmp_path, root, global_mode=False,
+                              harness=None, since=None, last=True)
+    assert [i.name for i in data.invocations] == ["newer"]

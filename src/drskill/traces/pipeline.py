@@ -43,6 +43,7 @@ def run_audit(
     global_mode: bool,
     harness: str | None,
     since: dt.datetime | None,
+    last: bool = False,
 ) -> AuditData:
     cdir = cache.audit_cache_dir(home)
     data = AuditData()
@@ -75,6 +76,11 @@ def run_audit(
     cache.prune_vanished(cdir, live_keys)
     data.invocations = _filtered(data.invocations, root, global_mode, since)
     data.invocations.sort(key=lambda i: i.timestamp)
+    if last and data.invocations:
+        newest = data.invocations[-1].source_file
+        data.invocations = [
+            i for i in data.invocations if i.source_file == newest
+        ]
     return data
 
 
