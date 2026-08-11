@@ -78,6 +78,26 @@ def run_audit(
     return data
 
 
+def run_audit_file(
+    home: Path,
+    path: Path,
+    harness: str | None,
+    since: dt.datetime | None,
+) -> AuditData:
+    """Audit one explicit trace file: no cache, no project-scope filter."""
+    adapter = ADAPTERS[harness] if harness else infer_adapter(path, home)
+    result = adapter.extract(path)
+    data = AuditData()
+    data.invocations = [
+        i for i in result.invocations
+        if since is None or i.timestamp >= since
+    ]
+    if result.recognized == 0 and path.stat().st_size > 0:
+        data.drifted[adapter.HARNESS] = 1
+    data.invocations.sort(key=lambda i: i.timestamp)
+    return data
+
+
 def _filtered(
     invocations: list[Invocation],
     root: Path,

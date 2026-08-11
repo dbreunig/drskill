@@ -193,3 +193,38 @@ def test_infer_adapter_maps_known_roots(tmp_path):
 def test_infer_adapter_unknown_location_raises(tmp_path):
     with pytest.raises(pipeline.UnknownTraceLocation):
         pipeline.infer_adapter(tmp_path / "elsewhere" / "t.jsonl", tmp_path)
+
+
+def test_run_audit_file_bypasses_project_scope(tmp_path):
+    f = _write_claude(tmp_path, "-b", "/somewhere/else", skill="outproj")
+    data = pipeline.run_audit_file(tmp_path, f, harness=None, since=None)
+    assert [i.name for i in data.invocations] == ["outproj"]
+
+
+def test_run_audit_file_applies_since(tmp_path):
+    d = tmp_path / ".claude" / "projects" / "-a"
+    d.mkdir(parents=True)
+    f = d / "s1.jsonl"
+    events = [_claude_event("/p", "old", ts="2026-01-01T00:00:00.000Z"),
+              _claude_event("/p", "new", ts="2026-07-20T00:00:00.000Z")]
+    f.write_text("\n".join(json.dumps(e) for e in events) + "\n")
+    cutoff = dt.datetime(2026, 6, 1, tzinfo=UTC)
+    data = pipeline.run_audit_file(tmp_path, f, harness=None, since=cutoff)
+    assert [i.name for i in data.invocations] == ["new"]
+
+
+def test_run_audit_file_harness_overrides_inference(tmp_path):
+    d = tmp_path / "exports"
+    d.mkdir()
+    f = d / "t.jsonl"
+    f.write_text(json.dumps(_claude_event("/p", "moved")) + "\n")
+    data = pipeline.run_audit_file(tmp_path, f, harness="claude-code",
+                                   since=None)
+    assert [i.name for i in data.invocations] == ["moved"]
+
+
+def test_run_audit_file_writes_no_cache(tmp_path):
+    f = _write_claude(tmp_path, "-a", "/p", skill="release")
+    pipeline.run_audit_file(tmp_path, f, harness=None, since=None)
+    cdir = cache.audit_cache_dir(tmp_path)
+    assert not (cdir.is_dir() and list(cdir.glob("*.json")))
