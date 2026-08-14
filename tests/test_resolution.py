@@ -1,3 +1,4 @@
+import json
 import os
 from pathlib import Path
 
@@ -326,3 +327,96 @@ def test_make_contributor_standalone(tmp_path):
     assert c.token_cost.body_tokens > 0 and unreadable == []
     missing, u2 = make_contributor(tmp_path / "nope" / "SKILL.md")
     assert missing is None and u2 == []
+
+
+def test_plugin_instance_stamps_provenance_and_suite(tmp_path):
+    from drskill.discovery import discover
+    from drskill.harnesses import load_harnesses
+    from drskill.resolution import build_world
+
+    h = next(x for x in load_harnesses() if x.id == "claude-code")
+    home, proj = tmp_path / "home", tmp_path / "proj"
+    proj.mkdir()
+    active = home / ".claude" / "plugins" / "cache" / "mkt" / "sp" / "1.0.0"
+    d = active / "skills" / "toolbox"
+    d.mkdir(parents=True)
+    (d / "SKILL.md").write_text(
+        "---\nname: toolbox\ndescription: d\n---\nbody\n", encoding="utf-8"
+    )
+    state = home / ".claude" / "plugins" / "installed_plugins.json"
+    state.parent.mkdir(parents=True, exist_ok=True)
+    state.write_text(json.dumps({"version": 1, "plugins": {"sp@mkt": [
+        {"scope": "user", "installPath": str(active), "version": "1.0.0"},
+    ]}}), encoding="utf-8")
+    i, b, _u = discover(h, proj, home)
+    world = build_world(i, {h.id: h}, b)
+    (c,) = [c for c in world.contributors.values() if c.name == "toolbox"]
+    assert c.source.kind == "plugin"
+    assert c.source.source == "sp@mkt==1.0.0"
+    assert c.suite == "sp"
+
+
+def test_claude_code_plugin_native_name_pair_not_shadowed(tmp_path):
+    # Claude Code namespaces plugin skills (plugin:skill), so a plugin
+    # skill sharing a native skill's name is NOT a real load conflict.
+    from drskill.discovery import discover
+    from drskill.harnesses import load_harnesses
+    from drskill.resolution import build_world
+
+    h = next(x for x in load_harnesses() if x.id == "claude-code")
+    home, proj = tmp_path / "home", tmp_path / "proj"
+    nd = proj / ".claude" / "skills" / "toolbox"
+    nd.mkdir(parents=True)
+    (nd / "SKILL.md").write_text(
+        "---\nname: toolbox\ndescription: native\n---\nnative body\n",
+        encoding="utf-8",
+    )
+    active = home / ".claude" / "plugins" / "cache" / "mkt" / "sp" / "1.0.0"
+    pd = active / "skills" / "toolbox"
+    pd.mkdir(parents=True)
+    (pd / "SKILL.md").write_text(
+        "---\nname: toolbox\ndescription: plugin\n---\nplugin body\n",
+        encoding="utf-8",
+    )
+    state = home / ".claude" / "plugins" / "installed_plugins.json"
+    state.parent.mkdir(parents=True, exist_ok=True)
+    state.write_text(json.dumps({"version": 1, "plugins": {"sp@mkt": [
+        {"scope": "user", "installPath": str(active), "version": "1.0.0"},
+    ]}}), encoding="utf-8")
+    i, b, _u = discover(h, proj, home)
+    world = build_world(i, {h.id: h}, b)
+    for c in world.contributors.values():
+        for d in c.deployments:
+            assert d.shadowed_by is None
+
+
+def test_gemini_native_shadows_extension_skill(tmp_path):
+    # gemini-cli DOES shadow: user/workspace skills override extension
+    # skills on a name collision (last-wins in skillManager).
+    from drskill.discovery import discover
+    from drskill.harnesses import load_harnesses
+    from drskill.resolution import build_world
+
+    h = next(x for x in load_harnesses() if x.id == "gemini-cli")
+    home, proj = tmp_path / "home", tmp_path / "proj"
+    nd = proj / ".gemini" / "skills" / "toolbox"
+    nd.mkdir(parents=True)
+    (nd / "SKILL.md").write_text(
+        "---\nname: toolbox\ndescription: native\n---\nnative body\n",
+        encoding="utf-8",
+    )
+    ext = home / ".gemini" / "extensions" / "ext-a"
+    ed = ext / "skills" / "toolbox"
+    ed.mkdir(parents=True)
+    (ed / "SKILL.md").write_text(
+        "---\nname: toolbox\ndescription: ext\n---\next body\n",
+        encoding="utf-8",
+    )
+    (ext / "gemini-extension.json").write_text(
+        json.dumps({"name": "ext-a", "version": "1.0.0"}), encoding="utf-8"
+    )
+    i, b, _u = discover(h, proj, home)
+    world = build_world(i, {h.id: h}, b)
+    ext_c = next(c for c in world.contributors.values()
+                 if c.source.kind == "plugin")
+    assert any(d.shadowed_by for d in ext_c.deployments)

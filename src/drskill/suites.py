@@ -48,6 +48,8 @@ def assign_suites(world: World, home: Path) -> None:
             continue
         if c.kind != "skill":
             continue
+        if c.source.kind == "plugin" and c.suite:
+            continue  # store-scanned: suite pre-attributed by the adapter
         found = by_hash.get(c.content_hash)
         if found is None and c.source.kind == "skills-lock" and c.source.source:
             found = c.source.source
