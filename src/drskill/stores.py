@@ -203,9 +203,78 @@ def _codex(home: Path, project_root: Path) -> tuple[list[InstalledPlugin], list[
     return out, unreadable
 
 
+# --- gemini-cli -------------------------------------------------------------
+# Source-verified 2026-08-14 (google-gemini/gemini-cli commit c0d1924):
+# store at ~/.gemini/extensions/<name>/ with identity in
+# gemini-extension.json (required name, version; extensions/storage.ts:23-39,
+# extension.ts:24-26); skills in a FIXED skills/ subdir loaded
+# NON-recursively -- glob exactly SKILL.md + */SKILL.md
+# (extension-manager.ts:921-922, skillLoader.ts:127). Enablement in
+# extension-enablement.json: {name: {overrides: [rule, ...]}}; default
+# enabled, rules iterate in file order and each MATCHING rule sets
+# enabled = not-disable; "!" prefix = disable, trailing "*" = include
+# subdirs, base rule is slash-wrapped; exact rules match only that dir
+# (extensionEnablement.ts:146-178, 35-43, 102-108). Missing or corrupt
+# file = everything enabled (:189-202). Extension skills rank below user
+# and workspace skills (skillManager.ts:54-99), which discovery encodes
+# by appending plugin roots after native paths.
+def _gemini_enabled(name: str, config: dict, project_root: Path) -> bool:
+    entry = config.get(name)
+    overrides = entry.get("overrides") if isinstance(entry, dict) else None
+    if not isinstance(overrides, list):
+        return True
+    cwd = "/" + str(project_root.resolve()).replace("\\", "/").strip("/") + "/"
+    enabled = True
+    for rule in overrides:
+        if not isinstance(rule, str) or not rule:
+            continue
+        disable = rule.startswith("!")
+        r = rule[1:] if disable else rule
+        subdirs = r.endswith("*")
+        base = r[:-1] if subdirs else r
+        if cwd == base or (subdirs and cwd.startswith(base)):
+            enabled = not disable
+    return enabled
+
+
+def _gemini_cli(home: Path, project_root: Path) -> tuple[list[InstalledPlugin], list[str]]:
+    unreadable: list[str] = []
+    ext_root = home / ".gemini" / "extensions"
+    if not ext_root.is_dir():
+        return [], unreadable
+    enablement_path = ext_root / "extension-enablement.json"
+    enablement = _read_json(enablement_path, unreadable)
+    if not isinstance(enablement, dict):
+        if enablement is not None and str(enablement_path) not in unreadable:
+            unreadable.append(str(enablement_path))
+        enablement = {}
+    out: list[InstalledPlugin] = []
+    for ext_dir in sorted(p for p in ext_root.iterdir() if p.is_dir()):
+        manifest_path = ext_dir / "gemini-extension.json"
+        manifest = _read_json(manifest_path, unreadable)
+        if not isinstance(manifest, dict) or not manifest.get("name"):
+            if manifest is not None and str(manifest_path) not in unreadable:
+                unreadable.append(str(manifest_path))
+            continue
+        name = str(manifest["name"])
+        out.append(InstalledPlugin(
+            harness="gemini-cli",
+            name=name,
+            marketplace=None,
+            version=str(manifest["version"]) if manifest.get("version") else None,
+            scope="user",
+            skills_roots=[ext_dir / "skills"],
+            enabled=_gemini_enabled(name, enablement, project_root),
+            recursive=False,
+            evidence=manifest_path,
+        ))
+    return out, unreadable
+
+
 ADAPTERS: dict[str, Callable[[Path, Path], tuple[list[InstalledPlugin], list[str]]]] = {
     "claude-code": _claude_code,
     "codex": _codex,
+    "gemini-cli": _gemini_cli,
 }
 
 

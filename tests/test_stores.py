@@ -204,3 +204,89 @@ def test_codex_valid_toml_wrong_shaped_plugins_is_unreadable(tmp_path):
     p = _codex_config(home, 'plugins = "not-a-table"\n')
     plugins, unreadable = discover_plugins("codex", home, proj)
     assert plugins == [] and unreadable == [str(p)]
+
+
+def _gemini_ext(home: Path, name: str, version: str = "1.0.0") -> Path:
+    d = home / ".gemini" / "extensions" / name
+    _skill(d / "skills", f"{name}-skill")
+    (d / "gemini-extension.json").write_text(
+        json.dumps({"name": name, "version": version}), encoding="utf-8"
+    )
+    return d
+
+
+def test_gemini_extension_discovered_nonrecursive(tmp_path):
+    home, proj = tmp_path / "home", tmp_path / "proj"
+    proj.mkdir()
+    d = _gemini_ext(home, "ext-a")
+    plugins, unreadable = discover_plugins("gemini-cli", home, proj)
+    assert unreadable == []
+    (p,) = plugins
+    assert p.name == "ext-a" and p.marketplace is None
+    assert p.version == "1.0.0" and p.enabled
+    assert p.recursive is False  # loader globs SKILL.md + */SKILL.md only
+    assert p.skills_roots == [d / "skills"]
+    assert p.provenance_source == "ext-a==1.0.0"
+
+
+def test_gemini_enablement_rules(tmp_path):
+    # Semantics from extensionEnablement.ts (commit c0d1924): default
+    # enabled; overrides iterate in file order, each matching rule sets
+    # enabled = not-disable; "!" = disable; trailing "*" = include
+    # subdirs; exact rule matches only that dir.
+    home = tmp_path / "home"
+    proj = tmp_path / "work" / "sub"
+    proj.mkdir(parents=True)
+    _gemini_ext(home, "ext-a")
+    enablement = home / ".gemini" / "extensions" / "extension-enablement.json"
+    work = str((tmp_path / "work").resolve())
+    enablement.write_text(json.dumps({
+        "ext-a": {"overrides": [f"!{work}/*", f"{str(proj.resolve())}/"]}
+    }), encoding="utf-8")
+    # disabled under work/*, but the later exact rule re-enables at proj
+    plugins, _ = discover_plugins("gemini-cli", home, proj)
+    assert plugins[0].enabled is True
+    # a sibling dir under work/ only matches the disable rule
+    sib = tmp_path / "work" / "other"
+    sib.mkdir()
+    plugins, _ = discover_plugins("gemini-cli", home, sib)
+    assert plugins[0].enabled is False
+
+
+def test_gemini_exact_rule_does_not_match_subdir(tmp_path):
+    home = tmp_path / "home"
+    proj = tmp_path / "work" / "sub"
+    proj.mkdir(parents=True)
+    _gemini_ext(home, "ext-a")
+    enablement = home / ".gemini" / "extensions" / "extension-enablement.json"
+    enablement.write_text(json.dumps({
+        "ext-a": {"overrides": [f"!{str((tmp_path / 'work').resolve())}/"]}
+    }), encoding="utf-8")
+    plugins, _ = discover_plugins("gemini-cli", home, proj)
+    assert plugins[0].enabled is True  # exact rule matches work/ only
+
+
+def test_gemini_corrupt_enablement_defaults_enabled(tmp_path):
+    home, proj = tmp_path / "home", tmp_path / "proj"
+    proj.mkdir()
+    _gemini_ext(home, "ext-a")
+    enablement = home / ".gemini" / "extensions" / "extension-enablement.json"
+    enablement.write_text("{broken", encoding="utf-8")
+    plugins, unreadable = discover_plugins("gemini-cli", home, proj)
+    # matches gemini's own behavior: corrupt file -> everything enabled;
+    # drskill additionally surfaces the file as unreadable
+    assert plugins[0].enabled is True
+    assert unreadable == [str(enablement)]
+
+
+def test_gemini_wrong_shaped_enablement_defaults_enabled_and_unreadable(tmp_path):
+    home, proj = tmp_path / "home", tmp_path / "proj"
+    proj.mkdir()
+    _gemini_ext(home, "ext-a")
+    enablement = home / ".gemini" / "extensions" / "extension-enablement.json"
+    enablement.write_text("[]", encoding="utf-8")
+    plugins, unreadable = discover_plugins("gemini-cli", home, proj)
+    # valid JSON but wrong shape (array instead of dict) -> extension still enabled;
+    # file surfaces as unreadable
+    assert plugins[0].enabled is True
+    assert unreadable == [str(enablement)]
