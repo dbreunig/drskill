@@ -1,7 +1,7 @@
 # Plugin-install stores as scan and suite surfaces — Design
 
 **Date:** 2026-08-14
-**Status:** Approved (interactive brainstorming session)
+**Status:** Approved (interactive brainstorming session); shipped 2026-08-14
 
 ## Problem
 
@@ -256,3 +256,38 @@ Acks/fingerprints unchanged.
   cycle — NOT CONFIRMED, so left out).
 - codex depth-2 vs shallow approximation: revisit if a real agent-plugin
   ships nested skill dirs.
+
+## Gate results (2026-08-14)
+
+Full suite: `uv run pytest -q` — 646 passed (baseline was 611 before this
+feature; 35 new tests across Tasks 1–6), no failures.
+
+Real-machine gate, run read-only against this machine:
+
+- `drskill list` on the drskill repo shows all 14 superpowers skills for
+  Claude Code with `source = plugin`, `suite = superpowers`, `scope = user`
+  — matching the machine's 6.3.0 user-scope install
+  (`~/.claude/plugins/cache/claude-plugins-official/superpowers/6.3.0/`).
+  No 4.3.1 material appears in this repo's scan.
+- Scanning from `/Users/dbreunig/Development/plumb` instead surfaces both
+  the project-scope 4.3.1 pin (from `installed_plugins.json`'s `local`
+  entry keyed to that `projectPath`) and the user-scope 6.3.0 install as
+  distinct contributors — confirming project-scope confinement holds in
+  both directions and no stale-version leakage occurs either way.
+- `drskill scan` completed with no crash; `drskill scan --json` exited 1
+  (findings present, as expected — not a failure).
+- The pre-existing `[e010] double-load` finding (opencode loading
+  `pyportal` twice) is present and byte-for-byte unchanged from
+  2026-08-13.
+- New findings appeared now that plugin skills participate in checks,
+  all judged real on inspection: `exact-duplicate`/`near-duplicate`
+  between the claude-code 6.3.0 cache, the codex 6.2.0 cache, and flat
+  `~/.agents/skills` copies of the same superpowers skills (three
+  genuinely different copies drifting apart); `injection-credential-read`
+  and `injection-egress` on codex-cached `template-creator` and
+  `sites-building`; `spec-name-mismatch` on codex-cached `Presentations`/
+  `Spreadsheets`. All evidence paths point at real files with real
+  content, not scanner artifacts. Nothing was acked; user state (ledgers,
+  `~/.drskill/state/`) was left untouched.
+- No bugs found: no crash, no wrong scope attribution, no stale cache
+  version scanned as if active.

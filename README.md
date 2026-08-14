@@ -450,7 +450,7 @@ The `suite` column names where a row came from. For a skill it is the plugin or 
 
 ## Known limitations
 
-Claude Code skills bundled inside installed plugins are not scanned yet. `drskill scan` only walks the plain `.claude/skills` directories described in the harness table; it does not look inside installed plugin packages. `drskill lint` does check a plugin directory you point it at, but only in the Agent Plugins layout with `plugin.json` at the root, not Claude Code's older `.claude-plugin` layout.
+Plugin-delivered skills are scanned like any other skill for the five stores drskill knows: Claude Code, Codex, Gemini CLI, Copilot, and droid. Each enabled plugin's skill roots are appended to that harness's loadout; disabled plugins and stale cache versions are never visited. `drskill lint` does check a plugin directory you point it at, but only in the Agent Plugins layout with `plugin.json` at the root, not Claude Code's older `.claude-plugin` layout.
 
 `.claude/commands/` directories use the same `` !`command` `` and ```` ```! ```` invocation-time shell syntax as skills, but drskill does not discover them yet, so a command file's embedded shell commands are invisible to `injection-shell-unreviewed` and `injection-shell-dangerous`.
 
