@@ -247,6 +247,21 @@ Acks/fingerprints unchanged.
 
 ## Follow-ups (logged, not this cycle)
 
+From the final whole-branch review (2026-08-14, all shipped-as-is by
+ruling): double-load's fix command suggests deleting inside managed
+plugin caches — should say disable/uninstall instead when a deployment
+is plugin-delivered; hostile installPath/cache_path values are followed
+verbatim (a state file pointing at / walks the filesystem — consider
+bounding roots to the store dir); README's plugin-store paragraph sits
+under Known limitations and elides the claude-code shadow-pairing
+carve-out; typing.Callable → collections.abc.Callable; duplicate
+unreadable entries when one state file has multiple mis-typed fields
+(one-line not-in guard in _claude_code/_copilot). Plan-defect note for
+the record: the plan's Task-2 reference code was actually RIGHT to stay
+silent on a config.toml with no [plugins] table (normal no-plugins
+state) — the wrong-shape-surfacing ruling was initially over-applied
+there and corrected in the final fix wave.
+
 - opencode config-injected skill roots (`config.skills.paths`,
   `plugin` entries) — needs config parsing.
 - Stale-cache / plugin-version drift checks (e.g. flag a project
