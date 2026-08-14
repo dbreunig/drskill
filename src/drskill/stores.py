@@ -52,6 +52,22 @@ def _read_json(path: Path, unreadable: list[str]):
         return None
 
 
+def _read_jsonc(path: Path, unreadable: list[str]):
+    """JSON preceded by // comment lines (copilot's config.json style)."""
+    if not path.is_file():
+        return None
+    try:
+        text = path.read_text(encoding="utf-8")
+        body = "\n".join(
+            line for line in text.splitlines()
+            if not line.lstrip().startswith("//")
+        )
+        return json.loads(body)
+    except (OSError, ValueError):
+        unreadable.append(str(path))
+        return None
+
+
 # --- claude-code -----------------------------------------------------------
 # Observed live 2026-08-14: cache/<marketplace>/<plugin>/<version>/skills
 # with STALE version dirs retained; ~/.claude/plugins/installed_plugins.json
@@ -271,10 +287,112 @@ def _gemini_cli(home: Path, project_root: Path) -> tuple[list[InstalledPlugin], 
     return out, unreadable
 
 
+# --- copilot ----------------------------------------------------------------
+# Empirical 2026-08-14 (GitHub Copilot CLI 1.0.80, sandboxed install probe):
+# store at ~/.copilot/installed-plugins/<marketplace>/<plugin>/ (whole
+# plugin copied once, unversioned dirs) with skills under skills/; state in
+# ~/.copilot/config.json (JSONC: comment lines precede the JSON) --
+# installedPlugins[] with name/marketplace/version/cache_path -- and
+# ~/.copilot/settings.json enabledPlugins keyed "name@marketplace".
+# Collision rank probed stable: project > personal > plugin, which
+# discovery encodes by appending plugin roots after native paths.
+# Recursion inside a plugin's skills dir was not probed; harness default
+# (recursive) assumed.
+def _copilot(home: Path, project_root: Path) -> tuple[list[InstalledPlugin], list[str]]:
+    unreadable: list[str] = []
+    config_path = home / ".copilot" / "config.json"
+    config = _read_jsonc(config_path, unreadable)
+    if not isinstance(config, dict):
+        if config is not None and str(config_path) not in unreadable:
+            unreadable.append(str(config_path))
+        return [], unreadable
+    installed = config.get("installedPlugins")
+    if not isinstance(installed, list):
+        if installed is not None:
+            unreadable.append(str(config_path))
+        return [], unreadable
+    enabled_map: dict = {}
+    settings = _read_json(home / ".copilot" / "settings.json", unreadable)
+    if isinstance(settings, dict) and isinstance(settings.get("enabledPlugins"), dict):
+        enabled_map = settings["enabledPlugins"]
+    out: list[InstalledPlugin] = []
+    for entry in installed:
+        if not isinstance(entry, dict) or not entry.get("name"):
+            continue
+        name = str(entry["name"])
+        marketplace = entry.get("marketplace")
+        cache_path = entry.get("cache_path")
+        root = (Path(cache_path) if cache_path
+                else home / ".copilot" / "installed-plugins" / str(marketplace or "") / name)
+        key = f"{name}@{marketplace}" if marketplace else name
+        out.append(InstalledPlugin(
+            harness="copilot",
+            name=name,
+            marketplace=str(marketplace) if marketplace else None,
+            version=str(entry["version"]) if entry.get("version") else None,
+            scope="user",
+            skills_roots=[root / "skills"],
+            enabled=enabled_map.get(key) is not False,
+            recursive=True,
+            evidence=config_path,
+        ))
+    return out, unreadable
+
+
+# --- droid ------------------------------------------------------------------
+# Empirical 2026-08-14 (@factory/cli 0.196.0, sandboxed install probe):
+# store at ~/.factory/plugins/cache/<mkt>-<hash>/<plugin>-<hash>/<installId>/
+# with skills under skills/; one JSON per install under
+# ~/.factory/plugins/installed_plugins/ ({schemaVersion, pluginId:
+# "name@marketplace", entry: {scope, installPath, version}}). droid has no
+# skill-enumeration verb, so THAT these cached skills load (and at what
+# rank) is BEST-EFFORT, resting on prime-radiant-inc/everyharness's
+# container install checks. Scopes other than "user" are skipped (only
+# "user" observed).
+def _droid(home: Path, project_root: Path) -> tuple[list[InstalledPlugin], list[str]]:
+    unreadable: list[str] = []
+    state_dir = home / ".factory" / "plugins" / "installed_plugins"
+    if not state_dir.is_dir():
+        return [], unreadable
+    out: list[InstalledPlugin] = []
+    for state_path in sorted(state_dir.glob("*.json")):
+        data = _read_json(state_path, unreadable)
+        if not isinstance(data, dict):
+            if data is not None and str(state_path) not in unreadable:
+                unreadable.append(str(state_path))
+            continue
+        plugin_id = data.get("pluginId")
+        entry = data.get("entry")
+        if not isinstance(plugin_id, str) or not isinstance(entry, dict):
+            if str(state_path) not in unreadable:
+                unreadable.append(str(state_path))
+            continue
+        if entry.get("scope") != "user":
+            continue
+        install_path = entry.get("installPath")
+        if not install_path:
+            continue
+        name, _, marketplace = plugin_id.partition("@")
+        out.append(InstalledPlugin(
+            harness="droid",
+            name=name,
+            marketplace=marketplace or None,
+            version=str(entry["version"]) if entry.get("version") else None,
+            scope="user",
+            skills_roots=[Path(install_path) / "skills"],
+            enabled=entry.get("enabled") is not False,
+            recursive=True,
+            evidence=state_path,
+        ))
+    return out, unreadable
+
+
 ADAPTERS: dict[str, Callable[[Path, Path], tuple[list[InstalledPlugin], list[str]]]] = {
     "claude-code": _claude_code,
     "codex": _codex,
     "gemini-cli": _gemini_cli,
+    "copilot": _copilot,
+    "droid": _droid,
 }
 
 

@@ -290,3 +290,140 @@ def test_gemini_wrong_shaped_enablement_defaults_enabled_and_unreadable(tmp_path
     # file surfaces as unreadable
     assert plugins[0].enabled is True
     assert unreadable == [str(enablement)]
+
+
+def test_copilot_installed_plugin_with_jsonc_header(tmp_path):
+    home, proj = tmp_path / "home", tmp_path / "proj"
+    proj.mkdir()
+    store = home / ".copilot" / "installed-plugins" / "mkt" / "sp"
+    _skill(store / "skills", "sp-skill")
+    cfg = home / ".copilot" / "config.json"
+    cfg.parent.mkdir(parents=True, exist_ok=True)
+    # copilot writes comment lines BEFORE the JSON body (observed 1.0.80)
+    cfg.write_text(
+        "// User settings belong in settings.json.\n"
+        "// This file is managed automatically.\n"
+        + json.dumps({"installedPlugins": [
+            {"name": "sp", "marketplace": "mkt", "version": "1.2.3",
+             "cache_path": str(store)},
+        ]}),
+        encoding="utf-8",
+    )
+    (home / ".copilot" / "settings.json").write_text(
+        json.dumps({"enabledPlugins": {"sp@mkt": True}}), encoding="utf-8"
+    )
+    plugins, unreadable = discover_plugins("copilot", home, proj)
+    assert unreadable == []
+    (p,) = plugins
+    assert p.name == "sp" and p.marketplace == "mkt" and p.version == "1.2.3"
+    assert p.skills_roots == [store / "skills"]
+    assert p.enabled and p.scope == "user"
+
+
+def test_copilot_disabled_and_default_store_path(tmp_path):
+    home, proj = tmp_path / "home", tmp_path / "proj"
+    proj.mkdir()
+    store = home / ".copilot" / "installed-plugins" / "mkt" / "sp"
+    _skill(store / "skills", "sp-skill")
+    cfg = home / ".copilot" / "config.json"
+    cfg.parent.mkdir(parents=True, exist_ok=True)
+    # no cache_path: fall back to installed-plugins/<mkt>/<name>
+    cfg.write_text(json.dumps({"installedPlugins": [
+        {"name": "sp", "marketplace": "mkt", "version": "1.2.3"},
+    ]}), encoding="utf-8")
+    (home / ".copilot" / "settings.json").write_text(
+        json.dumps({"enabledPlugins": {"sp@mkt": False}}), encoding="utf-8"
+    )
+    plugins, _ = discover_plugins("copilot", home, proj)
+    (p,) = plugins
+    assert p.skills_roots == [store / "skills"]
+    assert p.enabled is False
+
+
+def test_copilot_config_json_valid_but_wrong_shape_is_unreadable(tmp_path):
+    home, proj = tmp_path / "home", tmp_path / "proj"
+    proj.mkdir()
+    cfg = home / ".copilot" / "config.json"
+    cfg.parent.mkdir(parents=True, exist_ok=True)
+    cfg.write_text("[]", encoding="utf-8")
+    plugins, unreadable = discover_plugins("copilot", home, proj)
+    assert plugins == [] and unreadable == [str(cfg)]
+
+
+def test_copilot_installed_plugins_present_but_not_list_is_unreadable(tmp_path):
+    home, proj = tmp_path / "home", tmp_path / "proj"
+    proj.mkdir()
+    cfg = home / ".copilot" / "config.json"
+    cfg.parent.mkdir(parents=True, exist_ok=True)
+    cfg.write_text(json.dumps({"installedPlugins": "not-a-list"}), encoding="utf-8")
+    plugins, unreadable = discover_plugins("copilot", home, proj)
+    assert plugins == [] and unreadable == [str(cfg)]
+
+
+def test_droid_installed_plugins(tmp_path):
+    home, proj = tmp_path / "home", tmp_path / "proj"
+    proj.mkdir()
+    install = home / ".factory" / "plugins" / "cache" / "mkt-ab" / "sp-cd" / "v1"
+    _skill(install / "skills", "sp-skill")
+    state_dir = home / ".factory" / "plugins" / "installed_plugins"
+    state_dir.mkdir(parents=True)
+    (state_dir / "sp-mkt-user-1234.json").write_text(json.dumps({
+        "schemaVersion": 1,
+        "pluginId": "sp@mkt",
+        "entry": {"scope": "user", "installPath": str(install), "version": "v1"},
+    }), encoding="utf-8")
+    plugins, unreadable = discover_plugins("droid", home, proj)
+    assert unreadable == []
+    (p,) = plugins
+    assert p.name == "sp" and p.marketplace == "mkt" and p.version == "v1"
+    assert p.skills_roots == [install / "skills"]
+    assert p.scope == "user" and p.enabled
+
+
+def test_droid_malformed_entry_is_unreadable(tmp_path):
+    home, proj = tmp_path / "home", tmp_path / "proj"
+    proj.mkdir()
+    state_dir = home / ".factory" / "plugins" / "installed_plugins"
+    state_dir.mkdir(parents=True)
+    bad = state_dir / "bad.json"
+    bad.write_text("{nope", encoding="utf-8")
+    plugins, unreadable = discover_plugins("droid", home, proj)
+    assert plugins == [] and unreadable == [str(bad)]
+
+
+def test_droid_per_install_json_valid_but_wrong_shape_is_unreadable(tmp_path):
+    home, proj = tmp_path / "home", tmp_path / "proj"
+    proj.mkdir()
+    state_dir = home / ".factory" / "plugins" / "installed_plugins"
+    state_dir.mkdir(parents=True)
+    bad = state_dir / "bad.json"
+    bad.write_text("[]", encoding="utf-8")
+    plugins, unreadable = discover_plugins("droid", home, proj)
+    assert plugins == [] and unreadable == [str(bad)]
+
+
+def test_droid_entry_missing_is_unreadable(tmp_path):
+    home, proj = tmp_path / "home", tmp_path / "proj"
+    proj.mkdir()
+    state_dir = home / ".factory" / "plugins" / "installed_plugins"
+    state_dir.mkdir(parents=True)
+    bad = state_dir / "missing_entry.json"
+    bad.write_text(json.dumps({"schemaVersion": 1, "pluginId": "sp@mkt"}), encoding="utf-8")
+    plugins, unreadable = discover_plugins("droid", home, proj)
+    assert plugins == [] and unreadable == [str(bad)]
+
+
+def test_droid_scope_not_user_is_skipped_not_unreadable(tmp_path):
+    home, proj = tmp_path / "home", tmp_path / "proj"
+    proj.mkdir()
+    install = home / ".factory" / "plugins" / "cache" / "mkt-ab" / "sp-cd" / "v1"
+    _skill(install / "skills", "sp-skill")
+    state_dir = home / ".factory" / "plugins" / "installed_plugins"
+    state_dir.mkdir(parents=True)
+    (state_dir / "sp-mkt-org-1234.json").write_text(json.dumps({
+        "schemaVersion": 1,
+        "pluginId": "sp@mkt",
+        "entry": {"scope": "organization", "installPath": str(install), "version": "v1"},
+    }), encoding="utf-8")
+    plugins, unreadable = discover_plugins("droid", home, proj)
+    assert plugins == [] and unreadable == []
