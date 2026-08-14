@@ -5,6 +5,8 @@ from typing import Literal
 
 from pydantic import BaseModel, Field
 
+from drskill.stores import InstalledPlugin
+
 
 class RawInstance(BaseModel):
     """A skill file as one harness sees it, before resolution."""
@@ -14,6 +16,7 @@ class RawInstance(BaseModel):
     skill_file: Path
     via_symlink: bool
     order: int  # index of the containing search path in the harness's list
+    plugin: "InstalledPlugin | None" = None  # set for store-delivered skills
 
 
 class Deployment(BaseModel):
@@ -26,7 +29,7 @@ class Deployment(BaseModel):
 
 
 class Provenance(BaseModel):
-    kind: Literal["skills-lock", "gh-skill", "linked", "unmanaged"] = "unmanaged"
+    kind: Literal["skills-lock", "gh-skill", "linked", "unmanaged", "plugin"] = "unmanaged"
     source: str | None = None
 
 

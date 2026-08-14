@@ -21,7 +21,7 @@ def world_from(proj, home, harness_ids=("claude-code",)):
     hs = [h for h in load_harnesses() if h.id in harness_ids]
     instances, broken = [], []
     for h in hs:
-        i, b = discover(h, proj, home)
+        i, b, _u = discover(h, proj, home)
         instances += i
         broken += b
     return build_world(instances, {h.id: h for h in hs}, broken)

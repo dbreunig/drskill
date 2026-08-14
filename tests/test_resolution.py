@@ -32,7 +32,7 @@ def write_skill(root: Path, name: str, description: str = "d", body: str = "body
 
 def world_for(harness_id, proj, home):
     h = get(harness_id)
-    instances, broken = discover(h, proj, home)
+    instances, broken, _u = discover(h, proj, home)
     return build_world(instances, {h.id: h}, broken)
 
 
@@ -61,8 +61,8 @@ def test_symlink_dedup_one_contributor_many_deployments(tmp_path):
         os.symlink(canonical, d / "shared")
     (proj / ".pi").mkdir()
     cc, pi = get("claude-code"), get("pi")
-    i1, b1 = discover(cc, proj, home)
-    i2, b2 = discover(pi, proj, home)
+    i1, b1, u1 = discover(cc, proj, home)
+    i2, b2, u2 = discover(pi, proj, home)
     world = build_world(i1 + i2, {"claude-code": cc, "pi": pi}, b1 + b2)
     assert len(world.contributors) == 1
     c = next(iter(world.contributors.values()))
@@ -190,7 +190,7 @@ def test_search_order_none_never_shadows(tmp_path):
     )
     from drskill.discovery import discover
 
-    instances, broken = discover(h, proj, home)
+    instances, broken, _u = discover(h, proj, home)
     world = build_world(instances, {h.id: h}, broken)
     assert all(d.shadowed_by is None for c, d in world.harness_loads("nonesuch"))
 
@@ -206,7 +206,7 @@ def _bundled_world(root):
         paths_verified=True, precedence_verified=True,
         project_paths=[".claude/skills"], recursive=True,
     )
-    instances, broken = discover(h, root, root / "no-home")
+    instances, broken, _u = discover(h, root, root / "no-home")
     return build_world(instances, {"t3": h}, broken)
 
 
@@ -290,7 +290,7 @@ def test_bare_md_skill_has_no_bundled_files(tmp_path):
     sd.mkdir()
     (sd / "loose.md").write_text("---\nname: loose\ndescription: Use when x.\n---\nBody.\n")
     (sd / "stray.txt").write_text("not collected\n")
-    instances, broken = discover(h, tmp_path, tmp_path / "no-home")
+    instances, broken, _u = discover(h, tmp_path, tmp_path / "no-home")
     world = build_world(instances, {"t3": h}, broken)
     loose = [c for c in world.contributors.values() if c.name == "loose"]
     assert loose and loose[0].bundled_files == []
