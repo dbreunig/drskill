@@ -98,10 +98,15 @@ def _claude_code(home: Path, project_root: Path) -> tuple[list[InstalledPlugin],
         if not isinstance(installs, list):
             continue
         name, _, marketplace = key.partition("@")
+        if not name:
+            continue  # e.g. key "@mkt": empty name would defeat suite attribution
         for inst in installs:
             if not isinstance(inst, dict):
                 continue
             install_path = inst.get("installPath")
+            if install_path is not None and not isinstance(install_path, str):
+                unreadable.append(str(state_path))
+                continue
             if not install_path:
                 continue
             scope = inst.get("scope")
@@ -109,16 +114,26 @@ def _claude_code(home: Path, project_root: Path) -> tuple[list[InstalledPlugin],
                 pscope, ppath = "user", None
             elif scope == "local":
                 pp = inst.get("projectPath")
-                if not pp or Path(pp).resolve() != project_root.resolve():
+                if pp is not None and not isinstance(pp, str):
+                    unreadable.append(str(state_path))
+                    continue
+                if not pp:
+                    continue
+                try:
+                    if Path(pp).resolve() != project_root.resolve():
+                        continue
+                except (ValueError, OSError):
+                    unreadable.append(str(state_path))
                     continue
                 pscope, ppath = "project", Path(pp)
             else:
                 continue
+            version = inst.get("version")
             out.append(InstalledPlugin(
                 harness="claude-code",
                 name=name,
                 marketplace=marketplace or None,
-                version=inst.get("version"),
+                version=str(version) if version is not None else None,
                 scope=pscope,
                 project_path=ppath,
                 skills_roots=[Path(install_path) / "skills"],
@@ -154,7 +169,9 @@ _CODEX_LEGACY_MANIFESTS = (
 def _codex_version_key(v: str):
     # Numeric-aware ordering approximating codex's compare; "1.10.0" beats
     # "1.9.0". Non-numeric parts rank as 0 with the raw string as tiebreak.
-    return [int(p) if p.isdigit() else 0 for p in v.split(".")], v
+    # isascii() guards against non-ASCII digits (e.g. "²" superscript
+    # two) that satisfy str.isdigit() but make int() raise ValueError.
+    return [int(p) if p.isascii() and p.isdigit() else 0 for p in v.split(".")], v
 
 
 def _codex(home: Path, project_root: Path) -> tuple[list[InstalledPlugin], list[str]]:
@@ -167,6 +184,10 @@ def _codex(home: Path, project_root: Path) -> tuple[list[InstalledPlugin], list[
     except (OSError, ValueError):
         return [], [str(config_path)]
     plugins_tbl = config.get("plugins")
+    if plugins_tbl is None:
+        return [], unreadable  # no [plugins] table is normal (config.toml
+        # is also used for MCP/model settings); only present-but-wrong-shape
+        # counts as unreadable.
     if not isinstance(plugins_tbl, dict):
         unreadable.append(str(config_path))
         return [], unreadable
@@ -197,7 +218,8 @@ def _codex(home: Path, project_root: Path) -> tuple[list[InstalledPlugin], list[
         if manifest_path is not None:
             manifest = _read_json(manifest_path, unreadable)
             if isinstance(manifest, dict):
-                declared = (manifest.get("paths") or {}).get("skills")
+                paths_val = manifest.get("paths")
+                declared = paths_val.get("skills") if isinstance(paths_val, dict) else None
                 if isinstance(declared, list) and declared:
                     skills_rel = [s for s in declared if isinstance(s, str)]
         roots = [root / rel for rel in skills_rel]
@@ -322,6 +344,9 @@ def _copilot(home: Path, project_root: Path) -> tuple[list[InstalledPlugin], lis
         name = str(entry["name"])
         marketplace = entry.get("marketplace")
         cache_path = entry.get("cache_path")
+        if cache_path is not None and not isinstance(cache_path, str):
+            unreadable.append(str(config_path))
+            continue
         root = (Path(cache_path) if cache_path
                 else home / ".copilot" / "installed-plugins" / str(marketplace or "") / name)
         key = f"{name}@{marketplace}" if marketplace else name
@@ -370,6 +395,9 @@ def _droid(home: Path, project_root: Path) -> tuple[list[InstalledPlugin], list[
         if entry.get("scope") != "user":
             continue
         install_path = entry.get("installPath")
+        if install_path is not None and not isinstance(install_path, str):
+            unreadable.append(str(state_path))
+            continue
         if not install_path:
             continue
         name, _, marketplace = plugin_id.partition("@")
@@ -395,6 +423,16 @@ ADAPTERS: dict[str, Callable[[Path, Path], tuple[list[InstalledPlugin], list[str
     "droid": _droid,
 }
 
+# Best-known primary state path per harness, used only by the belt-and-braces
+# fallback below when an adapter raises something its own guards missed.
+_PRIMARY_STATE_PATH: dict[str, Callable[[Path], Path]] = {
+    "claude-code": lambda home: home / ".claude" / "plugins" / "installed_plugins.json",
+    "codex": lambda home: home / ".codex" / "config.toml",
+    "gemini-cli": lambda home: home / ".gemini" / "extensions" / "extension-enablement.json",
+    "copilot": lambda home: home / ".copilot" / "config.json",
+    "droid": lambda home: home / ".factory" / "plugins" / "installed_plugins",
+}
+
 
 def discover_plugins(
     harness_id: str, home: Path, project_root: Path
@@ -402,4 +440,15 @@ def discover_plugins(
     adapter = ADAPTERS.get(harness_id)
     if adapter is None:
         return [], []
-    return adapter(home, project_root)
+    try:
+        return adapter(home, project_root)
+    except Exception:
+        # Never let an adapter exception escape scanning ("never a crash,
+        # never a guess"): degrade to unreadable rather than propagating.
+        path_fn = _PRIMARY_STATE_PATH.get(harness_id)
+        if path_fn is not None:
+            try:
+                return [], [str(path_fn(home))]
+            except Exception:
+                return [], []
+        return [], []

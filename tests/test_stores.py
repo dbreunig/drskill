@@ -427,3 +427,156 @@ def test_droid_scope_not_user_is_skipped_not_unreadable(tmp_path):
     }), encoding="utf-8")
     plugins, unreadable = discover_plugins("droid", home, proj)
     assert plugins == [] and unreadable == []
+
+
+# --- adversarial / corrupt state (final review, critical 1 & minor 6) -----
+
+def test_claude_code_int_install_path_is_unreadable_not_crash(tmp_path):
+    home, proj = tmp_path / "home", tmp_path / "proj"
+    proj.mkdir()
+    p = _cc_state(home, {"sp@mkt": [
+        {"scope": "user", "installPath": 123, "version": "1.0.0"},
+    ]})
+    plugins, unreadable = discover_plugins("claude-code", home, proj)
+    assert plugins == [] and unreadable == [str(p)]
+
+
+def test_claude_code_int_project_path_is_unreadable_not_crash(tmp_path):
+    home, proj = tmp_path / "home", tmp_path / "proj"
+    proj.mkdir()
+    active = _cc_cache(home, "mkt", "sp", "1.0.0")
+    p = _cc_state(home, {"sp@mkt": [
+        {"scope": "local", "projectPath": 5,
+         "installPath": str(active), "version": "1.0.0"},
+    ]})
+    plugins, unreadable = discover_plugins("claude-code", home, proj)
+    assert plugins == [] and unreadable == [str(p)]
+
+
+def test_claude_code_nul_byte_project_path_is_unreadable_not_crash(tmp_path):
+    home, proj = tmp_path / "home", tmp_path / "proj"
+    proj.mkdir()
+    active = _cc_cache(home, "mkt", "sp", "1.0.0")
+    p = _cc_state(home, {"sp@mkt": [
+        {"scope": "local", "projectPath": "bad\x00path",
+         "installPath": str(active), "version": "1.0.0"},
+    ]})
+    plugins, unreadable = discover_plugins("claude-code", home, proj)
+    assert plugins == [] and unreadable == [str(p)]
+
+
+def test_claude_code_int_version_is_stringified_not_crash(tmp_path):
+    home, proj = tmp_path / "home", tmp_path / "proj"
+    proj.mkdir()
+    active = _cc_cache(home, "mkt", "sp", "6.0.0")
+    _cc_state(home, {"sp@mkt": [
+        {"scope": "user", "installPath": str(active), "version": 6},
+    ]})
+    plugins, unreadable = discover_plugins("claude-code", home, proj)
+    assert unreadable == []
+    (p,) = plugins
+    assert p.version == "6"  # other adapters str()-wrap version; match them
+
+
+def test_claude_code_empty_plugin_name_is_skipped(tmp_path):
+    home, proj = tmp_path / "home", tmp_path / "proj"
+    proj.mkdir()
+    active = _cc_cache(home, "mkt", "sp", "1.0.0")
+    _cc_state(home, {"@mkt": [
+        {"scope": "user", "installPath": str(active), "version": "1.0.0"},
+    ]})
+    plugins, unreadable = discover_plugins("claude-code", home, proj)
+    # key "@mkt" partitions to name "" -- an empty name silently defeats
+    # suites' pre-attribution skip, so it must be dropped entirely
+    assert plugins == [] and unreadable == []
+
+
+def test_codex_non_dict_manifest_paths_no_crash(tmp_path):
+    home, proj = tmp_path / "home", tmp_path / "proj"
+    proj.mkdir()
+    d = home / ".codex" / "plugins" / "cache" / "mkt" / "sp" / "1.0.0"
+    _skill(d / "skills", "sp-skill")
+    # "paths" is truthy but not a dict/table -- (manifest.get("paths") or {})
+    # would previously call .get() on the string and raise AttributeError
+    (d / "plugin.json").write_text(
+        json.dumps({"name": "sp", "version": "1.0.0", "paths": "skills"})
+    )
+    _codex_config(home, '[plugins."sp@mkt"]\nenabled = true\n')
+    plugins, unreadable = discover_plugins("codex", home, proj)
+    assert unreadable == []
+    (p,) = plugins
+    assert p.skills_roots == [d / "skills"]  # falls back to the default
+
+
+def test_codex_non_ascii_digit_version_dir_no_crash(tmp_path):
+    home, proj = tmp_path / "home", tmp_path / "proj"
+    proj.mkdir()
+    good = _codex_cache(home, "mkt", "sp", "1.0.0")
+    # "²" (superscript two) satisfies str.isdigit() but int() raises
+    # ValueError on it -- a directory named this way must not crash sorting
+    bad_dir = home / ".codex" / "plugins" / "cache" / "mkt" / "sp" / "².0"
+    bad_dir.mkdir(parents=True)
+    _codex_config(home, '[plugins."sp@mkt"]\nenabled = true\n')
+    plugins, unreadable = discover_plugins("codex", home, proj)
+    (p,) = plugins
+    assert p.skills_roots == [good / "skills"]
+    assert p.version == "1.0.0"
+
+
+def test_codex_missing_plugins_table_is_normal_not_unreadable(tmp_path):
+    # config.toml exists for MCP/model settings with no [plugins] table at
+    # all -- this is the NORMAL case, not unreadable state (critical 2).
+    home, proj = tmp_path / "home", tmp_path / "proj"
+    proj.mkdir()
+    _codex_config(home, '[model]\nname = "x"\n')
+    plugins, unreadable = discover_plugins("codex", home, proj)
+    assert plugins == [] and unreadable == []
+
+
+def test_codex_invalid_toml_is_unreadable(tmp_path):
+    home, proj = tmp_path / "home", tmp_path / "proj"
+    proj.mkdir()
+    p = _codex_config(home, 'not = valid = toml =\n')
+    plugins, unreadable = discover_plugins("codex", home, proj)
+    assert plugins == [] and unreadable == [str(p)]
+
+
+def test_copilot_int_cache_path_is_unreadable_not_crash(tmp_path):
+    home, proj = tmp_path / "home", tmp_path / "proj"
+    proj.mkdir()
+    cfg = home / ".copilot" / "config.json"
+    cfg.parent.mkdir(parents=True, exist_ok=True)
+    cfg.write_text(json.dumps({"installedPlugins": [
+        {"name": "sp", "marketplace": "mkt", "version": "1.2.3", "cache_path": 123},
+    ]}), encoding="utf-8")
+    plugins, unreadable = discover_plugins("copilot", home, proj)
+    assert plugins == [] and unreadable == [str(cfg)]
+
+
+def test_droid_int_install_path_is_unreadable_not_crash(tmp_path):
+    home, proj = tmp_path / "home", tmp_path / "proj"
+    proj.mkdir()
+    state_dir = home / ".factory" / "plugins" / "installed_plugins"
+    state_dir.mkdir(parents=True)
+    bad = state_dir / "sp-mkt-user-1234.json"
+    bad.write_text(json.dumps({
+        "schemaVersion": 1,
+        "pluginId": "sp@mkt",
+        "entry": {"scope": "user", "installPath": 123, "version": "v1"},
+    }), encoding="utf-8")
+    plugins, unreadable = discover_plugins("droid", home, proj)
+    assert plugins == [] and unreadable == [str(bad)]
+
+
+def test_discover_plugins_never_crashes_on_unexpected_adapter_exception(tmp_path, monkeypatch):
+    from drskill import stores as stores_mod
+
+    def boom(home, project_root):
+        raise RuntimeError("simulated adapter bug, unforeseen by per-field guards")
+
+    monkeypatch.setitem(stores_mod.ADAPTERS, "claude-code", boom)
+    home, proj = tmp_path / "home", tmp_path / "proj"
+    proj.mkdir()
+    plugins, unreadable = discover_plugins("claude-code", home, proj)
+    assert plugins == []
+    assert unreadable == [str(home / ".claude" / "plugins" / "installed_plugins.json")]
