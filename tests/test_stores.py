@@ -110,3 +110,97 @@ def test_claude_code_missing_plugins_key_is_unreadable(tmp_path):
     p.write_text(json.dumps({"version": 1}), encoding="utf-8")
     plugins, unreadable = discover_plugins("claude-code", home, proj)
     assert plugins == [] and unreadable == [str(p)]
+
+
+def _codex_config(home: Path, text: str) -> Path:
+    p = home / ".codex" / "config.toml"
+    p.parent.mkdir(parents=True, exist_ok=True)
+    p.write_text(text, encoding="utf-8")
+    return p
+
+
+def _codex_cache(home: Path, marketplace: str, plugin: str, version: str,
+                 manifest: str = "plugin.json") -> Path:
+    d = home / ".codex" / "plugins" / "cache" / marketplace / plugin / version
+    _skill(d / "skills", f"{plugin}-skill")
+    (d / manifest).parent.mkdir(parents=True, exist_ok=True)
+    (d / manifest).write_text(
+        json.dumps({"name": plugin, "version": version}), encoding="utf-8"
+    )
+    return d
+
+
+def test_codex_prefers_local_version_dir(tmp_path):
+    home, proj = tmp_path / "home", tmp_path / "proj"
+    proj.mkdir()
+    _codex_cache(home, "mkt", "sp", "1.0.0")
+    local = _codex_cache(home, "mkt", "sp", "local")
+    _codex_config(home, '[plugins."sp@mkt"]\nenabled = true\n')
+    plugins, _ = discover_plugins("codex", home, proj)
+    (p,) = plugins
+    assert p.skills_roots == [local / "skills"]
+    assert p.version == "local"
+
+
+def test_codex_highest_version_when_no_local(tmp_path):
+    home, proj = tmp_path / "home", tmp_path / "proj"
+    proj.mkdir()
+    _codex_cache(home, "mkt", "sp", "1.9.0")
+    high = _codex_cache(home, "mkt", "sp", "1.10.0")  # numeric, not lexicographic
+    _codex_config(home, '[plugins."sp@mkt"]\nenabled = true\n')
+    plugins, _ = discover_plugins("codex", home, proj)
+    assert plugins[0].skills_roots == [high / "skills"]
+
+
+def test_codex_disabled_and_missing_cache(tmp_path):
+    home, proj = tmp_path / "home", tmp_path / "proj"
+    proj.mkdir()
+    _codex_cache(home, "mkt", "off", "1.0.0")
+    _codex_config(home, (
+        '[plugins."off@mkt"]\nenabled = false\n'
+        '[plugins."gone@mkt"]\nenabled = true\n'  # no cache dir: skipped
+    ))
+    plugins, _ = discover_plugins("codex", home, proj)
+    (p,) = plugins
+    assert p.name == "off" and p.enabled is False
+
+
+def test_codex_agent_plugin_manifest_is_shallow_legacy_recursive(tmp_path):
+    home, proj = tmp_path / "home", tmp_path / "proj"
+    proj.mkdir()
+    _codex_cache(home, "mkt", "ap", "1.0.0", manifest="plugin.json")
+    _codex_cache(home, "mkt", "leg", "1.0.0",
+                 manifest=".codex-plugin/plugin.json")
+    _codex_config(home, (
+        '[plugins."ap@mkt"]\nenabled = true\n'
+        '[plugins."leg@mkt"]\nenabled = true\n'
+    ))
+    plugins, _ = discover_plugins("codex", home, proj)
+    by_name = {p.name: p for p in plugins}
+    assert by_name["ap"].recursive is False
+    assert by_name["leg"].recursive is True
+
+
+def test_codex_manifest_skills_paths_and_migrated_dir(tmp_path):
+    home, proj = tmp_path / "home", tmp_path / "proj"
+    proj.mkdir()
+    d = home / ".codex" / "plugins" / "cache" / "mkt" / "sp" / "1.0.0"
+    (d / ".codex-plugin" / "migrated-command-skills").mkdir(parents=True)
+    (d / "myskills").mkdir()
+    (d / ".codex-plugin" / "plugin.json").write_text(json.dumps(
+        {"name": "sp", "version": "1.0.0", "paths": {"skills": ["myskills"]}}
+    ))
+    _codex_config(home, '[plugins."sp@mkt"]\nenabled = true\n')
+    plugins, _ = discover_plugins("codex", home, proj)
+    (p,) = plugins
+    assert p.skills_roots == [
+        d / "myskills", d / ".codex-plugin" / "migrated-command-skills"
+    ]
+
+
+def test_codex_valid_toml_wrong_shaped_plugins_is_unreadable(tmp_path):
+    home, proj = tmp_path / "home", tmp_path / "proj"
+    proj.mkdir()
+    p = _codex_config(home, 'plugins = "not-a-table"\n')
+    plugins, unreadable = discover_plugins("codex", home, proj)
+    assert plugins == [] and unreadable == [str(p)]
