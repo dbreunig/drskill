@@ -86,6 +86,17 @@ def _load_effective_config_or_exit(
         raise typer.Exit(1)
 
 
+def _scan_with_status(fn):
+    """Run a world-building step under the live one-line spinner scan uses.
+
+    Rich disables the animation on non-TTY output, so piped/captured runs
+    are untouched; the callback names each step (discovery, MCP configs,
+    every check) exactly as `scan` does.
+    """
+    with console.status("[bold]starting[/bold]", spinner="dots") as status:
+        return fn(lambda m: status.update(f"[bold]{escape(m)}[/bold]"))
+
+
 @app.callback()
 def main() -> None:
     pass
@@ -375,7 +386,9 @@ def ack(
         raise typer.Exit(1)
     home = _home()
     config = _load_effective_config_or_exit(root, home, global_mode)
-    world, findings = run_scan(root, home, global_mode, config)
+    world, findings = _scan_with_status(
+        lambda p: run_scan(root, home, global_mode, config, progress=p)
+    )
     active, _ = ledger.filter_findings(findings, config)
     # Most notes must not be acked: a deep "judged distinct" note shares a
     # fingerprint with the warning it would revert to if the verdict cache
@@ -468,7 +481,9 @@ def show(
     _validate_harness(harness)
     home = _home()
     config = _load_effective_config_or_exit(root, home, global_mode)
-    world, findings = run_scan(root, home, global_mode, config, harness=harness)
+    world, findings = _scan_with_status(
+        lambda p: run_scan(root, home, global_mode, config, harness=harness, progress=p)
+    )
     active, _ = ledger.filter_findings(findings, config)
     targets = _resolve_refs(refs, active)
     ordered = report.sort_findings(world, targets, set())
@@ -491,7 +506,9 @@ def review(
     _validate_harness(harness)
     home = _home()
     config = _load_effective_config_or_exit(root, home, global_mode)
-    world, findings = run_scan(root, home, global_mode, config, harness=harness)
+    world, findings = _scan_with_status(
+        lambda p: run_scan(root, home, global_mode, config, harness=harness, progress=p)
+    )
     active, _ = ledger.filter_findings(findings, config)
     active = [f for f in active if f.severity != "note"]
     if not active:
@@ -610,7 +627,9 @@ def list_cmd(
     _validate_harness(harness)
     home = _home()
     config = _load_effective_config_or_exit(root, home, global_mode)
-    world, _findings = run_scan(root, home, global_mode, config, harness=harness)
+    world, _findings = _scan_with_status(
+        lambda p: run_scan(root, home, global_mode, config, harness=harness, progress=p)
+    )
     _warn_if_undetected(harness, root, home, global_mode)
     from drskill import suites
 
@@ -778,7 +797,9 @@ def cache(
             )
     elif action == "prune":
         config = _load_effective_config_or_exit(root, home, global_mode)
-        world, findings = run_scan(root, home, global_mode, config)
+        world, findings = _scan_with_status(
+            lambda p: run_scan(root, home, global_mode, config, progress=p)
+        )
         valid = {deep.pair_key(a, b) for a, b in deep.flagged_pairs(world, findings)}
         # Walk the files, not the parsed entries, so corrupt files (which
         # load_cache skips) are pruned instead of lingering forever.

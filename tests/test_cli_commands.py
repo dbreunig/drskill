@@ -443,3 +443,23 @@ def test_cache_stats_and_prune_cover_shell_baselines(tmp_path):
     r = invoke(tmp_path, "cache", "prune")
     assert r.exit_code == 0
     assert len(list(bdir.glob("*.json"))) == 1  # live baseline kept, rest gone
+
+
+def test_list_runs_scan_under_live_progress(tmp_path, monkeypatch):
+    # list (like ack/show/review/cache prune) runs the full scan pipeline;
+    # it must pass a live progress callback so slow scans show activity.
+    import drskill.cli as cli
+
+    captured = {}
+    real = cli.run_scan
+
+    def spy(*args, **kwargs):
+        captured["progress"] = kwargs.get("progress")
+        return real(*args, **kwargs)
+
+    monkeypatch.setattr(cli, "run_scan", spy)
+    proj = tmp_path / "proj"
+    write(proj, "a-skill", "Use when testing progress.", "body")
+    r = invoke(tmp_path, "list")
+    assert r.exit_code == 0
+    assert captured["progress"] is not None
