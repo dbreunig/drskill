@@ -112,25 +112,39 @@ mcp_global_configs = ["~/.codex/config.toml"]
 mcp_format = "codex-toml"
 mcp_verified = true
 
-# Verified against https://docs.github.com/en/copilot/concepts/agents/about-agent-skills
-# and https://docs.github.com/en/copilot/how-tos/copilot-cli/customize-copilot/add-skills,
-# 2026-07-19: project dirs are .github/skills, .claude/skills, and
-# .agents/skills; personal/global dirs are ~/.copilot/skills and
-# ~/.agents/skills.
-# NOT verified: GitHub's own docs do not say whether discovery is
-# recursive within a skill directory, and do not state which location
-# wins when a project skill and a personal skill share a name. The CLI
-# is closed source (github/copilot-cli only ships install scripts), so
-# there was no source to check either. Unverified on both facets:
-# recursion is a paths-facet fact, so paths_verified stays false too;
-# recursive and search_order below are unconfirmed seed defaults.
+# Paths first doc-verified 2026-07-19 against
+# https://docs.github.com/en/copilot/concepts/agents/about-agent-skills and
+# https://docs.github.com/en/copilot/how-tos/copilot-cli/customize-copilot/add-skills
+# (the CLI is closed source, and the docs are silent on recursion and
+# collision precedence, so both facets stayed unverified until the run
+# below).
+# Empirically verified 2026-08-13 against GitHub Copilot CLI 1.0.80 on
+# macOS via `copilot skill list` under a sandboxed $HOME with one
+# uniquely-named fixture skill per candidate directory (method borrowed
+# from prime-radiant-inc/everyharness's container install checks; probe
+# script: scripts/verify-harness-discovery.sh):
+# - all five directories below are read, and neither ./skills nor a
+#   project-level .copilot/skills is;
+# - discovery is recursive in BOTH scopes (skills two levels below a
+#   root load);
+# - a project/personal name collision lists exactly ONE entry, the
+#   project copy -- project shadows personal outright (unlike codex,
+#   where both stay visible), confirming search_order below;
+# - within project scope .github/skills beats .agents/skills beats
+#   .claude/skills (pairwise collision fixtures), which is why
+#   project_paths is ordered as it is -- the docs list .claude before
+#   .agents, but the CLI resolves the other way; within personal scope
+#   ~/.copilot/skills beats ~/.agents/skills.
+# Caveat: precedence evidence is the CLI's own enumeration deduping to
+# one copy; with a closed-source CLI that is the strongest observable
+# signal for which copy is effective.
 [[harness]]
 id = "copilot"
 display_name = "GitHub Copilot CLI"
-paths_verified = false
-precedence_verified = false
+paths_verified = true
+precedence_verified = true
 detect = [".github/copilot-instructions.md", "~/.copilot"]
-project_paths = [".github/skills", ".claude/skills", ".agents/skills"]
+project_paths = [".github/skills", ".agents/skills", ".claude/skills"]
 global_paths = ["~/.copilot/skills", "~/.agents/skills"]
 search_order = "project-first"
 recursive = true
@@ -169,8 +183,9 @@ mcp_global_configs = ["~/.gemini/settings.json"]
 mcp_verified = true
 
 # --- Vendored from vercel-labs/skills (MIT), commit 777599e1159e401b11ce4c8a57c20f09a8f1596e ---
-# All entries below are unverified on both facets; see the header comment
-# for provenance.
+# Entries below are unverified on both facets (see the header comment for
+# provenance), except where an entry carries its own verification comment
+# (cline, opencode).
 
 [[harness]]
 id = "adal"
@@ -505,6 +520,15 @@ search_order = "project-first"
 recursive = true
 root_md_paths = []
 
+# Partial empirical evidence 2026-08-13 (Hermes Agent v0.20.0 on macOS,
+# `hermes skills list` under a sandboxed $HOME): ~/.hermes/skills IS
+# read, recursively (a fixture skill two levels down lists as source
+# "local"). Project .hermes/skills did NOT appear in that enumeration,
+# but `skills list` provably omits some runtime-loaded skills
+# (plugin-registered skills never show, per
+# prime-radiant-inc/everyharness's install checks), so absence there
+# cannot demote the project path. Both facets stay best-effort:
+# positive evidence covers only the global dir.
 [[harness]]
 id = "hermes-agent"
 display_name = "Hermes Agent"
@@ -721,14 +745,45 @@ search_order = "project-first"
 recursive = true
 root_md_paths = []
 
+# Paths empirically verified 2026-08-13 against opencode-ai 1.18.18 on
+# macOS via `opencode debug skill` under a sandboxed $HOME with one
+# uniquely-named fixture skill per candidate directory (method borrowed
+# from prime-radiant-inc/everyharness's container install checks; probe
+# script: scripts/verify-harness-discovery.sh):
+# - opencode accepts BOTH the singular and plural directory names in
+#   both scopes (its built-in customize-opencode skill documents
+#   `skill(s)`), so all eight paths below are read; it also auto-scans
+#   the external .claude/skills and .agents/skills trees in both scopes
+#   (project .claude/skills is read even though the built-in doc table
+#   only mentions the global one -- empirical result kept);
+# - neither ./skills in the cwd nor .github/skills is read (an
+#   everyharness code comment suggests a cwd ./skills tree; opencode
+#   1.18.18 does not read one natively -- their plugin injects it via
+#   config.skills.paths);
+# - discovery is recursive (skills two levels below a root load), per
+#   the loader's documented `**/SKILL.md` scan.
+# Every path/recursion probe appeared in ALL runs, so paths_verified is
+# true. precedence_verified stays FALSE for a new reason: collision
+# resolution is NONDETERMINISTIC. A name collision lists exactly one
+# entry, but across 12 repeated runs the surviving copy FLIPPED between
+# runs for 3 of 5 tested directory pairs (project .opencode/skills vs
+# global ~/.config/opencode/skills went 6:4 project:global; project
+# .opencode/skills vs project .agents/skills went 8:2; project
+# .agents/skills vs .claude/skills went 10:1 -- a parallel-scan race,
+# one winner per run, unstable across runs). The list orders below
+# encode the MODAL winners (opencode-native > .agents > .claude,
+# project > global) and search_order the modal scope winner, but on
+# this harness a same-name collision is effectively a coin flip -- which
+# is precisely why drskill's duplicate/shadowing findings matter here.
+# ~/.config prefix assumes the XDG default, as elsewhere in this file.
 [[harness]]
 id = "opencode"
 display_name = "OpenCode"
-paths_verified = false
+paths_verified = true
 precedence_verified = false
-detect = ["~/.config/opencode"]
-project_paths = [".agents/skills"]
-global_paths = ["~/.config/opencode/skills"]
+detect = [".opencode", "~/.config/opencode"]
+project_paths = [".opencode/skills", ".opencode/skill", ".agents/skills", ".claude/skills"]
+global_paths = ["~/.config/opencode/skills", "~/.config/opencode/skill", "~/.agents/skills", "~/.claude/skills"]
 search_order = "project-first"
 recursive = true
 root_md_paths = []

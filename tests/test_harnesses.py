@@ -21,6 +21,43 @@ def test_pi_rules_match_docs():
     assert set(pi.root_md_paths) == {".pi/skills", "~/.pi/agent/skills"}
 
 
+def test_copilot_rules_match_probes():
+    """Pins the 2026-08-13 empirical results (Copilot CLI 1.0.80,
+    `copilot skill list` over collision fixtures): project shadows
+    personal, and .github > .agents > .claude within project scope."""
+    cp = get(load_harnesses(), "copilot")
+    assert cp.paths_verified and cp.precedence_verified
+    assert cp.search_order == "project-first"
+    assert cp.recursive
+    assert cp.project_paths == [".github/skills", ".agents/skills", ".claude/skills"]
+    assert cp.global_paths == ["~/.copilot/skills", "~/.agents/skills"]
+
+
+def test_opencode_rules_match_probes():
+    """Pins the 2026-08-13 empirical results (opencode-ai 1.18.18,
+    `opencode debug skill` over collision fixtures): singular and plural
+    dirs in both scopes plus external .claude/.agents trees, all
+    recursive. Precedence stays UNVERIFIED by design: repeated runs
+    showed collision winners flipping between runs (parallel-scan
+    race), so the path order encodes modal winners only."""
+    oc = get(load_harnesses(), "opencode")
+    assert oc.paths_verified and not oc.precedence_verified
+    assert oc.search_order == "project-first"
+    assert oc.recursive
+    assert oc.project_paths == [
+        ".opencode/skills",
+        ".opencode/skill",
+        ".agents/skills",
+        ".claude/skills",
+    ]
+    assert oc.global_paths == [
+        "~/.config/opencode/skills",
+        "~/.config/opencode/skill",
+        "~/.agents/skills",
+        "~/.claude/skills",
+    ]
+
+
 def test_search_paths_order_and_scope(tmp_path):
     pi = get(load_harnesses(), "pi")
     triples = pi.search_paths(tmp_path / "proj", tmp_path / "home")
@@ -54,7 +91,16 @@ def test_core_six_present():
 
 def test_vendored_entries_are_unverified_by_default():
     hs = load_harnesses()
-    core = {"claude-code", "cline", "cursor", "codex", "copilot", "gemini-cli", "pi"}
+    core = {
+        "claude-code",
+        "cline",
+        "cursor",
+        "codex",
+        "copilot",
+        "gemini-cli",
+        "opencode",
+        "pi",
+    }
     for h in hs:
         if h.id not in core:
             assert not h.paths_verified and not h.precedence_verified, (
