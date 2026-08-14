@@ -65,6 +65,8 @@ def _claude_code(home: Path, project_root: Path) -> tuple[list[InstalledPlugin],
     state_path = home / ".claude" / "plugins" / "installed_plugins.json"
     data = _read_json(state_path, unreadable)
     if not isinstance(data, dict):
+        if data is not None and str(state_path) not in unreadable:
+            unreadable.append(str(state_path))
         return [], unreadable
     enabled_map: dict = {}
     settings = _read_json(home / ".claude" / "settings.json", unreadable)
@@ -73,6 +75,7 @@ def _claude_code(home: Path, project_root: Path) -> tuple[list[InstalledPlugin],
     out: list[InstalledPlugin] = []
     plugins = data.get("plugins")
     if not isinstance(plugins, dict):
+        unreadable.append(str(state_path))
         return [], unreadable
     for key, installs in sorted(plugins.items()):
         if not isinstance(installs, list):

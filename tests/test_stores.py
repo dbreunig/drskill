@@ -90,3 +90,23 @@ def test_missing_state_and_unknown_harness_are_empty(tmp_path):
     home.mkdir(); proj.mkdir()
     assert discover_plugins("claude-code", home, proj) == ([], [])
     assert discover_plugins("pi", home, proj) == ([], [])
+
+
+def test_claude_code_valid_json_wrong_shape_is_unreadable(tmp_path):
+    home, proj = tmp_path / "home", tmp_path / "proj"
+    proj.mkdir()
+    p = home / ".claude" / "plugins" / "installed_plugins.json"
+    p.parent.mkdir(parents=True)
+    p.write_text("[]", encoding="utf-8")
+    plugins, unreadable = discover_plugins("claude-code", home, proj)
+    assert plugins == [] and unreadable == [str(p)]
+
+
+def test_claude_code_missing_plugins_key_is_unreadable(tmp_path):
+    home, proj = tmp_path / "home", tmp_path / "proj"
+    proj.mkdir()
+    p = home / ".claude" / "plugins" / "installed_plugins.json"
+    p.parent.mkdir(parents=True)
+    p.write_text(json.dumps({"version": 1}), encoding="utf-8")
+    plugins, unreadable = discover_plugins("claude-code", home, proj)
+    assert plugins == [] and unreadable == [str(p)]
