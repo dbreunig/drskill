@@ -12,7 +12,7 @@ PAYLOAD = "'; echo pwned; '"
 
 def world_from(proj: Path, home: Path):
     h = next(x for x in load_harnesses() if x.id == "claude-code")
-    instances, broken = discover(h, proj, home)
+    instances, broken, _u = discover(h, proj, home)
     return build_world(instances, {h.id: h}, broken)
 
 

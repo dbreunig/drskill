@@ -9,7 +9,7 @@ from drskill.resolution import build_world
 
 def world_from(proj, home):
     h = next(x for x in load_harnesses() if x.id == "claude-code")
-    i, b = discover(h, proj, home)
+    i, b, _u = discover(h, proj, home)
     return build_world(i, {h.id: h}, b)
 
 
@@ -181,7 +181,7 @@ def test_overlap_excludes_same_name_pairs(tmp_path):
     hs = [h for h in load_harnesses() if h.id in ("claude-code", "pi")]
     instances, broken = [], []
     for h in hs:
-        i, b = discover(h, proj, home)
+        i, b, _u = discover(h, proj, home)
         instances += i
         broken += b
     world = build_world(instances, {h.id: h for h in hs}, broken)

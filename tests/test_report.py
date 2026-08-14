@@ -224,7 +224,7 @@ def test_render_reports_unscanned_bundled_files(tmp_path):
         paths_verified=True, precedence_verified=True,
         project_paths=[".claude/skills"], recursive=True,
     )
-    instances, broken = discover(h, tmp_path, tmp_path / "no-home")
+    instances, broken, _u = discover(h, tmp_path, tmp_path / "no-home")
     world = build_world(instances, {"t3": h}, broken)
     console = Console(record=True, width=120)
     render(world, [], [], console)
@@ -281,7 +281,7 @@ def _mini_world(tmp_path, harness_defs=None, system_vendor=True):
         ]
     instances, broken = [], []
     for h in harness_defs:
-        i, b = discover(h, tmp_path, tmp_path / "no-home")
+        i, b, _u = discover(h, tmp_path, tmp_path / "no-home")
         instances += i
         broken += b
     return build_world(instances, {h.id: h for h in harness_defs}, broken)

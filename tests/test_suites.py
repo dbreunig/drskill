@@ -193,3 +193,17 @@ def test_list_shows_server_row_when_not_connected(tmp_path):
     # the server itself is listed, marked, and points at --mcp-connect
     assert "memory" in r.output and "mcp server" in r.output
     assert "connect" in r.output  # a hint to run --mcp-connect
+
+
+def test_assign_suites_skips_preattributed_plugin_contributors(tmp_path):
+    # A store-scanned contributor arrives with suite already set; the
+    # content-hash registry must not overwrite it, even when the cache
+    # would content-match it to a DIFFERENT plugin name.
+    home = tmp_path / "home"
+    skills = plugin_cache(home, "official", "other", "1.0.0")
+    h = write_skill(skills / "toolbox", "toolbox", "Use when boxing tools.")
+    c = _contrib("toolbox", h, source_kind="plugin", source="sp@mkt==1.0.0")
+    c.suite = "sp"
+    world = _world(c)
+    suites.assign_suites(world, home)
+    assert c.suite == "sp"

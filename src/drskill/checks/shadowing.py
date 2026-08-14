@@ -94,7 +94,17 @@ def diverged_copies(world: World, config: Config) -> list[Finding]:
             continue
         coloaded = False
         for hid in world.harnesses:
-            loaded = {c.id for c, _d in world.harness_loads(hid)}
+            # Mirror _mark_shadows' claude-code plugin exclusion: those
+            # contributors never shadow or get shadowed there (namespaced
+            # "plugin:skill" loading), so they must not count toward
+            # "shadow/double-load territory" either -- otherwise a drifted
+            # native/plugin same-name pair on claude-code gets no finding
+            # from any check.
+            loaded = {
+                c.id
+                for c, _d in world.harness_loads(hid)
+                if not (hid == "claude-code" and c.source.kind == "plugin")
+            }
             if len([c for c in group if c.id in loaded]) >= 2:
                 coloaded = True  # name-shadow / double-load territory
                 break

@@ -71,11 +71,14 @@ def run_scan(
     else:
         harnesses = [h for h in load_harnesses() if h.id == harness]
     instances, broken = [], []
+    unreadable_states: list[tuple[str, str]] = []
     for h in harnesses:
-        i, b = discover(h, project_root, home, global_only)
+        i, b, u = discover(h, project_root, home, global_only)
         instances += i
         broken += b
+        unreadable_states += u
     world = build_world(instances, {h.id: h for h in harnesses}, broken)
+    world.unreadable += [p for p in unreadable_states if p not in world.unreadable]
     world.lockfile = load_lockfile(project_root)
     if world.lockfile:
         for c in world.contributors.values():

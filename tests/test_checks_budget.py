@@ -7,7 +7,7 @@ from drskill.resolution import build_world
 
 def world_from(proj, home):
     h = next(x for x in load_harnesses() if x.id == "claude-code")
-    i, b = discover(h, proj, home)
+    i, b, _u = discover(h, proj, home)
     return build_world(i, {h.id: h}, b)
 
 

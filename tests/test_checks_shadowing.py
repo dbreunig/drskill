@@ -15,7 +15,7 @@ def world_from(proj, home, harness_ids=("claude-code",)):
     hs = [h for h in load_harnesses() if h.id in harness_ids]
     instances, broken = [], []
     for h in hs:
-        i, b = discover(h, proj, home)
+        i, b, _u = discover(h, proj, home)
         instances += i
         broken += b
     return build_world(instances, {h.id: h for h in hs}, broken)
@@ -173,6 +173,50 @@ def test_diverged_copies_skips_identical_content(tmp_path):
     _write_named(proj, ".claude/skills", "same", "identical body")
     _write_named(proj, ".pi/skills", "same", "identical body")
     findings = run_all(world_from(proj, home, ("claude-code", "pi")), Config())
+    assert find(findings, "diverged-copies") == []
+
+
+def _cc_plugin_install(home, marketplace, plugin, version, skill_name, body):
+    d = home / ".claude" / "plugins" / "cache" / marketplace / plugin / version
+    skill_dir = d / "skills" / skill_name
+    skill_dir.mkdir(parents=True)
+    (skill_dir / "SKILL.md").write_text(
+        f"---\nname: {skill_name}\ndescription: d\n---\n{body}\n"
+    )
+    state = home / ".claude" / "plugins" / "installed_plugins.json"
+    state.parent.mkdir(parents=True, exist_ok=True)
+    import json
+    state.write_text(json.dumps({"version": 1, "plugins": {
+        f"{plugin}@{marketplace}": [
+            {"scope": "user", "installPath": str(d), "version": version},
+        ],
+    }}))
+    return d
+
+
+def test_diverged_copies_claude_code_native_vs_plugin_same_name(tmp_path):
+    # claude-code plugin contributors are excluded from shadow pairing
+    # (resolution._mark_shadows), so a drifted native/plugin same-name pair
+    # gets no name-shadow and no double-load finding either (content
+    # differs). diverged-copies must catch it instead of also skipping it
+    # as "shadow/double-load territory".
+    proj, home = tmp_path / "p", tmp_path / "h"
+    _write_named(proj, ".claude/skills", "tool", "native version")
+    _cc_plugin_install(home, "mkt", "sp", "1.0.0", "tool", "plugin version")
+    findings = run_all(world_from(proj, home, ("claude-code",)), Config())
+    assert find(findings, "name-shadow") == []
+    assert find(findings, "double-load") == []
+    hits = find(findings, "diverged-copies")
+    assert len(hits) == 1
+    assert "tool" in hits[0].message
+
+
+def test_diverged_copies_claude_code_native_vs_plugin_identical_content(tmp_path):
+    # identical content is double-load's territory, not diverged-copies'
+    proj, home = tmp_path / "p", tmp_path / "h"
+    _write_named(proj, ".claude/skills", "tool", "same body")
+    _cc_plugin_install(home, "mkt", "sp", "1.0.0", "tool", "same body")
+    findings = run_all(world_from(proj, home, ("claude-code",)), Config())
     assert find(findings, "diverged-copies") == []
 
 

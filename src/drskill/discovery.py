@@ -5,6 +5,7 @@ from pathlib import Path
 
 from drskill.harnesses import HarnessDef
 from drskill.models import BrokenSymlink, RawInstance
+from drskill.stores import discover_plugins
 
 
 def _walk_dirs(base: Path):
@@ -65,12 +66,11 @@ def _via_symlink(f: Path, base: Path) -> bool:
 
 def discover(
     h: HarnessDef, project_root: Path, home: Path, global_only: bool = False
-) -> tuple[list[RawInstance], list[BrokenSymlink]]:
+) -> tuple[list[RawInstance], list[BrokenSymlink], list[tuple[str, str]]]:
     instances: list[RawInstance] = []
     broken: list[BrokenSymlink] = []
-    for order, (base, scope, spec_str) in enumerate(
-        h.search_paths(project_root, home, global_only)
-    ):
+    native_paths = h.search_paths(project_root, home, global_only)
+    for order, (base, scope, spec_str) in enumerate(native_paths):
         if not base.is_dir():
             continue
         files = _find_skill_files(base, h.recursive)
@@ -93,4 +93,35 @@ def discover(
                 )
             )
         broken += [BrokenSymlink(harness=h.id, path=p) for p in _find_broken_symlinks(base, h.recursive)]
-    return instances, broken
+    # Store-delivered skills: enabled plugins' roots rank BELOW every
+    # native path (proven on gemini and copilot; codex keeps its
+    # no-shadowing semantics via search_order "none").
+    plugins, unreadable_states = discover_plugins(h.id, home, project_root)
+    unreadable = [(h.id, p) for p in unreadable_states]
+    order = len(native_paths)
+    for plug in plugins:
+        if not plug.enabled:
+            continue  # disabled plugins' skills demonstrably do not load
+        if global_only and plug.scope == "project":
+            continue
+        for base in plug.skills_roots:
+            if not base.is_dir():
+                order += 1
+                continue
+            for f in _find_skill_files(base, plug.recursive):
+                if not f.exists():
+                    continue
+                instances.append(RawInstance(
+                    harness=h.id,
+                    scope=plug.scope,
+                    skill_file=f,
+                    via_symlink=_via_symlink(f, base),
+                    order=order,
+                    plugin=plug,
+                ))
+            broken += [
+                BrokenSymlink(harness=h.id, path=p)
+                for p in _find_broken_symlinks(base, plug.recursive)
+            ]
+            order += 1
+    return instances, broken, unreadable

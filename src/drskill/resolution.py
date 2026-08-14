@@ -221,6 +221,9 @@ def build_world(
                 continue
             world.unreadable += [(inst.harness, p) for p in unreadable_files]
             world.contributors[cid] = c
+        if inst.plugin is not None and c.source.kind == "unmanaged":
+            c.source = Provenance(kind="plugin", source=inst.plugin.provenance_source)
+            c.suite = inst.plugin.name
         if inst.scope == "project":
             c.scope = "project"
         c.deployments.append(
@@ -245,6 +248,11 @@ def _mark_shadows(world: World) -> None:
             continue  # this harness keeps every same-name copy visible
         first_by_name: dict[str, Contributor] = {}
         for c, d in world.harness_loads(hid):
+            # Claude Code namespaces plugin skills ("plugin:skill"), so a
+            # plugin/native name collision is not a real load conflict
+            # there: plugin instances neither shadow nor get shadowed.
+            if hid == "claude-code" and c.source.kind == "plugin":
+                continue
             prior = first_by_name.get(c.name)
             if prior is None:
                 first_by_name[c.name] = c

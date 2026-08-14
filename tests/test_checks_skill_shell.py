@@ -13,7 +13,7 @@ def make_world(root):
         paths_verified=True, precedence_verified=True,
         project_paths=[".claude/skills"], recursive=True,
     )
-    instances, broken = discover(h, root, root / "no-home")
+    instances, broken, _u = discover(h, root, root / "no-home")
     return build_world(instances, {"t3": h}, broken)
 
 
