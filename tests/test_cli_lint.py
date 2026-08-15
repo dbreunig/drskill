@@ -107,3 +107,53 @@ def test_ack_round_trip(tmp_path, monkeypatch):
     )
     r = runner.invoke(app, ["lint", str(root), "--fail-on", "warn"])
     assert r.exit_code == 0, r.output
+
+
+def test_lint_claude_plugin_end_to_end(tmp_path):
+    # a claude-code plugin with a bad-name manifest and one good skill
+    root = tmp_path / "plug"
+    (root / ".claude-plugin").mkdir(parents=True)
+    (root / ".claude-plugin" / "plugin.json").write_text('{"name": "Bad_Name"}')
+    d = root / "skills" / "good"
+    d.mkdir(parents=True)
+    (d / "SKILL.md").write_text(
+        "---\nname: good\ndescription: Use when the user asks for a "
+        "good-skill demo.\n---\nbody\n"
+    )
+    r = runner.invoke(app, ["lint", str(root)])
+    assert r.exit_code == 1  # error-severity finding present
+    assert "cc-manifest-invalid" in r.output
+
+
+def test_lint_marketplace_end_to_end(tmp_path):
+    root = tmp_path / "market"
+    (root / ".claude-plugin").mkdir(parents=True)
+    (root / ".claude-plugin" / "marketplace.json").write_text(json.dumps({
+        "name": "m", "owner": {"name": "o"},
+        "plugins": [{"name": "x", "source": {"source": "github", "repo": "o/r"}}],
+    }))
+    r = runner.invoke(app, ["lint", str(root)])
+    # warning severity only -> default --fail-on error passes
+    assert r.exit_code == 0
+    assert "marketplace-unpinned-source" in r.output
+
+
+def test_lint_dual_manifest_runs_both_suites(tmp_path):
+    from drskill.lint import checks_for, classify
+
+    root = tmp_path / "plug"
+    (root / ".claude-plugin").mkdir(parents=True)
+    (root / ".claude-plugin" / "plugin.json").write_text('{"name": "p"}')
+    (root / "plugin.json").write_text('{"name": "p"}')
+    ids = checks_for(classify(root), mcp_connect=False)
+    assert "plugin-manifest-invalid" in ids and "cc-manifest-invalid" in ids
+    assert "marketplace-invalid" in ids
+
+
+def test_marketplace_target_gets_only_marketplace_checks(tmp_path):
+    from drskill.lint import MARKETPLACE_CHECKS, checks_for, classify
+
+    root = tmp_path / "market"
+    (root / ".claude-plugin").mkdir(parents=True)
+    (root / ".claude-plugin" / "marketplace.json").write_text("{}")
+    assert checks_for(classify(root), mcp_connect=False) == MARKETPLACE_CHECKS

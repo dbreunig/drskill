@@ -305,6 +305,14 @@ PLUGIN_SPEC_CHECKS = [
     "plugin-skill-undiscoverable", "plugin-path-escape",
     "plugin-extension-hygiene",
 ]
+CC_PLUGIN_CHECKS = [
+    "cc-manifest-invalid", "cc-manifest-unknown-field",
+    "cc-component-missing", "cc-manifest-mismatch",
+]
+MARKETPLACE_CHECKS = [
+    "marketplace-invalid", "marketplace-unpinned-source",
+    "marketplace-command-source", "marketplace-entry-missing",
+]
 MCP_SPEC_CHECKS = ["mcp-spec-invalid", "mcp-spec-placeholder"]
 MCP_STATIC_CHECKS = ["mcp-config-invalid", "mcp-secret-in-config", "mcp-unpinned-server"]
 MCP_CONNECT_CHECKS = [
@@ -316,9 +324,17 @@ MCP_CONNECT_CHECKS = [
 def checks_for(target: LintTarget, mcp_connect: bool) -> list[str]:
     if target.kind == "skill":
         return list(SKILL_CONTENT_CHECKS)
+    if target.kind == "marketplace":
+        return list(MARKETPLACE_CHECKS)
     if target.kind == "plugin":
-        ids = (SKILL_CONTENT_CHECKS + ["exact-duplicate", "near-duplicate"]
-               + PLUGIN_SPEC_CHECKS + MCP_SPEC_CHECKS + MCP_STATIC_CHECKS)
+        ids = SKILL_CONTENT_CHECKS + ["exact-duplicate", "near-duplicate"]
+        if target.plugin_flavor == "claude-code":
+            ids += CC_PLUGIN_CHECKS + MARKETPLACE_CHECKS
+            ids += MCP_SPEC_CHECKS + MCP_STATIC_CHECKS
+        else:
+            ids += PLUGIN_SPEC_CHECKS + MCP_SPEC_CHECKS + MCP_STATIC_CHECKS
+            if target.dual_manifest:
+                ids += CC_PLUGIN_CHECKS + MARKETPLACE_CHECKS
     elif target.mcp_flavor == "agent-plugins":
         ids = MCP_SPEC_CHECKS + MCP_STATIC_CHECKS
     else:

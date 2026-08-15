@@ -161,12 +161,16 @@ drskill scan --deep --mcp-connect --ci
 Everything above checks the loadout your agents consume. `drskill lint` turns the same checks on the things you author. Point it at one thing and it works out what that thing is:
 
 ```
-drskill lint ./my-plugin        # a plugin directory with a plugin.json
+drskill lint ./my-plugin        # an Agent Plugins directory with a plugin.json
+drskill lint ./my-cc-plugin     # a Claude Code plugin, manifest at .claude-plugin/plugin.json
 drskill lint ./skills/foo       # a skill folder, or its SKILL.md
 drskill lint ./mcp.json         # an MCP config file
+drskill lint ./my-marketplace   # a marketplace directory or marketplace.json file
 ```
 
-A plugin is checked against the [Agent Plugins 1.0.0 specification](https://agent-plugins.org): the `plugin.json` manifest and its name rules, which skills a client will actually discover, `mcp.json` transports and placeholder rules, and symlinks that escape the plugin root. On top of the spec checks, every skill inside the plugin gets the same content checks as `scan` (the SKILL.md spec, description quality, token budget, and injection checks), and every server in its `mcp.json` gets the static MCP checks.
+A plugin is checked against the [Agent Plugins 1.0.0 specification](https://agent-plugins.org): the `plugin.json` manifest and its name rules, which skills a client will actually discover, `mcp.json` transports and placeholder rules, and symlinks that escape the plugin root. On top of the spec checks, every skill inside the plugin gets the same content checks as `scan` (the SKILL.md spec, description quality, token budget, and injection checks), and every server in its `mcp.json` gets the static MCP checks. A plugin using Claude Code's own layout, with the manifest at `.claude-plugin/plugin.json`, gets the equivalent Claude Code manifest checks instead of the Agent Plugins spec checks; a plugin that ships both manifests gets both suites. Either way, a `.claude-plugin/marketplace.json` sitting alongside the manifest is picked up and checked too.
+
+A marketplace target — a directory or a bare `marketplace.json` — gets the marketplace supply-chain checks: manifest validity, and whether each listed plugin's source is pinned to something immutable (a git sha, an npm version, an archive sha256) rather than a movable ref or an unpinned default branch.
 
 A skill target runs just the skill checks. An MCP config target depends on the file. A file with the Agent Plugins `$schema`, or sitting next to a `plugin.json`, is checked against the spec's `mcp.json` rules. A plain `mcpServers` file, like a `.mcp.json`, has no spec to enforce, so it gets the structural and security checks only.
 
@@ -180,7 +184,7 @@ Exit code 0 is clean, 1 means findings at or above the failure threshold (errors
 
 `--deep` and `--mcp-connect` opt into the model-judged checks and the live server checks, exactly as they do for `scan`. Without them, lint makes no LLM calls and connects to nothing.
 
-Lint reads the Agent Plugins layout: a `plugin.json` at the directory root. Claude Code's older plugin layout, with the manifest at `.claude-plugin/plugin.json`, is not recognized yet.
+Lint auto-detects the layout: a `plugin.json` at the directory root is the Agent Plugins layout, and a manifest at `.claude-plugin/plugin.json` is Claude Code's layout. `--type plugin` and `--type marketplace` force the kind when a path is ambiguous.
 
 ## Audit your usage
 
@@ -335,6 +339,24 @@ These checks run only under `drskill lint`, against a plugin's manifest and layo
 | `mcp-spec-invalid` | error | A plugin's `mcp.json` breaks the spec: a missing `$schema`, an unknown transport, a bad command or URL, or `args`, `env`, or `headers` with the wrong types. |
 | `mcp-spec-placeholder` | error, warning for headers | `${PLUGIN_ROOT}` or `${PLUGIN_DATA}` somewhere it never expands (the command, an env key), an env entry using a reserved name, or a `cwd` outside the allowed forms. A placeholder in a header value is a warning, because it is sent literally. |
 
+These checks run under `drskill lint` against a Claude Code plugin's `.claude-plugin/plugin.json` and layout.
+
+| check id | severity | fires when |
+|---|---|---|
+| `cc-manifest-invalid` | error | `.claude-plugin/plugin.json` does not parse, misses the required `name`, the name is not kebab-case, or a component pointer field (`commands`, `agents`, `skills`, `hooks`, `mcpServers`) has the wrong type. |
+| `cc-manifest-unknown-field` | warning | The manifest carries a top-level field Claude Code does not document. |
+| `cc-component-missing` | error | A component field (e.g. `skills`, `commands`) names a path that does not exist under the plugin root. |
+| `cc-manifest-mismatch` | warning | A plugin ships both manifests and they disagree on `name` or `version`. |
+
+These checks run under `drskill lint` against a marketplace: a `.claude-plugin/marketplace.json`, or its listing plugins' supply chain.
+
+| check id | severity | fires when |
+|---|---|---|
+| `marketplace-invalid` | error, warning for an unrecognized source type | The marketplace descriptor breaks the format: missing `name`, `owner.name`, or `plugins`, a name that is not kebab-case, or a plugin entry missing its required source fields. |
+| `marketplace-unpinned-source` | warning, note for a ref-only git pin | A listed plugin's source floats: no `sha` pinning a git source (a `ref` alone downgrades to a note), no npm `version`, no archive `sha256`, or an insecure `http://` URL. |
+| `marketplace-command-source` | warning | A plugin installs by running an arbitrary shell command (`source: command`). Review the command before trusting the marketplace. |
+| `marketplace-entry-missing` | error | A relative-path plugin entry points at a directory that does not exist. |
+
 ## Deep checks
 
 The description-overlap check compares text, so some of its warnings are false alarms. `drskill scan --deep` sends each flagged pair of skills to a language model, which judges whether the two skills are distinct, whether their descriptions collide, or whether their scopes genuinely overlap. Deep mode is included in the standard install; only the minimal `drskill-core` install leaves it out. The only other requirement is a provider API key, e.g. `ANTHROPIC_API_KEY`. drskill sends only skill names and descriptions to the model, and it sends nothing at all unless you pass `--deep`.
@@ -450,7 +472,7 @@ The `suite` column names where a row came from. For a skill it is the plugin or 
 
 ## Known limitations
 
-Plugin-delivered skills are scanned like any other skill for the five stores drskill knows: Claude Code, Codex, Gemini CLI, Copilot, and droid. Each enabled plugin's skill roots are appended to that harness's loadout; disabled plugins and stale cache versions are never visited. `drskill lint` does check a plugin directory you point it at, but only in the Agent Plugins layout with `plugin.json` at the root, not Claude Code's older `.claude-plugin` layout.
+Plugin-delivered skills are scanned like any other skill for the five stores drskill knows: Claude Code, Codex, Gemini CLI, Copilot, and droid. Each enabled plugin's skill roots are appended to that harness's loadout; disabled plugins and stale cache versions are never visited.
 
 `.claude/commands/` directories use the same `` !`command` `` and ```` ```! ```` invocation-time shell syntax as skills, but drskill does not discover them yet, so a command file's embedded shell commands are invisible to `injection-shell-unreviewed` and `injection-shell-dangerous`.
 
