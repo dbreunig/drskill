@@ -244,13 +244,21 @@ non-blocking display bug found on marketplace targets (see above).
 
 ## Follow-ups (logged, not this cycle)
 
-- Marketplace lint header: give `target.kind == "marketplace"` its
-  own line in `render_lint` (`src/drskill/report.py`) instead of
-  falling through to the MCP-config header. Found during the 2026-08-15
-  live gate; findings/content unaffected, display only.
-
+- ~~Marketplace lint header~~ FIXED post-gate (commit 7bcf111):
+  `render_lint` gained a marketplace branch with name + entry count.
 - `strict: false` conflict detection if a local-source plugin dir is
   present (both sides locally readable — feasible subset).
 - Marketplace `renames` / cross-marketplace dependency validation.
 - Schema-verbatim validation tier if a jsonschema dep ever becomes
   worth it.
+- From the final whole-branch review (2026-08-15): `drskill ack`
+  resolves ids against a fresh SCAN, so lint-only findings (all cc-*
+  and marketplace-* checks) cannot be acked via the CLI today — the
+  workflow is `lint --json` → fingerprint → append_ack. A lint-aware
+  ack path (or an honest README sentence) is worth a cycle. Also:
+  marketplace fingerprints hash the whole file text, so any edit
+  re-fires every ack in that file — entry-scoped hashing (serialize
+  just the entry's source object) would make acks on large
+  marketplaces less brittle. Deferred minor: pathological multi-KB
+  entry names embed verbatim in finding messages (cap via one_line
+  like command sources).
