@@ -1,7 +1,7 @@
 # Lint: Claude Code plugin layout + marketplace descriptors — Design
 
 **Date:** 2026-08-14
-**Status:** Approved (interactive brainstorming session)
+**Status:** Approved (interactive brainstorming session); shipped 2026-08-15
 
 ## Problem
 
@@ -192,7 +192,62 @@ pin).
   (dual-manifest), and a local marketplace descriptor; read every
   finding once, expect signal not noise.
 
+## Gate results (2026-08-15)
+
+Full suite: `uv run pytest -q` — 698 passed, 0 failures.
+
+Live gate (read-only, no acks, no writes to any target):
+
+- **Real installed plugin** —
+  `~/.claude/plugins/cache/claude-plugins-official/superpowers/6.3.0`
+  (14 skills). `drskill lint` → "No findings." Clean, as expected —
+  this plugin's skills already pass `drskill scan`.
+- **everyharness kitchen-sink fixture** — present at
+  `.../scratchpad/everyharness/fixtures/kitchen-sink`, but it is an
+  everyharness-flavor fixture (`everyharness.yaml`, `agents/`,
+  `commands/`, `hooks/hooks.json`, `skills/`) with no `plugin.json`
+  anywhere (root or `.claude-plugin/`) — not a dual-manifest
+  claude-code plugin layout. Skipped per brief step 3 (fixture found
+  but doesn't match the dual-manifest shape the gate targets).
+- **Marketplace descriptor 1** —
+  `~/.claude/plugins/marketplaces/superpowers-marketplace/.claude-plugin/marketplace.json`
+  (9 plugin entries, all `source: url`). 8 `[marketplace-unpinned-source]`
+  warnings (no `sha`/`ref` — e.g. `superpowers`, `superpowers-chrome`,
+  `elements-of-style`) and 1 `[marketplace-unpinned-source]` note
+  (`superpowers-dev` pins only a movable `ref: dev`, no `sha`).
+  Verdict: real signal — this marketplace's entries genuinely track
+  default branches; not noise.
+- **Marketplace descriptor 2** —
+  `~/.claude/plugins/marketplaces/claude-plugins-official/.claude-plugin/marketplace.json`
+  (286 plugin entries). "No findings." Verified by hand: 53 entries
+  use a bare string `source` (local relative paths like
+  `./plugins/agent-sdk-dev`, since this marketplace lives inside the
+  same repo as its plugins) and are correctly excluded from the
+  unpinned-source check (string sources are skipped —
+  `checks/marketplace.py` `marketplace_unpinned`); the remaining
+  entries carry both `sha` and `ref`/`repo` pins. Verdict: correct,
+  not a false negative.
+- **Known issue found (non-blocking):** marketplace lint targets get
+  a wrong header line — `render_lint` in `report.py` branches only on
+  `target.kind == "plugin"` / `"skill"`; a `"marketplace"` target
+  falls through to the MCP-config `else` branch and prints
+  `drskill lint — MCP config (harness flavor), 0 servers` instead of
+  a marketplace-appropriate header. Confirmed on both marketplace
+  descriptors above. The underlying findings are unaffected — check
+  selection (`MARKETPLACE_CHECKS`) and finding content are correct in
+  both cases, and no test asserts the marketplace header text. Cosmetic
+  only; logged here as a follow-up rather than patched during the gate.
+
+Overall verdict: no crash, no nonsense finding, no false-positive
+flood on the real superpowers plugin — gate passes. One cosmetic,
+non-blocking display bug found on marketplace targets (see above).
+
 ## Follow-ups (logged, not this cycle)
+
+- Marketplace lint header: give `target.kind == "marketplace"` its
+  own line in `render_lint` (`src/drskill/report.py`) instead of
+  falling through to the MCP-config header. Found during the 2026-08-15
+  live gate; findings/content unaffected, display only.
 
 - `strict: false` conflict detection if a local-source plugin dir is
   present (both sides locally readable — feasible subset).
