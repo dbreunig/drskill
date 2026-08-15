@@ -18,8 +18,10 @@ from drskill.models import BrokenSymlink, Finding, PluginManifest, PluginMcpFile
 from drskill.resolution import World, make_contributor
 
 _ACCEPTS = (
-    "drskill lint takes a plugin directory (with plugin.json), a skill "
-    "directory or SKILL.md file, or an MCP config JSON file"
+    "drskill lint takes a plugin directory (with plugin.json or "
+    ".claude-plugin/plugin.json), a skill directory or SKILL.md file, a "
+    "marketplace directory or marketplace.json file, or an MCP config "
+    "JSON file"
 )
 _MCP_SCHEMA_RE = re.compile(r"agent-plugins\.org/schemas/[^/]+/mcp\.schema\.json$")
 
@@ -28,10 +30,19 @@ class LintUsageError(Exception):
     pass
 
 
+def _plugin_target(p: Path) -> LintTarget:
+    return LintTarget(
+        kind="plugin", path=p, plugin_flavor="agent-plugins",
+        dual_manifest=(p / ".claude-plugin" / "plugin.json").is_file(),
+    )
+
+
 class LintTarget(BaseModel):
-    kind: Literal["plugin", "skill", "mcp"]
+    kind: Literal["plugin", "skill", "mcp", "marketplace"]
     path: Path
     mcp_flavor: Literal["agent-plugins", "harness"] | None = None
+    plugin_flavor: Literal["agent-plugins", "claude-code"] | None = None
+    dual_manifest: bool = False
 
 
 def classify(path: Path, forced: str | None = None) -> LintTarget:
@@ -39,9 +50,23 @@ def classify(path: Path, forced: str | None = None) -> LintTarget:
     if not p.exists():
         raise LintUsageError(f"{path} does not exist; {_ACCEPTS}")
     if forced == "plugin":
-        if not (p.is_dir() and (p / "plugin.json").is_file()):
-            raise LintUsageError(f"{path} is not a plugin directory (no plugin.json)")
-        return LintTarget(kind="plugin", path=p)
+        if p.is_dir() and (p / "plugin.json").is_file():
+            return _plugin_target(p)
+        if p.is_dir() and (p / ".claude-plugin" / "plugin.json").is_file():
+            return LintTarget(kind="plugin", path=p, plugin_flavor="claude-code")
+        raise LintUsageError(
+            f"{path} is not a plugin directory (no plugin.json or "
+            ".claude-plugin/plugin.json)"
+        )
+    if forced == "marketplace":
+        if p.is_file() and p.name == "marketplace.json":
+            return LintTarget(kind="marketplace", path=p)
+        if p.is_dir() and (p / ".claude-plugin" / "marketplace.json").is_file():
+            return LintTarget(kind="marketplace", path=p)
+        raise LintUsageError(
+            f"{path} is not a marketplace (no marketplace.json or "
+            ".claude-plugin/marketplace.json)"
+        )
     if forced == "skill":
         if p.is_file():
             if p.name != "SKILL.md":
@@ -59,12 +84,20 @@ def classify(path: Path, forced: str | None = None) -> LintTarget:
         return _classify_json(p)
     if p.is_dir():
         if (p / "plugin.json").is_file():
-            return LintTarget(kind="plugin", path=p)
+            return _plugin_target(p)
+        if (p / ".claude-plugin" / "plugin.json").is_file():
+            return LintTarget(kind="plugin", path=p, plugin_flavor="claude-code")
         if (p / "SKILL.md").is_file():
             return LintTarget(kind="skill", path=p)
-        raise LintUsageError(f"{path} has no plugin.json or SKILL.md; {_ACCEPTS}")
+        if (p / ".claude-plugin" / "marketplace.json").is_file():
+            return LintTarget(kind="marketplace", path=p)
+        raise LintUsageError(
+            f"{path} has no plugin.json, .claude-plugin/, or SKILL.md; {_ACCEPTS}"
+        )
     if p.name == "SKILL.md":
         return LintTarget(kind="skill", path=p)
+    if p.name == "marketplace.json":
+        return LintTarget(kind="marketplace", path=p)
     if p.suffix == ".json" or p.name.startswith("."):
         return _classify_json(p)
     raise LintUsageError(f"{path} is not a lintable file; {_ACCEPTS}")

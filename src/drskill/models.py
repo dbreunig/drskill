@@ -115,3 +115,14 @@ class PluginMcpFile(BaseModel):
     data: dict | None = None  # parsed JSON; None when it failed to parse
     root: str  # plugin root, or the file's parent when linted standalone
     provisional_root: bool = False
+
+
+class MarketplaceFile(BaseModel):
+    """A parsed .claude-plugin/marketplace.json, kept raw for the
+    marketplace-* checks."""
+
+    path: str
+    root: str  # marketplace repo root (the dir containing .claude-plugin/)
+    text: str = ""
+    data: dict | None = None  # parsed JSON; None when it failed to parse
+    parse_error: str | None = None

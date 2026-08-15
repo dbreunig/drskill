@@ -284,3 +284,76 @@ def test_run_lint_applies_cached_deep_verdicts_without_judge(tmp_path, monkeypat
     # The strip-harnesses step ran after apply_verdicts: it nulled out the
     # harness the fake apply_verdicts injected.
     assert all(f.harnesses == [] for f in findings)
+
+
+# Tests for Claude Code plugin layout and marketplace classification
+import json
+
+
+def _cc_plugin(tmp_path, manifest=None):
+    root = tmp_path / "ccplug"
+    (root / ".claude-plugin").mkdir(parents=True)
+    m = {"name": "my-plugin"} if manifest is None else manifest
+    (root / ".claude-plugin" / "plugin.json").write_text(json.dumps(m))
+    return root
+
+
+def test_classify_claude_plugin_dir(tmp_path):
+    root = _cc_plugin(tmp_path)
+    t = classify(root)
+    assert t.kind == "plugin" and t.plugin_flavor == "claude-code"
+    assert t.dual_manifest is False
+
+
+def test_classify_agent_plugins_sets_flavor(tmp_path):
+    root = tmp_path / "applug"
+    root.mkdir()
+    (root / "plugin.json").write_text('{"name": "x"}')
+    t = classify(root)
+    assert t.kind == "plugin" and t.plugin_flavor == "agent-plugins"
+
+
+def test_classify_dual_manifest(tmp_path):
+    root = _cc_plugin(tmp_path)
+    (root / "plugin.json").write_text('{"name": "my-plugin"}')
+    t = classify(root)
+    assert t.plugin_flavor == "agent-plugins" and t.dual_manifest is True
+
+
+def test_classify_marketplace_dir_and_file(tmp_path):
+    root = tmp_path / "market"
+    (root / ".claude-plugin").mkdir(parents=True)
+    mp = root / ".claude-plugin" / "marketplace.json"
+    mp.write_text('{"name": "m", "owner": {"name": "o"}, "plugins": []}')
+    assert classify(root).kind == "marketplace"
+    assert classify(mp).kind == "marketplace"
+
+
+def test_classify_forced_marketplace(tmp_path):
+    root = tmp_path / "market"
+    (root / ".claude-plugin").mkdir(parents=True)
+    (root / ".claude-plugin" / "marketplace.json").write_text("{}")
+    assert classify(root, forced="marketplace").kind == "marketplace"
+    plain = tmp_path / "plain"
+    plain.mkdir()
+    try:
+        classify(plain, forced="marketplace")
+        raise AssertionError("expected LintUsageError")
+    except LintUsageError:
+        pass
+
+
+def test_classify_forced_plugin_accepts_claude_layout(tmp_path):
+    root = _cc_plugin(tmp_path)
+    t = classify(root, forced="plugin")
+    assert t.kind == "plugin" and t.plugin_flavor == "claude-code"
+
+
+def test_classify_empty_dir_error_mentions_claude_plugin(tmp_path):
+    d = tmp_path / "empty"
+    d.mkdir()
+    try:
+        classify(d)
+        raise AssertionError("expected LintUsageError")
+    except LintUsageError as e:
+        assert ".claude-plugin" in str(e)
