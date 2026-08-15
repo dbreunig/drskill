@@ -1,5 +1,4 @@
 import json
-from pathlib import Path
 
 from drskill.checks import run_checks
 from drskill.ledger import Config

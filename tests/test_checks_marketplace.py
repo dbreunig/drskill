@@ -1,5 +1,5 @@
 import json
-from pathlib import Path
+
 
 from drskill.checks import run_checks
 from drskill.ledger import Config
@@ -164,3 +164,14 @@ def test_fingerprints_are_path_free(tmp_path):
     fa = _run(_world(tmp_path / "a", data))
     fb = _run(_world(tmp_path / "b", data))
     assert {f.fingerprint for f in fa} == {f.fingerprint for f in fb}
+
+
+def test_long_entry_names_truncated_in_messages(tmp_path):
+    long_name = "a" * 300  # valid kebab, pathologically long
+    world = _world(tmp_path, _mp([
+        {"name": long_name, "source": {"source": "github", "repo": "o/r"}},
+    ]))
+    fs = [f for f in _run(world) if f.check_id == "marketplace-unpinned-source"]
+    (f,) = fs
+    assert ("a" * 120) not in f.message  # capped
+    assert ("a" * 40) in f.message  # but recognizably present

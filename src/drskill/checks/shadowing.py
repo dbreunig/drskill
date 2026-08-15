@@ -58,6 +58,27 @@ def double_load(world: World, config: Config) -> list[Finding]:
             paths = ", ".join(str(d.path) for _, d in loads.values())
             quoted_paths = ", ".join(shlex.quote(str(d.path)) for _, d in loads.values())
             display = world.harnesses[hid].display_name
+            # A plugin store's copy is managed by its installer, so never
+            # suggest deleting inside the cache; name the plugin instead.
+            plugin_suites = sorted({
+                c.suite for c in contributors
+                if c.source.kind == "plugin" and c.suite
+            })
+            if plugin_suites:
+                flat = ", ".join(
+                    shlex.quote(str(d.path)) for c, d in loads.values()
+                    if c.source.kind != "plugin"
+                )
+                which = ", ".join(plugin_suites)
+                fix = (
+                    f"Disable or uninstall plugin {which} to drop its copy, "
+                    f"or remove the flat copy ({flat})"
+                    if flat else
+                    f"Disable or uninstall one of the plugins shipping this "
+                    f"skill ({which})"
+                )
+            else:
+                fix = f"Remove all but one copy ({quoted_paths})"
             out.append(
                 make_finding(
                     "double-load", "error", contributors,
@@ -65,7 +86,7 @@ def double_load(world: World, config: Config) -> list[Finding]:
                     f"'{contributors[0].name}' {len(loads)} times: {paths}",
                     harnesses=[hid],
                     extra_key=hid,
-                    fix_commands=[f"Remove all but one copy ({quoted_paths})"],
+                    fix_commands=[fix],
                 )
             )
     return out
@@ -131,7 +152,20 @@ def diverged_copies(world: World, config: Config) -> list[Finding]:
             labels = ["newest"] + ["older"] * (len(stamped) - 1)
         for label, ((_raw, ts), c) in zip(labels, stamped):
             lines.append(f"        {label}: {c.id} ({ts})")
-        if tied:
+        has_plugin_copy = any(c.source.kind == "plugin" for c in group)
+        if has_plugin_copy:
+            # A plugin store's copy is managed by its installer: rm/ln
+            # advice inside the cache is wrong (the installer restores it).
+            fixes = [
+                "A plugin's store copy is managed by its installer; "
+                "reconcile by updating the plugin or editing the flat "
+                "copy — never edit the plugin cache"
+            ]
+            if len(stamped) == 2:
+                fixes.append(
+                    f"diff {shlex.quote(stamped[0][1].id)} {shlex.quote(stamped[1][1].id)}"
+                )
+        elif tied:
             fixes = ["Timestamps tie; compare by hand before keeping one"]
             if len(stamped) == 2:
                 fixes.append(
