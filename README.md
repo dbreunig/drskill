@@ -1,6 +1,6 @@
 ### `drskill` Spots Context Issues
 
-`drskill` is `brew doctor` for your agent's loadout. Coding agents load Skills and connect to MCP servers before you type a word. `drskill` looks at every agent on your machine or in your repo, works out exactly which skills and which servers each one loads, and checks the whole set for problems.
+`drskill` is `brew doctor` for your agent's loadout. Coding agents load Skills and connect to MCP servers before you type a word. `drskill` looks at every agent on your machine or in your repo, works out exactly which skills and which servers each one loads — including skills delivered through installed plugins and extensions — and checks the whole set for problems.
 
 On the skill side it finds:
 
@@ -26,7 +26,9 @@ The last three need `drskill` to connect to the servers, which it does only when
 
 Every problem it reports ends in a command: a fix command or a command to acknowledge the problem and move on. `drskill` reads your files and never installs, edits, or deletes a skill. It makes zero calls to an LLM unless you opt in with `--deep`, and it never launches or connects to an MCP server unless you opt in with `--mcp-connect`.
 
-Scanning covers the loadout your agents consume. `drskill lint` covers what you author. Point it at a plugin, a skill, or an MCP config you are writing, and it checks the plugin against the [Agent Plugins specification](https://agent-plugins.org), runs the same content checks over everything inside, and exits with a code CI can gate on.
+Scanning covers the loadout your agents consume, wherever it comes from. For Claude Code, Codex, Gemini CLI, Copilot, and droid, that includes each installed plugin's skills, read straight from the plugin store: enabled plugins join the loadout with their suite attributed, while disabled plugins and stale cached versions are never visited.
+
+`drskill lint` covers what you author. Point it at a plugin, a skill, a marketplace, or an MCP config you are writing, and it checks plugins against the [Agent Plugins specification](https://agent-plugins.org) or Claude Code's own plugin format, checks marketplace descriptors for unpinned or shell-running plugin sources, runs the same content checks over everything inside, and exits with a code CI can gate on.
 
 Use `drskill` to:
 
@@ -34,7 +36,7 @@ Use `drskill` to:
 - Catch config risks before they ship, e.g. a secret in a committed file or an unpinned server package
 - Notice when your loadout changes (without you doing anything), e.g. a skill that drifted from its lockfile or a server that rewrote a tool description
 - Write skill and tool descriptions that do not clash with other libraries
-- Lint a plugin, skill, or MCP config before you publish it, and gate the release in CI
+- Lint a plugin, skill, marketplace, or MCP config before you publish it, and gate the release in CI
 - See which skills and MCP tools your agents actually use, and read the queries that triggered them
 
 ## Install
@@ -180,7 +182,7 @@ Lint is built for CI:
 drskill lint ./my-plugin --fail-on warn --json
 ```
 
-Exit code 0 is clean, 1 means findings at or above the failure threshold (errors by default; `--fail-on warn` includes warnings), and 2 is a usage error. `--json` prints findings as JSON and nothing else. Acks work the same as in `scan`: `drskill ack` writes to the nearest `drskill.toml`, and the finding stays silent until the content it judged changes, so an accepted warning keeps CI green without weakening the check.
+Exit code 0 is clean, 1 means findings at or above the failure threshold (errors by default; `--fail-on warn` includes warnings), and 2 is a usage error. `--json` prints findings as JSON and nothing else. Acked findings stay silent in lint exactly as in `scan`, and the manifest and marketplace checks fingerprint content rather than paths, so a committed ack holds across checkouts and CI. One honest caveat: `drskill ack` currently resolves finding references against a `scan` of your loadout, so for findings that only lint produces (the manifest and marketplace checks) you create the ack by copying the fingerprint from `lint --json` into `drskill.toml` yourself. A lint-aware ack flow is planned.
 
 `--deep` and `--mcp-connect` opt into the model-judged checks and the live server checks, exactly as they do for `scan`. Without them, lint makes no LLM calls and connects to nothing.
 
@@ -472,13 +474,11 @@ The `suite` column names where a row came from. For a skill it is the plugin or 
 
 ## Known limitations
 
-Plugin-delivered skills are scanned like any other skill for the five stores drskill knows: Claude Code, Codex, Gemini CLI, Copilot, and droid. Each enabled plugin's skill roots are appended to that harness's loadout; disabled plugins and stale cache versions are never visited.
-
 `.claude/commands/` directories use the same `` !`command` `` and ```` ```! ```` invocation-time shell syntax as skills, but drskill does not discover them yet, so a command file's embedded shell commands are invisible to `injection-shell-unreviewed` and `injection-shell-dangerous`.
 
 `skills-lock.json` hash verification is self-calibrating. Upstream `npx skills` computes its own content hashes, and `drskill` cannot always reproduce them exactly. If none of the hashes in a lockfile match what `drskill` computes, it will not accuse every skill of drift; instead it prints one warning saying the hashes could not be verified against that lockfile. Per-skill drift warnings only appear once `drskill` has confirmed, by matching at least one hash, that its hashing algorithm agrees with that lockfile's producer.
 
-Harness rules are verified in two parts, because they have two different jobs. Paths verification covers which directories a harness reads and whether it searches them recursively. Precedence verification covers which copy wins when two skills share a name. Claude Code, Pi, Gemini CLI, Codex, and Cline are verified on both. Cursor is verified on paths only, since its docs do not say which copy wins a collision. Copilot is unverified on both, since its docs do not confirm recursion and the CLI is closed source. About 65 further harnesses are vendored from the `vercel-labs/skills` project and are unverified on both.
+Harness rules are verified in two parts, because they have two different jobs. Paths verification covers which directories a harness reads and whether it searches them recursively. Precedence verification covers which copy wins when two skills share a name. Claude Code, Pi, Gemini CLI, Codex, Cline, and Copilot are verified on both — Copilot empirically, by probing its CLI with fixture skills, since its docs are silent and the code is closed. Cursor is verified on paths only, since its docs do not say which copy wins a collision. OpenCode is verified on paths, but its precedence is deliberately left unverified: probing showed its collision winner flips between runs, so a same-name collision there is effectively a coin flip. About 65 further harnesses are vendored from the `vercel-labs/skills` project and are unverified on both.
 
 A finding only inherits the uncertainty it actually depends on. Shadowing and double-load findings depend on precedence; every other finding depends only on paths. When a harness in a finding's list is unverified for the part that finding depends on, its name carries a `?` suffix, and the report ends with one legend line explaining it. A finding with no `?` rests entirely on verified rules.
 
