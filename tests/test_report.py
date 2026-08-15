@@ -372,3 +372,31 @@ def test_note_severity_renders_in_notes_section():
     assert "judged distinct" in text
     assert "1 note" in text
     assert "0 errors, 0 warnings" in text
+
+
+def test_render_lint_marketplace_header(tmp_path):
+    from drskill.lint import build_lint_world, classify
+    from drskill.report import render_lint
+
+    root = tmp_path / "market"
+    (root / ".claude-plugin").mkdir(parents=True)
+    (root / "a").mkdir()
+    mp = root / ".claude-plugin" / "marketplace.json"
+    mp.write_text(json.dumps({
+        "name": "mkt",
+        "owner": {"name": "o"},
+        "plugins": [
+            {"name": "a", "source": "./a"},
+            {"name": "b", "source": {
+                "source": "github", "repo": "o/r", "sha": "a" * 40,
+            }},
+        ],
+    }))
+    target = classify(root)
+    world = build_lint_world(target)
+    console = Console(record=True, width=100, force_terminal=False)
+    render_lint(world, target, [], [], console)
+    text = console.export_text()
+    assert "marketplace 'mkt'" in text
+    assert "2 plugin entries" in text
+    assert "MCP config" not in text
