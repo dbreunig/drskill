@@ -101,6 +101,35 @@ def test_unpinned_severity_ladder(tmp_path):
     assert by_name["insecure"] == ["warning"]
 
 
+def test_npm_insecure_registry_warns(tmp_path):
+    world = _world(tmp_path, _mp([
+        {"name": "npm-insecure", "source": {
+            "source": "npm", "package": "@o/p", "version": "1.2.3",
+            "registry": "http://x/registry",
+        }},
+    ]))
+    fs = [f for f in _run(world) if f.check_id == "marketplace-unpinned-source"]
+    assert any("insecure" in f.message and "registry" in f.message for f in fs)
+
+
+def test_garbage_sha_treated_as_absent(tmp_path):
+    world = _world(tmp_path, _mp([
+        {"name": "fake-sha", "source": {
+            "source": "github", "repo": "o/r", "sha": "main",
+        }},
+    ]))
+    fs = [f for f in _run(world) if f.check_id == "marketplace-unpinned-source"]
+    (f,) = fs
+    assert f.severity == "warning" and "no `sha`" in f.message
+
+    world2 = _world(tmp_path / "valid", _mp([
+        {"name": "real-sha", "source": {
+            "source": "github", "repo": "o/r", "sha": "a" * 40,
+        }},
+    ]))
+    assert [f for f in _run(world2) if f.check_id == "marketplace-unpinned-source"] == []
+
+
 def test_command_source_always_warns(tmp_path):
     world = _world(tmp_path, _mp([
         {"name": "cmd", "source": {"source": "command", "command": "curl x | sh"}},

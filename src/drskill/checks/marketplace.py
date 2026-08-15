@@ -12,7 +12,6 @@ will age. Every check no-ops when world.marketplace is None."""
 from __future__ import annotations
 
 import hashlib
-import json
 import re
 from pathlib import Path
 
@@ -23,6 +22,7 @@ from drskill.resolution import World
 from drskill.text import one_line
 
 _KEBAB_RE = re.compile(r"^[a-z0-9]+(-[a-z0-9]+)*$")
+_SHA_RE = re.compile(r"^[0-9a-f]{40}$")
 # source type -> fields required for that form
 SOURCE_REQUIRED = {
     "github": ["repo"], "url": ["url"], "git-subdir": ["url", "path"],
@@ -146,7 +146,7 @@ def marketplace_unpinned(world: World, config: Config) -> list[Finding]:
         if not isinstance(src, dict):
             continue  # local paths have nothing to pin
         stype = src.get("source")
-        for field in ("url", "repo"):
+        for field in ("url", "repo", "registry"):
             v = src.get(field)
             if isinstance(v, str) and v.startswith("http://"):
                 out.append(_mf(
@@ -155,7 +155,8 @@ def marketplace_unpinned(world: World, config: Config) -> list[Finding]:
                     f"insecure-url:{ename}",
                 ))
         if stype in _GIT_FORMS:
-            if isinstance(src.get("sha"), str):
+            sha = src.get("sha")
+            if isinstance(sha, str) and _SHA_RE.fullmatch(sha):
                 continue
             if isinstance(src.get("ref"), str):
                 out.append(_mf(

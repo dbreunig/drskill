@@ -52,6 +52,23 @@ def _ccf(check_id, severity, world, message, reason, fix=None):
     )
 
 
+def _mismatch_fp(check_id, severity, world, message, reason, fix=None):
+    """cc-manifest-mismatch judges BOTH manifests, so its fingerprint must
+    cover both raw_texts — otherwise editing root plugin.json's version
+    doesn't change the fingerprint and a stale ack keeps a still-mismatched
+    pair silent. Path-free like `_ccf`, same reason-slug convention."""
+    a_text = world.plugin.raw_text or ""
+    b_text = world.cc_plugin.raw_text or ""
+    combined = a_text + "\x00" + b_text
+    payload = "|".join(
+        [check_id, hashlib.sha256(combined.encode()).hexdigest(), reason]
+    )
+    return make_finding(
+        check_id, severity, [], message,
+        fix_commands=fix or [], fingerprint_texts=[payload],
+    )
+
+
 @check("cc-manifest-invalid")
 def cc_manifest_invalid(world: World, config: Config) -> list[Finding]:
     m = world.cc_plugin
@@ -141,7 +158,7 @@ def cc_manifest_mismatch(world: World, config: Config) -> list[Finding]:
     for field in ("name", "version"):
         va, vb = a.raw.get(field), b.raw.get(field)
         if isinstance(va, str) and isinstance(vb, str) and va != vb:
-            out.append(_ccf(
+            out.append(_mismatch_fp(
                 "cc-manifest-mismatch", "warning", world,
                 f"plugin.json and .claude-plugin/plugin.json disagree on "
                 f"`{field}`: {va!r} vs {vb!r} — regenerate or reconcile "

@@ -203,6 +203,18 @@ def test_checks_for_shapes():
     assert "mcp-tool-poisoning" in checks_for(agent, mcp_connect=True)
 
 
+def test_checks_for_agent_plugin_gets_marketplace_checks_without_dual_manifest():
+    from drskill.lint import LintTarget, checks_for
+
+    plug = LintTarget(
+        kind="plugin", path=Path("."), plugin_flavor="agent-plugins",
+        dual_manifest=False,
+    )
+    ids = checks_for(plug, mcp_connect=False)
+    assert "marketplace-invalid" in ids
+    assert "cc-manifest-invalid" not in ids  # still gated by dual_manifest
+
+
 def test_find_config_root_walks_up(tmp_path):
     from drskill.lint import find_config_root
 
@@ -404,6 +416,52 @@ def test_cc_world_mcp_from_inline_and_default(tmp_path):
     (filed / ".mcp.json").write_text('{"mcpServers": {"filed": {"command": "x"}}}')
     world2 = build_lint_world(classify(filed))
     assert [s.name for s in world2.mcp_servers] == ["filed"]
+
+
+def test_cc_world_mcp_string_pointer_ignores_default(tmp_path):
+    from drskill.lint import build_lint_world
+
+    root = _cc_plugin(tmp_path, {"name": "p", "mcpServers": "./config/mcp.json"})
+    (root / "config").mkdir(parents=True)
+    (root / "config" / "mcp.json").write_text(
+        '{"mcpServers": {"pointed": {"command": "x"}}}'
+    )
+    # A coexisting default .mcp.json must be ignored: a declared pointer
+    # REPLACES the default in Claude Code, it doesn't add to it.
+    (root / ".mcp.json").write_text(
+        '{"mcpServers": {"default": {"command": "y"}}}'
+    )
+    world = build_lint_world(classify(root))
+    assert [s.name for s in world.mcp_servers] == ["pointed"]
+
+
+def test_cc_world_mcp_list_pointer_loads_both(tmp_path):
+    from drskill.lint import build_lint_world
+
+    root = _cc_plugin(tmp_path, {
+        "name": "p", "mcpServers": ["./a/mcp.json", "./b/mcp.json"],
+    })
+    (root / "a").mkdir(parents=True)
+    (root / "a" / "mcp.json").write_text(
+        '{"mcpServers": {"one": {"command": "x"}}}'
+    )
+    (root / "b").mkdir(parents=True)
+    (root / "b" / "mcp.json").write_text(
+        '{"mcpServers": {"two": {"command": "y"}}}'
+    )
+    world = build_lint_world(classify(root))
+    assert {s.name for s in world.mcp_servers} == {"one", "two"}
+
+
+def test_cc_world_mcp_missing_pointer_no_crash_no_default_fallback(tmp_path):
+    from drskill.lint import build_lint_world
+
+    root = _cc_plugin(tmp_path, {"name": "p", "mcpServers": "./nope/mcp.json"})
+    (root / ".mcp.json").write_text(
+        '{"mcpServers": {"default": {"command": "y"}}}'
+    )
+    world = build_lint_world(classify(root))
+    assert world.mcp_servers == []
 
 
 def test_dual_manifest_world_has_both(tmp_path):

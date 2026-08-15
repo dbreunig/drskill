@@ -138,6 +138,18 @@ def build_lint_world(target: LintTarget) -> World:
                     servers, harness="", scope="project",
                     source=root / ".claude-plugin" / "plugin.json", in_project=True,
                 )
+            elif isinstance(servers, (str, list)):
+                # A declared pointer (or list of pointers) REPLACES the
+                # default .mcp.json entirely — it is not additive.
+                # Dangling pointers are cc-component-missing's job; just
+                # skip missing files here.
+                pointers = [servers] if isinstance(servers, str) else [
+                    e for e in servers if isinstance(e, str)
+                ]
+                for ptr in pointers:
+                    p = root / ptr
+                    if p.is_file():
+                        _add_harness_mcp(world, p)
             elif (root / ".mcp.json").is_file():
                 _add_harness_mcp(world, root / ".mcp.json")
         else:
@@ -282,7 +294,9 @@ def _add_harness_mcp(world: World, path: Path) -> None:
         return
     servers = data.get("mcpServers") if isinstance(data, dict) else None
     if isinstance(servers, dict):
-        world.mcp_servers = _servers_from_map(
+        # Accumulate rather than assign: a claude-code manifest may declare
+        # multiple mcpServers pointer files, each calling this in turn.
+        world.mcp_servers += _servers_from_map(
             servers, harness="", scope="project", source=path, in_project=True
         )
 
@@ -327,14 +341,18 @@ def checks_for(target: LintTarget, mcp_connect: bool) -> list[str]:
     if target.kind == "marketplace":
         return list(MARKETPLACE_CHECKS)
     if target.kind == "plugin":
+        # Marketplace checks no-op when world.marketplace is None, so they
+        # run unconditionally on plugin-kind targets; CC_PLUGIN_CHECKS stays
+        # gated to when a claude-code manifest is actually in play.
         ids = SKILL_CONTENT_CHECKS + ["exact-duplicate", "near-duplicate"]
+        ids += MARKETPLACE_CHECKS
         if target.plugin_flavor == "claude-code":
-            ids += CC_PLUGIN_CHECKS + MARKETPLACE_CHECKS
+            ids += CC_PLUGIN_CHECKS
             ids += MCP_SPEC_CHECKS + MCP_STATIC_CHECKS
         else:
             ids += PLUGIN_SPEC_CHECKS + MCP_SPEC_CHECKS + MCP_STATIC_CHECKS
             if target.dual_manifest:
-                ids += CC_PLUGIN_CHECKS + MARKETPLACE_CHECKS
+                ids += CC_PLUGIN_CHECKS
     elif target.mcp_flavor == "agent-plugins":
         ids = MCP_SPEC_CHECKS + MCP_STATIC_CHECKS
     else:

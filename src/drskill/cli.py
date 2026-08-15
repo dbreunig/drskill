@@ -273,7 +273,7 @@ def scan(
 
 @app.command()
 def lint(
-    path: Path = typer.Argument(Path("."), help="plugin directory, skill directory or SKILL.md, or MCP config file"),
+    path: Path = typer.Argument(Path("."), help="plugin directory, skill directory or SKILL.md, marketplace directory or marketplace.json, or MCP config file"),
     target_type: str | None = typer.Option(None, "--type", help="override detection: plugin, skill, mcp, or marketplace"),
     as_json: bool = typer.Option(False, "--json", help="emit findings as JSON"),
     fail_on: str = typer.Option("error", "--fail-on", help="lowest severity that fails the build: error or warn"),

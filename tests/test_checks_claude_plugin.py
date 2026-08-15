@@ -100,6 +100,42 @@ def test_dual_manifest_mismatch_is_warning(tmp_path):
     assert f.severity == "warning" and "1.0.0" in f.message and "2.0.0" in f.message
 
 
+def _dual_world(tmp_path, subdir, cc_version, root_version):
+    root = tmp_path / subdir
+    (root / ".claude-plugin").mkdir(parents=True)
+    (root / ".claude-plugin" / "plugin.json").write_text(
+        json.dumps({"name": "my-plugin", "version": cc_version})
+    )
+    (root / "plugin.json").write_text(json.dumps({
+        "$schema": "https://agent-plugins.org/schemas/1.0.0/plugin.schema.json",
+        "name": "my-plugin", "version": root_version, "description": "d",
+    }))
+    return build_lint_world(classify(root))
+
+
+def test_mismatch_fingerprint_covers_both_manifests(tmp_path):
+    # Same cc manifest, but the root plugin.json version differs: the
+    # mismatch check judges BOTH manifests, so an ack keyed only on the cc
+    # manifest would silently keep matching a still-mismatched pair.
+    world_a = _dual_world(tmp_path / "a", "plug", "2.0.0", "1.0.0")
+    world_b = _dual_world(tmp_path / "b", "plug", "2.0.0", "1.5.0")
+    (fa,) = [f for f in run_checks(world_a, Config(), CC_CHECKS)
+             if f.check_id == "cc-manifest-mismatch"]
+    (fb,) = [f for f in run_checks(world_b, Config(), CC_CHECKS)
+             if f.check_id == "cc-manifest-mismatch"]
+    assert fa.fingerprint != fb.fingerprint
+
+
+def test_mismatch_fingerprint_is_path_free(tmp_path):
+    world_a = _dual_world(tmp_path / "a", "plug", "2.0.0", "1.0.0")
+    world_b = _dual_world(tmp_path / "b", "different-dir-name", "2.0.0", "1.0.0")
+    (fa,) = [f for f in run_checks(world_a, Config(), CC_CHECKS)
+             if f.check_id == "cc-manifest-mismatch"]
+    (fb,) = [f for f in run_checks(world_b, Config(), CC_CHECKS)
+             if f.check_id == "cc-manifest-mismatch"]
+    assert fa.fingerprint == fb.fingerprint
+
+
 def test_fingerprints_are_path_free(tmp_path):
     world_a, _ = _world(tmp_path / "a", {"name": "My_Plugin"})
     world_b, _ = _world(tmp_path / "b", {"name": "My_Plugin"})

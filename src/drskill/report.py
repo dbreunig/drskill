@@ -346,13 +346,13 @@ def render_lint(world, target, active, acked, console) -> None:
         name = (world.plugin.name if world.plugin and world.plugin.name
                 else target.path.name)
         n = sum(1 for c in world.contributors.values() if c.kind == "skill")
-        head = f"[bold]drskill lint[/bold] — plugin '{escape(name)}', {n} skill{'s' if n != 1 else ''}"
+        head = f"[bold]drskill lint[/bold] — plugin '{escape(_sanitize(name))}', {n} skill{'s' if n != 1 else ''}"
         if world.mcp_servers:
             m = len(world.mcp_servers)
             head += f", {m} MCP server{'s' if m != 1 else ''}"
     elif target.kind == "skill":
         names = [c.name for c in world.contributors.values()] or [target.path.name]
-        head = f"[bold]drskill lint[/bold] — skill '{escape(names[0])}'"
+        head = f"[bold]drskill lint[/bold] — skill '{escape(_sanitize(names[0]))}'"
     elif target.kind == "marketplace":
         mp = world.marketplace
         name = None
@@ -362,7 +362,7 @@ def render_lint(world, target, active, acked, console) -> None:
         entries = 0
         if mp and mp.data and isinstance(mp.data.get("plugins"), list):
             entries = len(mp.data["plugins"])
-        head = (f"[bold]drskill lint[/bold] — marketplace '{escape(name)}', "
+        head = (f"[bold]drskill lint[/bold] — marketplace '{escape(_sanitize(name))}', "
                 f"{entries} plugin entr{'ies' if entries != 1 else 'y'}")
     else:
         m = len(world.mcp_servers)
