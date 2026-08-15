@@ -251,11 +251,9 @@ non-blocking display bug found on marketplace targets (see above).
 - Marketplace `renames` / cross-marketplace dependency validation.
 - Schema-verbatim validation tier if a jsonschema dep ever becomes
   worth it.
-- From the final whole-branch review (2026-08-15): `drskill ack`
-  resolves ids against a fresh SCAN, so lint-only findings (all cc-*
-  and marketplace-* checks) cannot be acked via the CLI today — the
-  workflow is `lint --json` → fingerprint → append_ack. A lint-aware
-  ack path (or an honest README sentence) is worth a cycle. Also:
+- ~~Lint-aware ack path~~ LANDED 2026-08-15 (`ack --lint <target>`,
+  commit a74666c): resolves refs against the target's lint findings
+  and writes to the target's config-root drskill.toml. Also:
   marketplace fingerprints hash the whole file text, so any edit
   re-fires every ack in that file — entry-scoped hashing (serialize
   just the entry's source object) would make acks on large

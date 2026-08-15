@@ -157,3 +157,74 @@ def test_marketplace_target_gets_only_marketplace_checks(tmp_path):
     (root / ".claude-plugin").mkdir(parents=True)
     (root / ".claude-plugin" / "marketplace.json").write_text("{}")
     assert checks_for(classify(root), mcp_connect=False) == MARKETPLACE_CHECKS
+
+
+def make_marketplace(root: Path, entries=None):
+    (root / ".claude-plugin").mkdir(parents=True, exist_ok=True)
+    data = {
+        "name": "test-market", "owner": {"name": "o"},
+        "plugins": entries if entries is not None else [
+            {"name": "loose-plugin",
+             "source": {"source": "github", "repo": "o/r"}},
+        ],
+    }
+    (root / ".claude-plugin" / "marketplace.json").write_text(json.dumps(data))
+
+
+def test_ack_lint_by_check_id_silences_relint(tmp_path, monkeypatch):
+    monkeypatch.setenv("DRSKILL_HOME", str(tmp_path / "home"))
+    root = tmp_path / "market"
+    make_marketplace(root)
+    r = runner.invoke(app, ["lint", str(root), "--fail-on", "warn"])
+    assert r.exit_code == 1 and "marketplace-unpinned-source" in r.output
+    r2 = runner.invoke(app, ["ack", "--lint", str(root), "marketplace-unpinned-source"])
+    assert r2.exit_code == 0, r2.output
+    ledger = root / "drskill.toml"
+    assert ledger.is_file() and "marketplace-unpinned-source" in ledger.read_text()
+    r3 = runner.invoke(app, ["lint", str(root), "--fail-on", "warn"])
+    assert r3.exit_code == 0, r3.output
+
+
+def test_ack_lint_by_finding_id(tmp_path, monkeypatch):
+    monkeypatch.setenv("DRSKILL_HOME", str(tmp_path / "home"))
+    root = tmp_path / "market"
+    make_marketplace(root)
+    r = runner.invoke(app, ["lint", str(root), "--json"])
+    findings = json.loads(r.output)
+    fp = next(f["fingerprint"] for f in findings
+              if f["check_id"] == "marketplace-unpinned-source")
+    short_id = fp.split(":", 1)[1][:4]
+    r2 = runner.invoke(app, ["ack", "--lint", str(root), short_id])
+    assert r2.exit_code == 0, r2.output
+    assert fp in (root / "drskill.toml").read_text()
+
+
+def test_ack_lint_all(tmp_path, monkeypatch):
+    monkeypatch.setenv("DRSKILL_HOME", str(tmp_path / "home"))
+    root = tmp_path / "market"
+    make_marketplace(root, entries=[
+        {"name": "loose-a", "source": {"source": "github", "repo": "o/a"}},
+        {"name": "loose-b", "source": {"source": "npm", "package": "b"}},
+    ])
+    r = runner.invoke(app, ["ack", "--lint", str(root), "--all"])
+    assert r.exit_code == 0, r.output
+    text = (root / "drskill.toml").read_text()
+    assert text.count("[[ack]]") == 2
+
+
+def test_ack_lint_rejects_scope_flags(tmp_path, monkeypatch):
+    monkeypatch.setenv("DRSKILL_HOME", str(tmp_path / "home"))
+    root = tmp_path / "market"
+    make_marketplace(root)
+    for extra in (["--local"], ["--global-ack"], ["--global"]):
+        r = runner.invoke(app, ["ack", "--lint", str(root),
+                                "marketplace-unpinned-source", *extra])
+        assert r.exit_code == 1, (extra, r.output)
+
+
+def test_ack_lint_bad_target_exits_one(tmp_path, monkeypatch):
+    monkeypatch.setenv("DRSKILL_HOME", str(tmp_path / "home"))
+    empty = tmp_path / "empty"
+    empty.mkdir()
+    r = runner.invoke(app, ["ack", "--lint", str(empty), "marketplace-invalid"])
+    assert r.exit_code == 1, r.output
