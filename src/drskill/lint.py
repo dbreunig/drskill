@@ -14,7 +14,7 @@ from drskill.checks import run_checks
 from drskill.discovery import _find_broken_symlinks
 from drskill.ledger import Config
 from drskill.mcp import _servers_from_map
-from drskill.models import BrokenSymlink, Finding, PluginManifest, PluginMcpFile
+from drskill.models import BrokenSymlink, Finding, MarketplaceFile, PluginManifest, PluginMcpFile
 from drskill.resolution import World, make_contributor
 
 _ACCEPTS = (
@@ -129,16 +129,41 @@ def build_lint_world(target: LintTarget) -> World:
         _add_skill(world, f)
     elif target.kind == "plugin":
         root = target.path.resolve()
-        world.plugin = _parse_manifest(root)
-        skills_dir = root / "skills"
-        if skills_dir.is_dir():
-            for child in sorted(skills_dir.iterdir()):
-                f = child / "SKILL.md"
-                if child.is_dir() and f.is_file():
-                    _add_skill(world, f)
-        mcp_path = root / "mcp.json"
-        if mcp_path.is_file():
-            _add_mcp_file(world, mcp_path, root, provisional=False)
+        if target.plugin_flavor == "claude-code":
+            world.cc_plugin = _parse_manifest(root, ".claude-plugin/plugin.json")
+            _add_cc_skills(world, root, world.cc_plugin)
+            servers = world.cc_plugin.raw.get("mcpServers")
+            if isinstance(servers, dict):
+                world.mcp_servers = _servers_from_map(
+                    servers, harness="", scope="project",
+                    source=root / ".claude-plugin" / "plugin.json", in_project=True,
+                )
+            elif (root / ".mcp.json").is_file():
+                _add_harness_mcp(world, root / ".mcp.json")
+        else:
+            world.plugin = _parse_manifest(root)
+            if target.dual_manifest:
+                world.cc_plugin = _parse_manifest(root, ".claude-plugin/plugin.json")
+            skills_dir = root / "skills"
+            if skills_dir.is_dir():
+                for child in sorted(skills_dir.iterdir()):
+                    f = child / "SKILL.md"
+                    if child.is_dir() and f.is_file():
+                        _add_skill(world, f)
+            mcp_path = root / "mcp.json"
+            if mcp_path.is_file():
+                _add_mcp_file(world, mcp_path, root, provisional=False)
+        mp = root / ".claude-plugin" / "marketplace.json"
+        if mp.is_file():
+            _load_marketplace(world, mp, root)
+    elif target.kind == "marketplace":
+        if target.path.is_dir():
+            root = target.path.resolve()
+            _load_marketplace(world, root / ".claude-plugin" / "marketplace.json", root)
+        else:
+            p = target.path.resolve()
+            root = p.parent.parent if p.parent.name == ".claude-plugin" else p.parent
+            _load_marketplace(world, p, root)
     else:
         p = target.path.resolve()
         if target.mcp_flavor == "agent-plugins":
@@ -161,8 +186,8 @@ def _add_skill(world: World, skill_file: Path) -> None:
         world.broken_symlinks.append(BrokenSymlink(harness="", path=b))
 
 
-def _parse_manifest(root: Path) -> PluginManifest:
-    path = root / "plugin.json"
+def _parse_manifest(root: Path, rel: str = "plugin.json") -> PluginManifest:
+    path = root / rel
     text = path.read_text(encoding="utf-8", errors="replace")
     try:
         raw = json.loads(text)
@@ -180,6 +205,51 @@ def _parse_manifest(root: Path) -> PluginManifest:
         version=raw.get("version") if isinstance(raw.get("version"), str) else None,
         schema_url=raw.get("$schema") if isinstance(raw.get("$schema"), str) else None,
     )
+
+
+def _cc_skill_roots(root: Path, manifest: PluginManifest) -> list[Path]:
+    """Default skills/ plus declared `skills` pointers (docs: `skills`
+    ADDS to the default scan), plus the v2.1.142+ root single-skill."""
+    roots = [root / "skills"]
+    declared = manifest.raw.get("skills")
+    entries = [declared] if isinstance(declared, str) else (
+        declared if isinstance(declared, list) else []
+    )
+    for e in entries:
+        if isinstance(e, str):
+            roots.append(root / e)
+    return roots
+
+
+def _add_cc_skills(world: World, root: Path, manifest: PluginManifest) -> None:
+    for base in _cc_skill_roots(root, manifest):
+        if not base.is_dir():
+            continue  # cc-component-missing reports declared-but-absent
+        if (base / "SKILL.md").is_file():
+            _add_skill(world, base / "SKILL.md")
+            continue
+        for child in sorted(base.iterdir()):
+            f = child / "SKILL.md"
+            if child.is_dir() and f.is_file():
+                _add_skill(world, f)
+    single = root / "SKILL.md"
+    if single.is_file():
+        _add_skill(world, single)
+
+
+def _load_marketplace(world: World, mp_path: Path, root: Path) -> None:
+    text = mp_path.read_text(encoding="utf-8", errors="replace")
+    try:
+        data = json.loads(text)
+        world.marketplace = MarketplaceFile(
+            path=str(mp_path), root=str(root), text=text,
+            data=data if isinstance(data, dict) else None,
+            parse_error=None if isinstance(data, dict) else "top level is not an object",
+        )
+    except json.JSONDecodeError as e:
+        world.marketplace = MarketplaceFile(
+            path=str(mp_path), root=str(root), text=text, parse_error=str(e)
+        )
 
 
 def _add_mcp_file(world: World, path: Path, root: Path, provisional: bool) -> None:
