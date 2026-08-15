@@ -372,3 +372,90 @@ def test_note_severity_renders_in_notes_section():
     assert "judged distinct" in text
     assert "1 note" in text
     assert "0 errors, 0 warnings" in text
+
+
+def test_render_lint_marketplace_header(tmp_path):
+    from drskill.lint import build_lint_world, classify
+    from drskill.report import render_lint
+
+    root = tmp_path / "market"
+    (root / ".claude-plugin").mkdir(parents=True)
+    (root / "a").mkdir()
+    mp = root / ".claude-plugin" / "marketplace.json"
+    mp.write_text(json.dumps({
+        "name": "mkt",
+        "owner": {"name": "o"},
+        "plugins": [
+            {"name": "a", "source": "./a"},
+            {"name": "b", "source": {
+                "source": "github", "repo": "o/r", "sha": "a" * 40,
+            }},
+        ],
+    }))
+    target = classify(root)
+    world = build_lint_world(target)
+    console = Console(record=True, width=100, force_terminal=False)
+    render_lint(world, target, [], [], console)
+    text = console.export_text()
+    assert "marketplace 'mkt'" in text
+    assert "2 plugin entries" in text
+    assert "MCP config" not in text
+
+
+def test_render_lint_marketplace_header_sanitizes_name(tmp_path):
+    from drskill.lint import build_lint_world, classify
+    from drskill.report import render_lint
+
+    root = tmp_path / "market"
+    (root / ".claude-plugin").mkdir(parents=True)
+    mp = root / ".claude-plugin" / "marketplace.json"
+    evil_name = "mkt‮evil"
+    mp.write_text(json.dumps({
+        "name": evil_name,
+        "owner": {"name": "o"},
+        "plugins": [],
+    }))
+    target = classify(root)
+    world = build_lint_world(target)
+    console = Console(record=True, width=100, force_terminal=False)
+    render_lint(world, target, [], [], console)
+    text = console.export_text()
+    assert "‮" not in text
+    assert "\\u202e" in text
+
+
+def test_render_lint_plugin_header_sanitizes_name(tmp_path):
+    from drskill.lint import build_lint_world, classify
+    from drskill.report import render_lint
+
+    root = tmp_path / "plug"
+    root.mkdir()
+    (root / "plugin.json").write_text(json.dumps({
+        "$schema": "https://agent-plugins.org/schemas/1.0.0/plugin.schema.json",
+        "name": "evil‮name",
+    }))
+    target = classify(root)
+    world = build_lint_world(target)
+    console = Console(record=True, width=100, force_terminal=False)
+    render_lint(world, target, [], [], console)
+    text = console.export_text()
+    assert "‮" not in text
+    assert "\\u202e" in text
+
+
+def test_render_lint_skill_header_sanitizes_name(tmp_path):
+    from drskill.lint import build_lint_world, classify
+    from drskill.report import render_lint
+
+    d = tmp_path / "skill"
+    d.mkdir()
+    (d / "SKILL.md").write_text(
+        "---\nname: evil‮name\ndescription: Use when testing.\n---\nbody\n"
+    )
+    target = classify(d)
+    world = build_lint_world(target)
+    console = Console(record=True, width=100, force_terminal=False)
+    render_lint(world, target, [], [], console)
+    text = console.export_text()
+    assert "‮" not in text
+    assert "\\u202e" in text

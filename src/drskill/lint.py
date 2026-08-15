@@ -14,12 +14,14 @@ from drskill.checks import run_checks
 from drskill.discovery import _find_broken_symlinks
 from drskill.ledger import Config
 from drskill.mcp import _servers_from_map
-from drskill.models import BrokenSymlink, Finding, PluginManifest, PluginMcpFile
+from drskill.models import BrokenSymlink, Finding, MarketplaceFile, PluginManifest, PluginMcpFile
 from drskill.resolution import World, make_contributor
 
 _ACCEPTS = (
-    "drskill lint takes a plugin directory (with plugin.json), a skill "
-    "directory or SKILL.md file, or an MCP config JSON file"
+    "drskill lint takes a plugin directory (with plugin.json or "
+    ".claude-plugin/plugin.json), a skill directory or SKILL.md file, a "
+    "marketplace directory or marketplace.json file, or an MCP config "
+    "JSON file"
 )
 _MCP_SCHEMA_RE = re.compile(r"agent-plugins\.org/schemas/[^/]+/mcp\.schema\.json$")
 
@@ -28,10 +30,19 @@ class LintUsageError(Exception):
     pass
 
 
+def _plugin_target(p: Path) -> LintTarget:
+    return LintTarget(
+        kind="plugin", path=p, plugin_flavor="agent-plugins",
+        dual_manifest=(p / ".claude-plugin" / "plugin.json").is_file(),
+    )
+
+
 class LintTarget(BaseModel):
-    kind: Literal["plugin", "skill", "mcp"]
+    kind: Literal["plugin", "skill", "mcp", "marketplace"]
     path: Path
     mcp_flavor: Literal["agent-plugins", "harness"] | None = None
+    plugin_flavor: Literal["agent-plugins", "claude-code"] | None = None
+    dual_manifest: bool = False
 
 
 def classify(path: Path, forced: str | None = None) -> LintTarget:
@@ -39,9 +50,23 @@ def classify(path: Path, forced: str | None = None) -> LintTarget:
     if not p.exists():
         raise LintUsageError(f"{path} does not exist; {_ACCEPTS}")
     if forced == "plugin":
-        if not (p.is_dir() and (p / "plugin.json").is_file()):
-            raise LintUsageError(f"{path} is not a plugin directory (no plugin.json)")
-        return LintTarget(kind="plugin", path=p)
+        if p.is_dir() and (p / "plugin.json").is_file():
+            return _plugin_target(p)
+        if p.is_dir() and (p / ".claude-plugin" / "plugin.json").is_file():
+            return LintTarget(kind="plugin", path=p, plugin_flavor="claude-code")
+        raise LintUsageError(
+            f"{path} is not a plugin directory (no plugin.json or "
+            ".claude-plugin/plugin.json)"
+        )
+    if forced == "marketplace":
+        if p.is_file() and p.name == "marketplace.json":
+            return LintTarget(kind="marketplace", path=p)
+        if p.is_dir() and (p / ".claude-plugin" / "marketplace.json").is_file():
+            return LintTarget(kind="marketplace", path=p)
+        raise LintUsageError(
+            f"{path} is not a marketplace (no marketplace.json or "
+            ".claude-plugin/marketplace.json)"
+        )
     if forced == "skill":
         if p.is_file():
             if p.name != "SKILL.md":
@@ -59,12 +84,20 @@ def classify(path: Path, forced: str | None = None) -> LintTarget:
         return _classify_json(p)
     if p.is_dir():
         if (p / "plugin.json").is_file():
-            return LintTarget(kind="plugin", path=p)
+            return _plugin_target(p)
+        if (p / ".claude-plugin" / "plugin.json").is_file():
+            return LintTarget(kind="plugin", path=p, plugin_flavor="claude-code")
         if (p / "SKILL.md").is_file():
             return LintTarget(kind="skill", path=p)
-        raise LintUsageError(f"{path} has no plugin.json or SKILL.md; {_ACCEPTS}")
+        if (p / ".claude-plugin" / "marketplace.json").is_file():
+            return LintTarget(kind="marketplace", path=p)
+        raise LintUsageError(
+            f"{path} has no plugin.json, .claude-plugin/, or SKILL.md; {_ACCEPTS}"
+        )
     if p.name == "SKILL.md":
         return LintTarget(kind="skill", path=p)
+    if p.name == "marketplace.json":
+        return LintTarget(kind="marketplace", path=p)
     if p.suffix == ".json" or p.name.startswith("."):
         return _classify_json(p)
     raise LintUsageError(f"{path} is not a lintable file; {_ACCEPTS}")
@@ -96,16 +129,53 @@ def build_lint_world(target: LintTarget) -> World:
         _add_skill(world, f)
     elif target.kind == "plugin":
         root = target.path.resolve()
-        world.plugin = _parse_manifest(root)
-        skills_dir = root / "skills"
-        if skills_dir.is_dir():
-            for child in sorted(skills_dir.iterdir()):
-                f = child / "SKILL.md"
-                if child.is_dir() and f.is_file():
-                    _add_skill(world, f)
-        mcp_path = root / "mcp.json"
-        if mcp_path.is_file():
-            _add_mcp_file(world, mcp_path, root, provisional=False)
+        if target.plugin_flavor == "claude-code":
+            world.cc_plugin = _parse_manifest(root, ".claude-plugin/plugin.json")
+            _add_cc_skills(world, root, world.cc_plugin)
+            servers = world.cc_plugin.raw.get("mcpServers")
+            if isinstance(servers, dict):
+                world.mcp_servers = _servers_from_map(
+                    servers, harness="", scope="project",
+                    source=root / ".claude-plugin" / "plugin.json", in_project=True,
+                )
+            elif isinstance(servers, (str, list)):
+                # A declared pointer (or list of pointers) REPLACES the
+                # default .mcp.json entirely — it is not additive.
+                # Dangling pointers are cc-component-missing's job; just
+                # skip missing files here.
+                pointers = [servers] if isinstance(servers, str) else [
+                    e for e in servers if isinstance(e, str)
+                ]
+                for ptr in pointers:
+                    p = root / ptr
+                    if p.is_file():
+                        _add_harness_mcp(world, p)
+            elif (root / ".mcp.json").is_file():
+                _add_harness_mcp(world, root / ".mcp.json")
+        else:
+            world.plugin = _parse_manifest(root)
+            if target.dual_manifest:
+                world.cc_plugin = _parse_manifest(root, ".claude-plugin/plugin.json")
+            skills_dir = root / "skills"
+            if skills_dir.is_dir():
+                for child in sorted(skills_dir.iterdir()):
+                    f = child / "SKILL.md"
+                    if child.is_dir() and f.is_file():
+                        _add_skill(world, f)
+            mcp_path = root / "mcp.json"
+            if mcp_path.is_file():
+                _add_mcp_file(world, mcp_path, root, provisional=False)
+        mp = root / ".claude-plugin" / "marketplace.json"
+        if mp.is_file():
+            _load_marketplace(world, mp, root)
+    elif target.kind == "marketplace":
+        if target.path.is_dir():
+            root = target.path.resolve()
+            _load_marketplace(world, root / ".claude-plugin" / "marketplace.json", root)
+        else:
+            p = target.path.resolve()
+            root = p.parent.parent if p.parent.name == ".claude-plugin" else p.parent
+            _load_marketplace(world, p, root)
     else:
         p = target.path.resolve()
         if target.mcp_flavor == "agent-plugins":
@@ -128,8 +198,8 @@ def _add_skill(world: World, skill_file: Path) -> None:
         world.broken_symlinks.append(BrokenSymlink(harness="", path=b))
 
 
-def _parse_manifest(root: Path) -> PluginManifest:
-    path = root / "plugin.json"
+def _parse_manifest(root: Path, rel: str = "plugin.json") -> PluginManifest:
+    path = root / rel
     text = path.read_text(encoding="utf-8", errors="replace")
     try:
         raw = json.loads(text)
@@ -147,6 +217,51 @@ def _parse_manifest(root: Path) -> PluginManifest:
         version=raw.get("version") if isinstance(raw.get("version"), str) else None,
         schema_url=raw.get("$schema") if isinstance(raw.get("$schema"), str) else None,
     )
+
+
+def _cc_skill_roots(root: Path, manifest: PluginManifest) -> list[Path]:
+    """Default skills/ plus declared `skills` pointers (docs: `skills`
+    ADDS to the default scan), plus the v2.1.142+ root single-skill."""
+    roots = [root / "skills"]
+    declared = manifest.raw.get("skills")
+    entries = [declared] if isinstance(declared, str) else (
+        declared if isinstance(declared, list) else []
+    )
+    for e in entries:
+        if isinstance(e, str):
+            roots.append(root / e)
+    return roots
+
+
+def _add_cc_skills(world: World, root: Path, manifest: PluginManifest) -> None:
+    for base in _cc_skill_roots(root, manifest):
+        if not base.is_dir():
+            continue  # cc-component-missing reports declared-but-absent
+        if (base / "SKILL.md").is_file():
+            _add_skill(world, base / "SKILL.md")
+            continue
+        for child in sorted(base.iterdir()):
+            f = child / "SKILL.md"
+            if child.is_dir() and f.is_file():
+                _add_skill(world, f)
+    single = root / "SKILL.md"
+    if single.is_file():
+        _add_skill(world, single)
+
+
+def _load_marketplace(world: World, mp_path: Path, root: Path) -> None:
+    text = mp_path.read_text(encoding="utf-8", errors="replace")
+    try:
+        data = json.loads(text)
+        world.marketplace = MarketplaceFile(
+            path=str(mp_path), root=str(root), text=text,
+            data=data if isinstance(data, dict) else None,
+            parse_error=None if isinstance(data, dict) else "top level is not an object",
+        )
+    except json.JSONDecodeError as e:
+        world.marketplace = MarketplaceFile(
+            path=str(mp_path), root=str(root), text=text, parse_error=str(e)
+        )
 
 
 def _add_mcp_file(world: World, path: Path, root: Path, provisional: bool) -> None:
@@ -179,7 +294,9 @@ def _add_harness_mcp(world: World, path: Path) -> None:
         return
     servers = data.get("mcpServers") if isinstance(data, dict) else None
     if isinstance(servers, dict):
-        world.mcp_servers = _servers_from_map(
+        # Accumulate rather than assign: a claude-code manifest may declare
+        # multiple mcpServers pointer files, each calling this in turn.
+        world.mcp_servers += _servers_from_map(
             servers, harness="", scope="project", source=path, in_project=True
         )
 
@@ -202,6 +319,14 @@ PLUGIN_SPEC_CHECKS = [
     "plugin-skill-undiscoverable", "plugin-path-escape",
     "plugin-extension-hygiene",
 ]
+CC_PLUGIN_CHECKS = [
+    "cc-manifest-invalid", "cc-manifest-unknown-field",
+    "cc-component-missing", "cc-manifest-mismatch",
+]
+MARKETPLACE_CHECKS = [
+    "marketplace-invalid", "marketplace-unpinned-source",
+    "marketplace-command-source", "marketplace-entry-missing",
+]
 MCP_SPEC_CHECKS = ["mcp-spec-invalid", "mcp-spec-placeholder"]
 MCP_STATIC_CHECKS = ["mcp-config-invalid", "mcp-secret-in-config", "mcp-unpinned-server"]
 MCP_CONNECT_CHECKS = [
@@ -213,9 +338,21 @@ MCP_CONNECT_CHECKS = [
 def checks_for(target: LintTarget, mcp_connect: bool) -> list[str]:
     if target.kind == "skill":
         return list(SKILL_CONTENT_CHECKS)
+    if target.kind == "marketplace":
+        return list(MARKETPLACE_CHECKS)
     if target.kind == "plugin":
-        ids = (SKILL_CONTENT_CHECKS + ["exact-duplicate", "near-duplicate"]
-               + PLUGIN_SPEC_CHECKS + MCP_SPEC_CHECKS + MCP_STATIC_CHECKS)
+        # Marketplace checks no-op when world.marketplace is None, so they
+        # run unconditionally on plugin-kind targets; CC_PLUGIN_CHECKS stays
+        # gated to when a claude-code manifest is actually in play.
+        ids = SKILL_CONTENT_CHECKS + ["exact-duplicate", "near-duplicate"]
+        ids += MARKETPLACE_CHECKS
+        if target.plugin_flavor == "claude-code":
+            ids += CC_PLUGIN_CHECKS
+            ids += MCP_SPEC_CHECKS + MCP_STATIC_CHECKS
+        else:
+            ids += PLUGIN_SPEC_CHECKS + MCP_SPEC_CHECKS + MCP_STATIC_CHECKS
+            if target.dual_manifest:
+                ids += CC_PLUGIN_CHECKS
     elif target.mcp_flavor == "agent-plugins":
         ids = MCP_SPEC_CHECKS + MCP_STATIC_CHECKS
     else:

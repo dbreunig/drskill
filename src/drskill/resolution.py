@@ -15,6 +15,7 @@ from drskill.models import (
     BundledFile,
     Contributor,
     Deployment,
+    MarketplaceFile,
     PluginManifest,
     PluginMcpFile,
     Provenance,
@@ -134,6 +135,8 @@ class World(BaseModel):
     shell_approved: dict[str, ShellBaseline] = Field(default_factory=dict)
     plugin: PluginManifest | None = None
     plugin_mcp: PluginMcpFile | None = None
+    cc_plugin: PluginManifest | None = None
+    marketplace: MarketplaceFile | None = None
 
     def harness_loads(self, harness_id: str) -> list[tuple[Contributor, Deployment]]:
         out = [

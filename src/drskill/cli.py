@@ -273,8 +273,8 @@ def scan(
 
 @app.command()
 def lint(
-    path: Path = typer.Argument(Path("."), help="plugin directory, skill directory or SKILL.md, or MCP config file"),
-    target_type: str | None = typer.Option(None, "--type", help="override detection: plugin, skill, or mcp"),
+    path: Path = typer.Argument(Path("."), help="plugin directory, skill directory or SKILL.md, marketplace directory or marketplace.json, or MCP config file"),
+    target_type: str | None = typer.Option(None, "--type", help="override detection: plugin, skill, mcp, or marketplace"),
     as_json: bool = typer.Option(False, "--json", help="emit findings as JSON"),
     fail_on: str = typer.Option("error", "--fail-on", help="lowest severity that fails the build: error or warn"),
     deep_mode: bool = typer.Option(False, "--deep", help="judge flagged pairs with the configured model"),
@@ -287,8 +287,8 @@ def lint(
     if fail_on not in ("error", "warn"):
         console.print(f"[red]--fail-on takes error or warn, not[/red] {escape(fail_on)}")
         raise typer.Exit(2)
-    if target_type not in (None, "plugin", "skill", "mcp"):
-        console.print(f"[red]--type takes plugin, skill, or mcp, not[/red] {escape(target_type)}")
+    if target_type not in (None, "plugin", "skill", "mcp", "marketplace"):
+        console.print(f"[red]--type takes plugin, skill, mcp, or marketplace, not[/red] {escape(target_type)}")
         raise typer.Exit(2)
     try:
         target = lint_mod.classify(path, target_type)

@@ -203,6 +203,18 @@ def test_checks_for_shapes():
     assert "mcp-tool-poisoning" in checks_for(agent, mcp_connect=True)
 
 
+def test_checks_for_agent_plugin_gets_marketplace_checks_without_dual_manifest():
+    from drskill.lint import LintTarget, checks_for
+
+    plug = LintTarget(
+        kind="plugin", path=Path("."), plugin_flavor="agent-plugins",
+        dual_manifest=False,
+    )
+    ids = checks_for(plug, mcp_connect=False)
+    assert "marketplace-invalid" in ids
+    assert "cc-manifest-invalid" not in ids  # still gated by dual_manifest
+
+
 def test_find_config_root_walks_up(tmp_path):
     from drskill.lint import find_config_root
 
@@ -284,3 +296,208 @@ def test_run_lint_applies_cached_deep_verdicts_without_judge(tmp_path, monkeypat
     # The strip-harnesses step ran after apply_verdicts: it nulled out the
     # harness the fake apply_verdicts injected.
     assert all(f.harnesses == [] for f in findings)
+
+
+# Tests for Claude Code plugin layout and marketplace classification
+import json
+
+
+def _cc_plugin(tmp_path, manifest=None):
+    root = tmp_path / "ccplug"
+    (root / ".claude-plugin").mkdir(parents=True)
+    m = {"name": "my-plugin"} if manifest is None else manifest
+    (root / ".claude-plugin" / "plugin.json").write_text(json.dumps(m))
+    return root
+
+
+def test_classify_claude_plugin_dir(tmp_path):
+    root = _cc_plugin(tmp_path)
+    t = classify(root)
+    assert t.kind == "plugin" and t.plugin_flavor == "claude-code"
+    assert t.dual_manifest is False
+
+
+def test_classify_agent_plugins_sets_flavor(tmp_path):
+    root = tmp_path / "applug"
+    root.mkdir()
+    (root / "plugin.json").write_text('{"name": "x"}')
+    t = classify(root)
+    assert t.kind == "plugin" and t.plugin_flavor == "agent-plugins"
+
+
+def test_classify_dual_manifest(tmp_path):
+    root = _cc_plugin(tmp_path)
+    (root / "plugin.json").write_text('{"name": "my-plugin"}')
+    t = classify(root)
+    assert t.plugin_flavor == "agent-plugins" and t.dual_manifest is True
+
+
+def test_classify_marketplace_dir_and_file(tmp_path):
+    root = tmp_path / "market"
+    (root / ".claude-plugin").mkdir(parents=True)
+    mp = root / ".claude-plugin" / "marketplace.json"
+    mp.write_text('{"name": "m", "owner": {"name": "o"}, "plugins": []}')
+    assert classify(root).kind == "marketplace"
+    assert classify(mp).kind == "marketplace"
+
+
+def test_classify_forced_marketplace(tmp_path):
+    root = tmp_path / "market"
+    (root / ".claude-plugin").mkdir(parents=True)
+    (root / ".claude-plugin" / "marketplace.json").write_text("{}")
+    assert classify(root, forced="marketplace").kind == "marketplace"
+    plain = tmp_path / "plain"
+    plain.mkdir()
+    try:
+        classify(plain, forced="marketplace")
+        raise AssertionError("expected LintUsageError")
+    except LintUsageError:
+        pass
+
+
+def test_classify_forced_plugin_accepts_claude_layout(tmp_path):
+    root = _cc_plugin(tmp_path)
+    t = classify(root, forced="plugin")
+    assert t.kind == "plugin" and t.plugin_flavor == "claude-code"
+
+
+def test_classify_empty_dir_error_mentions_claude_plugin(tmp_path):
+    d = tmp_path / "empty"
+    d.mkdir()
+    try:
+        classify(d)
+        raise AssertionError("expected LintUsageError")
+    except LintUsageError as e:
+        assert ".claude-plugin" in str(e)
+
+
+def _mk_skill_dir(base, name):
+    d = base / name
+    d.mkdir(parents=True)
+    (d / "SKILL.md").write_text(
+        f"---\nname: {name}\ndescription: Use when testing {name}.\n---\nbody\n"
+    )
+
+
+def test_cc_world_collects_manifest_and_skills(tmp_path):
+    from drskill.lint import build_lint_world
+
+    root = _cc_plugin(tmp_path, {"name": "my-plugin", "skills": ["extra-skills"]})
+    _mk_skill_dir(root / "skills", "alpha")
+    _mk_skill_dir(root / "extra-skills", "beta")
+    world = build_lint_world(classify(root))
+    assert world.cc_plugin is not None and world.cc_plugin.name == "my-plugin"
+    assert world.plugin is None  # agent-plugins checks must no-op
+    names = {c.name for c in world.contributors.values()}
+    assert names == {"alpha", "beta"}
+
+
+def test_cc_world_root_single_skill(tmp_path):
+    from drskill.lint import build_lint_world
+
+    root = _cc_plugin(tmp_path)
+    (root / "SKILL.md").write_text(
+        "---\nname: solo\ndescription: Use when testing solo.\n---\nbody\n"
+    )
+    world = build_lint_world(classify(root))
+    assert {c.name for c in world.contributors.values()} == {"solo"}
+
+
+def test_cc_world_mcp_from_inline_and_default(tmp_path):
+    from drskill.lint import build_lint_world
+
+    inline = _cc_plugin(tmp_path, {"name": "p", "mcpServers": {
+        "srv": {"command": "run-srv"}
+    }})
+    world = build_lint_world(classify(inline))
+    assert [s.name for s in world.mcp_servers] == ["srv"]
+
+    filed = _cc_plugin(tmp_path / "sub", {"name": "p2"})
+    (filed / ".mcp.json").write_text('{"mcpServers": {"filed": {"command": "x"}}}')
+    world2 = build_lint_world(classify(filed))
+    assert [s.name for s in world2.mcp_servers] == ["filed"]
+
+
+def test_cc_world_mcp_string_pointer_ignores_default(tmp_path):
+    from drskill.lint import build_lint_world
+
+    root = _cc_plugin(tmp_path, {"name": "p", "mcpServers": "./config/mcp.json"})
+    (root / "config").mkdir(parents=True)
+    (root / "config" / "mcp.json").write_text(
+        '{"mcpServers": {"pointed": {"command": "x"}}}'
+    )
+    # A coexisting default .mcp.json must be ignored: a declared pointer
+    # REPLACES the default in Claude Code, it doesn't add to it.
+    (root / ".mcp.json").write_text(
+        '{"mcpServers": {"default": {"command": "y"}}}'
+    )
+    world = build_lint_world(classify(root))
+    assert [s.name for s in world.mcp_servers] == ["pointed"]
+
+
+def test_cc_world_mcp_list_pointer_loads_both(tmp_path):
+    from drskill.lint import build_lint_world
+
+    root = _cc_plugin(tmp_path, {
+        "name": "p", "mcpServers": ["./a/mcp.json", "./b/mcp.json"],
+    })
+    (root / "a").mkdir(parents=True)
+    (root / "a" / "mcp.json").write_text(
+        '{"mcpServers": {"one": {"command": "x"}}}'
+    )
+    (root / "b").mkdir(parents=True)
+    (root / "b" / "mcp.json").write_text(
+        '{"mcpServers": {"two": {"command": "y"}}}'
+    )
+    world = build_lint_world(classify(root))
+    assert {s.name for s in world.mcp_servers} == {"one", "two"}
+
+
+def test_cc_world_mcp_missing_pointer_no_crash_no_default_fallback(tmp_path):
+    from drskill.lint import build_lint_world
+
+    root = _cc_plugin(tmp_path, {"name": "p", "mcpServers": "./nope/mcp.json"})
+    (root / ".mcp.json").write_text(
+        '{"mcpServers": {"default": {"command": "y"}}}'
+    )
+    world = build_lint_world(classify(root))
+    assert world.mcp_servers == []
+
+
+def test_dual_manifest_world_has_both(tmp_path):
+    from drskill.lint import build_lint_world
+
+    root = _cc_plugin(tmp_path, {"name": "my-plugin", "version": "2.0.0"})
+    (root / "plugin.json").write_text(json.dumps({
+        "$schema": "https://agent-plugins.org/schemas/1.0.0/plugin.schema.json",
+        "name": "my-plugin", "version": "1.0.0", "description": "d",
+    }))
+    world = build_lint_world(classify(root))
+    assert world.plugin is not None and world.cc_plugin is not None
+
+
+def test_marketplace_world(tmp_path):
+    from drskill.lint import build_lint_world
+
+    root = tmp_path / "market"
+    (root / ".claude-plugin").mkdir(parents=True)
+    mp = root / ".claude-plugin" / "marketplace.json"
+    mp.write_text('{"name": "m", "owner": {"name": "o"}, "plugins": []}')
+    world = build_lint_world(classify(root))
+    assert world.marketplace is not None
+    assert world.marketplace.root == str(root.resolve())
+    assert world.marketplace.data == {"name": "m", "owner": {"name": "o"}, "plugins": []}
+    # file target resolves the same root
+    world2 = build_lint_world(classify(mp))
+    assert world2.marketplace.root == str(root.resolve())
+
+
+def test_plugin_with_sibling_marketplace_loads_it(tmp_path):
+    from drskill.lint import build_lint_world
+
+    root = _cc_plugin(tmp_path)
+    (root / ".claude-plugin" / "marketplace.json").write_text(
+        '{"name": "m", "owner": {"name": "o"}, "plugins": []}'
+    )
+    world = build_lint_world(classify(root))
+    assert world.marketplace is not None
