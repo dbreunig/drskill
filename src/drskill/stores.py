@@ -6,6 +6,14 @@ active versions -- stores retain stale version dirs (observed live on
 claude-code) and record enabled/disabled state that determines whether
 skills load at all. Store facts are dated per adapter; see
 docs/superpowers/specs/2026-08-14-plugin-stores-design.md.
+
+Trust decision: installPath/cache_path values in state files are followed
+verbatim after a string type check. A hostile state file could point one
+at a huge tree and slow discovery to a crawl; drskill treats the user's
+own harness state as trusted for WHERE to read (it validates shapes, not
+intent), because the state files live beside the very configs every
+harness already executes. Bounding roots to each store directory would
+also break legitimate out-of-store installs (codex "local" version dirs).
 """
 
 from __future__ import annotations
@@ -92,7 +100,8 @@ def _claude_code(home: Path, project_root: Path) -> tuple[list[InstalledPlugin],
     out: list[InstalledPlugin] = []
     plugins = data.get("plugins")
     if not isinstance(plugins, dict):
-        unreadable.append(str(state_path))
+        if str(state_path) not in unreadable:
+            unreadable.append(str(state_path))
         return [], unreadable
     for key, installs in sorted(plugins.items()):
         if not isinstance(installs, list):
@@ -105,7 +114,8 @@ def _claude_code(home: Path, project_root: Path) -> tuple[list[InstalledPlugin],
                 continue
             install_path = inst.get("installPath")
             if install_path is not None and not isinstance(install_path, str):
-                unreadable.append(str(state_path))
+                if str(state_path) not in unreadable:
+                    unreadable.append(str(state_path))
                 continue
             if not install_path:
                 continue
@@ -115,7 +125,8 @@ def _claude_code(home: Path, project_root: Path) -> tuple[list[InstalledPlugin],
             elif scope == "local":
                 pp = inst.get("projectPath")
                 if pp is not None and not isinstance(pp, str):
-                    unreadable.append(str(state_path))
+                    if str(state_path) not in unreadable:
+                        unreadable.append(str(state_path))
                     continue
                 if not pp:
                     continue
@@ -123,7 +134,8 @@ def _claude_code(home: Path, project_root: Path) -> tuple[list[InstalledPlugin],
                     if Path(pp).resolve() != project_root.resolve():
                         continue
                 except (ValueError, OSError):
-                    unreadable.append(str(state_path))
+                    if str(state_path) not in unreadable:
+                        unreadable.append(str(state_path))
                     continue
                 pscope, ppath = "project", Path(pp)
             else:
@@ -189,7 +201,8 @@ def _codex(home: Path, project_root: Path) -> tuple[list[InstalledPlugin], list[
         # is also used for MCP/model settings); only present-but-wrong-shape
         # counts as unreadable.
     if not isinstance(plugins_tbl, dict):
-        unreadable.append(str(config_path))
+        if str(config_path) not in unreadable:
+            unreadable.append(str(config_path))
         return [], unreadable
     out: list[InstalledPlugin] = []
     cache = home / ".codex" / "plugins" / "cache"
@@ -331,7 +344,8 @@ def _copilot(home: Path, project_root: Path) -> tuple[list[InstalledPlugin], lis
     installed = config.get("installedPlugins")
     if not isinstance(installed, list):
         if installed is not None:
-            unreadable.append(str(config_path))
+            if str(config_path) not in unreadable:
+                unreadable.append(str(config_path))
         return [], unreadable
     enabled_map: dict = {}
     settings = _read_json(home / ".copilot" / "settings.json", unreadable)
@@ -345,7 +359,8 @@ def _copilot(home: Path, project_root: Path) -> tuple[list[InstalledPlugin], lis
         marketplace = entry.get("marketplace")
         cache_path = entry.get("cache_path")
         if cache_path is not None and not isinstance(cache_path, str):
-            unreadable.append(str(config_path))
+            if str(config_path) not in unreadable:
+                unreadable.append(str(config_path))
             continue
         root = (Path(cache_path) if cache_path
                 else home / ".copilot" / "installed-plugins" / str(marketplace or "") / name)
@@ -396,7 +411,8 @@ def _droid(home: Path, project_root: Path) -> tuple[list[InstalledPlugin], list[
             continue
         install_path = entry.get("installPath")
         if install_path is not None and not isinstance(install_path, str):
-            unreadable.append(str(state_path))
+            if str(state_path) not in unreadable:
+                unreadable.append(str(state_path))
             continue
         if not install_path:
             continue

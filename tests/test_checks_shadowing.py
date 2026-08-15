@@ -232,3 +232,37 @@ def test_diverged_copies_tie_labels_and_diff_fix(tmp_path):
     hit = find(findings, "diverged-copies")[0]
     assert "newest:" not in hit.message and "copy:" in hit.message
     assert any(cmd.startswith("diff ") for cmd in hit.fix_commands)
+
+
+def test_double_load_plugin_copy_fix_advises_uninstall(tmp_path):
+    # An identical native + plugin-store pair on claude-code double-loads
+    # (the plugin copy is excluded from shadow pairing). The fix command
+    # must not suggest deleting inside the managed plugin cache.
+    proj, home = tmp_path / "proj", tmp_path / "home"
+    d = proj / ".claude" / "skills" / "toolbox"
+    d.mkdir(parents=True)
+    (d / "SKILL.md").write_text("---\nname: toolbox\ndescription: d\n---\nsame\n")
+    _cc_plugin_install(home, "mkt", "sp", "1.0.0", "toolbox", "same")
+    world = world_from(proj, home)
+    fs = [f for f in run_all(world, Config()) if f.check_id == "double-load"]
+    assert len(fs) == 1
+    fix = " ".join(fs[0].fix_commands)
+    assert "sp" in fix and ("uninstall" in fix.lower() or "disable" in fix.lower())
+    assert "Remove all but one copy" not in fix
+    assert "plugins/cache" not in fix  # never point removal at the store
+
+
+def test_diverged_plugin_copy_fix_never_deletes_cache(tmp_path):
+    proj, home = tmp_path / "proj", tmp_path / "home"
+    d = proj / ".claude" / "skills" / "toolbox"
+    d.mkdir(parents=True)
+    (d / "SKILL.md").write_text(
+        "---\nname: toolbox\ndescription: native\n---\nnative body\n"
+    )
+    _cc_plugin_install(home, "mkt", "sp", "1.0.0", "toolbox", "plugin body")
+    world = world_from(proj, home)
+    fs = [f for f in run_all(world, Config()) if f.check_id == "diverged-copies"]
+    assert len(fs) == 1
+    fix = " ".join(fs[0].fix_commands)
+    assert "rm -r" not in fix
+    assert "plugin" in fix.lower()

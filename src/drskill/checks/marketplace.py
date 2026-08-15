@@ -52,8 +52,10 @@ def _entries(world):
 
 
 def _ename(entry, i):
+    # Capped: a pathological multi-KB name must not balloon every message
+    # (and reason slug) it appears in.
     name = entry.get("name") if isinstance(entry, dict) else None
-    return name if isinstance(name, str) and name else f"entry {i}"
+    return one_line(name, 80) if isinstance(name, str) and name else f"entry {i}"
 
 
 @check("marketplace-invalid")

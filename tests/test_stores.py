@@ -580,3 +580,27 @@ def test_discover_plugins_never_crashes_on_unexpected_adapter_exception(tmp_path
     plugins, unreadable = discover_plugins("claude-code", home, proj)
     assert plugins == []
     assert unreadable == [str(home / ".claude" / "plugins" / "installed_plugins.json")]
+
+
+def test_claude_code_multiple_bad_installs_single_unreadable(tmp_path):
+    home, proj = tmp_path / "home", tmp_path / "proj"
+    proj.mkdir()
+    p = _cc_state(home, {
+        "a@m": [{"scope": "user", "installPath": 123, "version": "1"}],
+        "b@m": [{"scope": "user", "installPath": 456, "version": "1"}],
+    })
+    plugins, unreadable = discover_plugins("claude-code", home, proj)
+    assert plugins == [] and unreadable == [str(p)]
+
+
+def test_copilot_multiple_bad_cache_paths_single_unreadable(tmp_path):
+    home, proj = tmp_path / "home", tmp_path / "proj"
+    proj.mkdir()
+    cfg = home / ".copilot" / "config.json"
+    cfg.parent.mkdir(parents=True)
+    cfg.write_text(json.dumps({"installedPlugins": [
+        {"name": "a", "marketplace": "m", "cache_path": 123},
+        {"name": "b", "marketplace": "m", "cache_path": 456},
+    ]}), encoding="utf-8")
+    plugins, unreadable = discover_plugins("copilot", home, proj)
+    assert plugins == [] and unreadable == [str(cfg)]
