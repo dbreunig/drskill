@@ -372,6 +372,11 @@ def ack(
     force_global: bool = typer.Option(
         False, "--global-ack", help="record in the machine ledger (~/.drskill.toml)"
     ),
+    lint_target: Path | None = typer.Option(
+        None, "--lint",
+        help="resolve refs against `drskill lint` findings for this target "
+             "instead of a scan; the ack lands in the target's drskill.toml",
+    ),
     root: Path = typer.Option(Path("."), "--root", hidden=True),
     global_mode: bool = typer.Option(False, "--global"),
 ) -> None:
@@ -384,11 +389,36 @@ def ack(
     if global_mode and (force_local or force_global):
         console.print("[red]--global mode already writes the machine ledger[/red]")
         raise typer.Exit(1)
+    if lint_target is not None and (force_local or force_global or global_mode):
+        # A lint ack must land where `lint` reads its ledger back from —
+        # the target's config root — so the destination is not a choice.
+        console.print(
+            "[red]--lint routes the ack to the linted target's drskill.toml; "
+            "it cannot combine with --local, --global-ack, or --global[/red]"
+        )
+        raise typer.Exit(1)
     home = _home()
-    config = _load_effective_config_or_exit(root, home, global_mode)
-    world, findings = _scan_with_status(
-        lambda p: run_scan(root, home, global_mode, config, progress=p)
-    )
+    lint_config_root: Path | None = None
+    if lint_target is not None:
+        from drskill import lint as lint_mod
+
+        try:
+            target = lint_mod.classify(lint_target)
+        except lint_mod.LintUsageError as e:
+            console.print(f"[red]{escape(str(e))}[/red]")
+            raise typer.Exit(1)
+        lint_config_root = lint_mod.find_config_root(target.path)
+        config = _load_effective_config_or_exit(lint_config_root, home, False)
+        world, findings = _scan_with_status(
+            lambda p: lint_mod.run_lint(
+                target, config, lint_config_root, home, progress=p
+            )
+        )
+    else:
+        config = _load_effective_config_or_exit(root, home, global_mode)
+        world, findings = _scan_with_status(
+            lambda p: run_scan(root, home, global_mode, config, progress=p)
+        )
     active, _ = ledger.filter_findings(findings, config)
     # Most notes must not be acked: a deep "judged distinct" note shares a
     # fingerprint with the warning it would revert to if the verdict cache
@@ -450,16 +480,24 @@ def ack(
     global_ledger = ledger.ledger_path(root, home, True)
     dest_counts: dict[Path, int] = {}
     for f in targets:
-        dest = ledger.ack_destination(
-            world, f, root, home, global_mode,
-            force_local=force_local, force_global=force_global,
-        )
+        if lint_config_root is not None:
+            # The one ledger run_lint reads back is the target's config
+            # root, so a lint ack always lands there.
+            dest = ledger.ledger_path(lint_config_root, home, False)
+        else:
+            dest = ledger.ack_destination(
+                world, f, root, home, global_mode,
+                force_local=force_local, force_global=force_global,
+            )
         ledger.append_ack(
             dest,
             Ack(check=f.check_id, skills=sorted(f.contributor_names),
                 fingerprint=f.fingerprint, note=note, date=dt.date.today()),
         )
-        _save_approved_baseline(world, f, root, home, global_mode)
+        _save_approved_baseline(
+            world, f, lint_config_root or root, home,
+            False if lint_config_root is not None else global_mode,
+        )
         dest_counts[dest] = dest_counts.get(dest, 0) + 1
         label = f"{f.check_id} " + ", ".join(f.contributor_names) if f.contributor_names else f.check_id
         suffix = ""

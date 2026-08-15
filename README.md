@@ -182,7 +182,14 @@ Lint is built for CI:
 drskill lint ./my-plugin --fail-on warn --json
 ```
 
-Exit code 0 is clean, 1 means findings at or above the failure threshold (errors by default; `--fail-on warn` includes warnings), and 2 is a usage error. `--json` prints findings as JSON and nothing else. Acked findings stay silent in lint exactly as in `scan`, and the manifest and marketplace checks fingerprint content rather than paths, so a committed ack holds across checkouts and CI. One honest caveat: `drskill ack` currently resolves finding references against a `scan` of your loadout, so for findings that only lint produces (the manifest and marketplace checks) you create the ack by copying the fingerprint from `lint --json` into `drskill.toml` yourself. A lint-aware ack flow is planned.
+Exit code 0 is clean, 1 means findings at or above the failure threshold (errors by default; `--fail-on warn` includes warnings), and 2 is a usage error. `--json` prints findings as JSON and nothing else. Acks work in lint exactly as in `scan`: pass `--lint` to `ack` with the same target you linted, and the finding ids or check ids from the lint report resolve against that target's findings:
+
+```
+drskill lint ./my-marketplace           # reports [3f2a] marketplace-unpinned-source ...
+drskill ack --lint ./my-marketplace 3f2a
+```
+
+The ack lands in the `drskill.toml` nearest the linted target — the ledger lint reads back — and the manifest and marketplace checks fingerprint content rather than paths, so a committed ack holds across checkouts and CI without weakening the check.
 
 `--deep` and `--mcp-connect` opt into the model-judged checks and the live server checks, exactly as they do for `scan`. Without them, lint makes no LLM calls and connects to nothing.
 
