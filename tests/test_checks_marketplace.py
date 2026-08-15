@@ -78,11 +78,11 @@ def test_unknown_source_type_is_warning(tmp_path):
 
 def test_unpinned_severity_ladder(tmp_path):
     world = _world(tmp_path, _mp([
-        {"name": "loose", "source": {"source": "github", "repo": "o/r"}},
+        {"name": "gh-bare", "source": {"source": "github", "repo": "o/r"}},
         {"name": "ref-only", "source": {
             "source": "url", "url": "https://x/r.git", "ref": "main"}},
-        {"name": "npm-loose", "source": {"source": "npm", "package": "p"}},
-        {"name": "archive-loose", "source": {
+        {"name": "npm-bare", "source": {"source": "npm", "package": "p"}},
+        {"name": "arch-bare", "source": {
             "source": "archive", "url": "https://x/a.zip"}},
         {"name": "insecure", "source": {
             "source": "url", "url": "http://x/r.git", "sha": "b" * 40}},
@@ -90,13 +90,14 @@ def test_unpinned_severity_ladder(tmp_path):
     fs = [f for f in _run(world) if f.check_id == "marketplace-unpinned-source"]
     by_name = {}
     for f in fs:
-        for n in ("loose", "ref-only", "npm-loose", "archive-loose", "insecure"):
+        for n in ("gh-bare", "ref-only", "npm-bare", "arch-bare", "insecure"):
             if n in f.message:
                 by_name.setdefault(n, []).append(f.severity)
-    assert by_name["loose"] == ["warning"]
+                break
+    assert by_name["gh-bare"] == ["warning"]
     assert by_name["ref-only"] == ["note"]
-    assert by_name["npm-loose"] == ["warning"]
-    assert by_name["archive-loose"] == ["warning"]
+    assert by_name["npm-bare"] == ["warning"]
+    assert by_name["arch-bare"] == ["warning"]
     assert by_name["insecure"] == ["warning"]
 
 
