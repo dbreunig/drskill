@@ -459,3 +459,47 @@ def test_render_lint_skill_header_sanitizes_name(tmp_path):
     text = console.export_text()
     assert "‮" not in text
     assert "\\u202e" in text
+
+
+def world_dual_route():
+    from drskill.models import Deployment
+
+    c = make_contributor(id="/real/foo/SKILL.md", name="foo")
+    c.token_cost = TokenCost(catalog_tokens=100, body_tokens=1000)
+    c.deployments.append(Deployment(
+        harness="pi", path="/home/.pi/agent/skills/foo/SKILL.md",
+        scope="user", via_symlink=True, order=0,
+    ))
+    c.deployments.append(Deployment(
+        harness="pi", path="/home/.agents/skills/foo/SKILL.md",
+        scope="user", via_symlink=False, order=1,
+    ))
+    return World(
+        contributors={c.id: c},
+        harnesses={"pi": HarnessDef(id="pi", display_name="Pi")},
+    )
+
+
+def test_dual_route_contributor_collapses_to_one_row():
+    # One real file reached through two search roots (one a symlink) is ONE
+    # skill; list should say so instead of printing two identical rows.
+    text = tables_to_text(world_dual_route())
+    assert text.count("foo") == 1
+    assert "2 paths" in text and "1 symlink" in text
+
+
+def test_dual_route_tokens_counted_once():
+    text = tables_to_text(world_dual_route(), tokens=True)
+    assert "200" not in text and "2000" not in text  # totals count once
+
+
+def test_dual_route_with_shadowed_deployment_keeps_rows():
+    # When one route is shadowed the two rows carry different facts; keep
+    # them separate, but totals still count the contributor once.
+    world = world_dual_route()
+    c = world.contributors["/real/foo/SKILL.md"]
+    c.deployments[0].shadowed_by = "/other"
+    text = tables_to_text(world, tokens=True)
+    assert text.count("foo") == 2
+    assert "shadowed" in text
+    assert "200" not in text and "2000" not in text
