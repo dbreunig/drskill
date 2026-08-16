@@ -56,21 +56,34 @@ truth for a project's selected loadout.
 ### Machine state stays on the machine
 
 The default harness, installed content, approval receipts, ownership
-manifests, credentials, and caches are machine-specific. They do not sync just
-because the user signs in.
+manifests, provider credentials, and caches are machine-specific. They do not
+sync just because the user signs in.
 
 ### Mutation is explicit
 
-`scan`, `audit`, `lint`, `list`, `show`, and `diff` remain read-only. A scanned
-repository can never cause installation or execution. Mutation occurs only
-through verbs whose names promise it: `install`, `update`, `use`, `add`, and
-`remove`. `try` creates temporary state and launches a child process, then
-restores the prior state.
+`scan`, `audit`, `lint`, `list`, `show`, `loadout show`, and `diff` remain
+read-only. A scanned repository can never cause installation or execution.
+Mutation occurs only through verbs whose names promise it: `install`, `update`,
+`use`, `add`, and `remove`. `try` creates temporary state and launches a child
+process, then restores the prior state. It is the only drskill command that
+launches another process.
 
 ### Runtime revisions require approval
 
 Every new resolved runtime revision requires approval on each machine. Changes
 to website metadata do not. The rule is intentionally simple and predictable.
+
+### Inspect incoming content before approval
+
+`install`, `use`, `update`, and `try` run drskill's full static skill, plugin,
+MCP, and injection checks against incoming content before asking for approval.
+This preflight is a core product advantage: drskill shows what a loadout would
+introduce before it materializes anything.
+
+Mandatory preflight uses trusted built-in rules and machine-owned policy. A
+cloned repository's `[deep]` configuration cannot weaken, replace, or steer
+those checks. Preflight does not execute repository content or make a model
+call unless the user explicitly requests a separate operation that does so.
 
 ## Vocabulary
 
@@ -84,6 +97,14 @@ plugins or extensions, and MCP server definitions, plus harness mappings.
 An immutable published version of a loadout. Its identity is a hash of resolved
 runtime state, not its description, recommendations, stars, or other website
 metadata.
+
+### Entry and entry selector
+
+An entry is one resolved skill, plugin or extension, or MCP server definition.
+Entries have canonical selectors of the form `<kind>:<name>`, such as
+`skill:citation-style`, `plugin:anthropic-tools`, or `mcp:zotero`. Selectors
+identify inherited entries for removal and remain stable across source
+revisions.
 
 ### Project intent
 
@@ -141,8 +162,8 @@ loadout is available from the service.
 
 - Immutable runtime-state hash.
 - Ordered entries and harness mappings.
-- Each entry records kind, name, source reference, version or revision, and
-  content hash when available.
+- Each entry records its canonical selector, kind, name, source reference,
+  version or revision, and content hash when available.
 - Source references name upstream content rather than republishing third-party
   bodies. Entries without a reproducible source are marked `local-only` and
   cannot be published as installable dependencies.
@@ -165,16 +186,21 @@ comments, ratings, or community-edited recommendations.
 
 ## Files on a machine
 
-All drskill-owned user state lives under one inspectable directory:
+drskill extends its existing inspectable user-state directory rather than
+creating a new collection of unrelated locations:
 
 ```text
 ~/.drskill/
-  config.toml              # machine-specific preferences
-  acks.toml                # machine/global acks; service-sync eligible
-  store/                   # immutable downloaded content
+  env                      # existing provider API keys; never synced
+  config.toml              # new machine-specific preferences
+  acks.toml                # new machine/global ack ledger; sync eligible
+  store/                   # new immutable downloaded content
   state/
-    projects/              # approval receipts and ownership manifests
-  cache/                   # disposable downloads and reports
+    ...                    # existing seen-state used by review and ack
+    projects/              # new approval receipts and ownership manifests
+  cache/
+    audit/                 # existing sensitive trace cache; never synced
+    ...                    # disposable downloads and reports
 ```
 
 The directory has one purpose but its contents are separated because they have
@@ -182,26 +208,38 @@ different sync and lifecycle rules:
 
 | path | synced | recoverable |
 |---|---|---|
+| `env` | no | no |
 | `config.toml` | no | no |
 | `acks.toml` | yes | from the service |
 | `store/` | no | by running `install` |
-| `state/` | no | yes, but approval is required again |
-| `cache/` | no | always |
+| `state/` | no | partly; seen-state resets and approval is required again |
+| `cache/audit/` | no | by reparsing local traces, when traces still exist |
+| other `cache/` | no | always |
 
 `~/.drskill/store/` is deliberately outside every harness discovery root. It
 is immutable and content-addressed so installing a newer version for one
 project cannot silently change another project's symlinked content.
 
-Credentials and tokens live in the operating system's credential store, never
-in these files. The existing `~/.drskill.toml` remains readable and can be
-migrated into `config.toml` and `acks.toml` without changing ack semantics.
+The shipped `~/.drskill/env` design remains the user-owned home for provider
+API keys used by deep analysis. Process environment variables continue to win
+over values in that file. The file is never project-scoped, committed, or
+synced. Storage for the service's own authentication token is a separate
+implementation decision and may use the operating system's credential store.
 
-The project contains only the visible intent and lock files:
+The existing `~/.drskill.toml` remains readable and can be migrated into
+`config.toml` and `acks.toml` without changing ack semantics. Every path above,
+including existing seen-state and audit-cache paths, remains rooted through
+`DRSKILL_HOME` when that override is set.
+
+The project keeps loadout intent and resolution visible at its root. Existing
+project-side caches remain separate from machine-global state:
 
 ```text
 project/
   drskill.toml
   drskill.lock
+  .drskill/
+    cache/                 # existing project-side committed caches, if used
 ```
 
 Harness-specific links, copies, or enablement settings are local installation
@@ -217,14 +255,24 @@ human-editable table:
 ```toml
 [loadout]
 base = "friend/textbook"
-add = ["drew/plain-writing"]
-remove = ["friend/citation-style"]
+remove = ["skill:citation-style"]
+
+[[loadout.add]]
+kind = "skill"
+source = "drew/plain-writing"
 ```
 
-The model intentionally permits one base plus additions and removals. It does
-not merge several complete loadouts, avoiding ambiguous precedence and
-collision rules. Someone who wants an independent composition can fork the
-base loadout.
+The model intentionally permits one base plus entry-level additions and
+removals. It does not subtract whole loadouts or merge several complete
+loadouts, avoiding ambiguous precedence and collision rules. Someone who wants
+an independent composition can fork the base loadout.
+
+Removal values are canonical entry selectors. A removal must match an entry
+inherited from the base; an absent selector is an error rather than a silent
+no-op. Duplicate selectors are invalid. Additions declare their kind and
+source and may declare an optional local alias. Resolution assigns every
+addition a canonical selector, and the lock records the final selector,
+source, exact version or revision, and content hash.
 
 Commands that change `[loadout]` must preserve comments, formatting, and the
 append-oriented ack entries elsewhere in `drskill.toml`.
@@ -244,6 +292,7 @@ Existing ack behavior does not change:
 
 - Base loadout name and immutable revision hash.
 - Every installed skill, plugin, extension, and MCP definition.
+- Every entry's canonical selector.
 - Reproducible source coordinates and exact versions or revisions.
 - Content hashes.
 - Harness mappings and the adapter version that produced them.
@@ -293,6 +342,18 @@ A recovery manifest lets the next drskill invocation detect and clean up an
 interrupted trial. `try` never converts temporary state into project intent
 without a separate user command.
 
+`try` is drskill's only process-launching command. The user names a supported
+harness or relies on the machine-local default; the harness identifier resolves
+to a known adapter and executable, not an arbitrary command string. drskill
+invokes it directly with an argument vector and never passes it through a
+shell.
+
+Temporary state must be isolated to the launched session wherever the harness
+supports that. An adapter may not implement `try` by toggling shared
+enablement configuration that could affect an already-running session. If a
+harness cannot provide safe session isolation, its adapter does not support
+`try` until that behavior is available and empirically verified.
+
 ### Persistent project selection
 
 ```console
@@ -305,8 +366,8 @@ install`. The selection remains until changed. It is local to the checkout
 until the user commits the two project files.
 
 ```console
-$ drskill add drew/plain-writing
-$ drskill remove friend/citation-style
+$ drskill add skill drew/plain-writing
+$ drskill remove skill:citation-style
 ```
 
 `add` and `remove` edit the override lists, re-resolve, show the diff, and use
@@ -321,9 +382,15 @@ $ drskill install
 ```
 
 The checkout is inert until `install` runs. `install` reads the committed lock,
-fetches missing immutable content, shows the exact plan and findings, requests
-approval if needed, and materializes the project state. Repeating it with the
-same approved revision is non-interactive and idempotent.
+fetches missing immutable content, and runs the full static injection, skill,
+plugin, and MCP check battery before approval. It then shows the exact plan and
+findings, requests approval if needed, and materializes the project state.
+Repeating it with the same approved revision is non-interactive and idempotent.
+
+For this mandatory preflight, `install` parses the repository's loadout intent
+but does not trust the repository's `[deep]` configuration, execute its
+content, or invoke a model. Any deeper, explicitly requested analysis remains
+a separate action with its own trust boundary.
 
 ### Updating an upstream loadout
 
@@ -342,15 +409,28 @@ change the runtime revision and do not invalidate approval.
 ### Read-only inspection
 
 ```console
-$ drskill show friend/textbook
+$ drskill loadout show friend/textbook
 $ drskill diff
 $ drskill scan
 ```
 
-`show` can inspect local or remote loadouts and their health reports. `diff`
-compares project intent, the lock, installed state, and available upstream
-revision without changing any of them. Existing read-only commands remain
-read-only.
+`drskill show <finding-id|check-id>` retains its shipped meaning. `loadout
+show` inspects local or remote loadouts and their health reports without
+competing for that namespace. `diff` compares project intent, the lock,
+installed state, and available upstream revision without changing any of them.
+Existing read-only commands remain read-only.
+
+### Loadout sharing
+
+```console
+$ drskill loadout publish textbook
+$ drskill loadout fork friend/textbook
+$ drskill loadout star friend/textbook
+```
+
+Loadout-specific inspection and social operations live under the `loadout`
+namespace. The high-frequency project and session workflow remains top-level:
+`try`, `use`, `install`, `update`, `add`, and `remove`.
 
 ## Approval and acknowledgments
 
@@ -380,6 +460,21 @@ This design specifies behavior, not one universal filesystem mechanism.
 Harness adapters choose among verified native enablement, directory links, or
 copies. Each adapter must empirically verify its discovery, precedence, and
 symlink behavior before it may mutate that harness.
+
+Scan recognizes every entry recorded in the ownership manifest as having
+`managed` provenance. Managed content is still inspected; provenance changes
+attribution and repair advice, not security or quality coverage. In particular:
+
+- An expected managed symlink does not produce a finding merely for being a
+  symlink.
+- One managed physical destination such as `.agents/skills` is not reported as
+  several independent copies merely because multiple harnesses discover it.
+- Findings never recommend deleting or editing content inside the immutable
+  store.
+- Missing, replaced, or modified materialization is attributed to the managed
+  installation and recommends `drskill install` as the repair path.
+- Genuine injection, quality, collision, and content-drift findings still
+  appear.
 
 The following rules apply to every adapter:
 
@@ -434,9 +529,10 @@ This product spans several independently testable subsystems and should not be
 implemented as one plan. The recommended sequence is:
 
 1. Define and validate the loadout intent and lock formats; add read-only
-   capture/show/diff behavior.
-2. Consolidate machine state under `~/.drskill/` while preserving legacy config
-   and existing ack routing.
+   capture/`loadout show`/diff behavior.
+2. Extend machine state under `~/.drskill/` while preserving `env`, seen-state,
+   audit caches, project-side caches, `DRSKILL_HOME`, legacy config, and existing
+   ack routing.
 3. Add service accounts, private versioned loadouts, and global-ack sync.
 4. Implement immutable local storage and one empirically verified harness
    adapter behind `install`.
@@ -476,3 +572,5 @@ The product contract intentionally leaves these decisions to narrower specs:
    reproducible in v1.
 5. The authentication and merge protocol for syncing `acks.toml` without
    overwriting concurrent decisions.
+6. Storage for the service authentication token, independently of the existing
+   `~/.drskill/env` provider-key contract.
