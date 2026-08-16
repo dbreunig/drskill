@@ -77,21 +77,49 @@ def render_harness_tables(
             return row
 
         connected_cfgs: set[str] = set()
-        for c, d in world.harness_loads(hid):
+        loads = world.harness_loads(hid)
+        # One real file reached through several search roots (e.g. one root
+        # symlinked into another) is one contributor with several
+        # deployments. That is ONE skill, so it gets one row — the note says
+        # how many routes reach it — and its tokens count once.
+        deploys_by_cid: dict[str, list] = {}
+        for c, d in loads:
+            deploys_by_cid.setdefault(c.id, []).append(d)
+        collapsed: set[str] = set()
+        counted: set[str] = set()
+        for c, d in loads:
             is_tool = c.kind == "mcp_tool"
-            notes = []
-            if d.shadowed_by:
-                notes.append("shadowed")
-            if d.via_symlink:
-                notes.append("symlink")
             if is_tool:
                 connected_cfgs.add(c.id.split(":", 1)[0])
+            deploys = deploys_by_cid[c.id]
+            if tokens and c.id not in counted and any(
+                dd.shadowed_by is None for dd in deploys
+            ):
+                counted.add(c.id)
+                cat_total += c.token_cost.catalog_tokens
+                body_total += c.token_cost.body_tokens
+            collapse = (
+                not is_tool and len(deploys) > 1
+                and all(dd.shadowed_by is None for dd in deploys)
+                and len({dd.scope for dd in deploys}) == 1
+            )
+            if collapse:
+                if c.id in collapsed:
+                    continue
+                collapsed.add(c.id)
+                links = sum(1 for dd in deploys if dd.via_symlink)
+                notes = [f"{len(deploys)} paths"]
+                if links:
+                    notes.append(f"{links} symlink{'s' if links != 1 else ''}")
+            else:
+                notes = []
+                if d.shadowed_by:
+                    notes.append("shadowed")
+                if d.via_symlink:
+                    notes.append("symlink")
             cat = body = None
             if tokens:
                 cat, body = c.token_cost.catalog_tokens, c.token_cost.body_tokens
-                if d.shadowed_by is None:
-                    cat_total += c.token_cost.catalog_tokens
-                    body_total += c.token_cost.body_tokens
             key = (0 if not is_tool else 1, c.suite or "￿", c.name)
             rows.append((key, _cells(
                 c.name, "mcp tool" if is_tool else "skill", d.scope,
