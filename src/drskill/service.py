@@ -97,3 +97,67 @@ def api_request(
     except urllib.error.URLError as error:
         raise ServiceError("connection_error", f"Could not reach {base}: {error.reason}") from None
     return json.loads(body) if body else {}
+
+
+def browser_login(
+    base_url: str | None = None,
+    open_browser=webbrowser.open,
+    timeout: float = LOGIN_TIMEOUT_SECONDS,
+) -> tuple[str, str]:
+    """Run the loopback authorization flow; returns (token, handle)."""
+    base = base_url or service_url()
+    state = secrets.token_urlsafe(32)
+    verifier = secrets.token_urlsafe(32)
+    challenge = hashlib.sha256(verifier.encode()).hexdigest()
+
+    received: dict = {}
+    done = threading.Event()
+
+    class _CallbackHandler(http.server.BaseHTTPRequestHandler):
+        def do_GET(self):
+            parsed = urllib.parse.urlparse(self.path)
+            if parsed.path != "/callback":
+                self.send_response(404)
+                self.end_headers()
+                return
+            params = urllib.parse.parse_qs(parsed.query)
+            received["grant"] = (params.get("grant") or [None])[0]
+            received["state"] = (params.get("state") or [None])[0]
+            self.send_response(200)
+            self.send_header("Content-Type", "text/html")
+            self.end_headers()
+            self.wfile.write(
+                b"<html><body><p>You're signed in &mdash; you can close this tab.</p></body></html>"
+            )
+            done.set()
+
+        def log_message(self, *args):
+            pass
+
+    server = http.server.HTTPServer(("127.0.0.1", 0), _CallbackHandler)
+    port = server.server_address[1]
+    thread = threading.Thread(target=server.serve_forever, daemon=True)
+    thread.start()
+    try:
+        authorize = f"{base}/cli/authorize?" + urllib.parse.urlencode(
+            {"port": port, "state": state, "challenge": challenge}
+        )
+        open_browser(authorize)
+        if not done.wait(timeout):
+            raise ServiceError("timeout", "Timed out waiting for browser authorization.")
+    finally:
+        server.shutdown()
+        thread.join(timeout=5)
+        server.server_close()
+
+    if received.get("state") != state or not received.get("grant"):
+        raise ServiceError("state_mismatch", "Authorization response did not match this login attempt.")
+
+    exchange = api_request(
+        "POST", "/api/v1/cli_handoffs",
+        json_body={"grant": received["grant"], "verifier": verifier},
+        base_url=base,
+    )
+    token = exchange["token"]
+    identity = api_request("GET", "/api/v1/identity", token=token, base_url=base)
+    return token, identity["user"]["handle"]
