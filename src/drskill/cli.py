@@ -3,6 +3,7 @@ from __future__ import annotations
 import datetime as dt
 import json
 import os
+import sys
 from collections import Counter
 from pathlib import Path
 
@@ -1020,6 +1021,51 @@ def logout() -> None:
         typer.echo(f"Could not revoke on the server ({err.message}); removing local credentials anyway.")
     service.delete_credentials()
     typer.echo("Signed out.")
+
+
+@app.command()
+def sync() -> None:
+    """Sync machine-ledger acknowledgments with the drskill service."""
+    import platform as platform_module
+    from importlib import metadata
+
+    from drskill import sync as sync_module
+
+    creds, base = _service_credentials()
+    try:
+        version = metadata.version("drskill-core")
+    except metadata.PackageNotFoundError:
+        version = "unknown"
+    device_info = {
+        "name": platform_module.node() or "unknown device",
+        "platform": sys.platform,
+        "cli_version": version,
+    }
+    try:
+        summary = sync_module.run_sync(creds, base, device_info)
+    except service.ServiceError as err:
+        _echo_service_error(err)
+        raise typer.Exit(1)
+
+    for warning in summary.get("warnings", []):
+        typer.echo(warning)
+
+    parts = []
+    pushed = []
+    if summary["pushed_acks"]:
+        pushed.append(f"{summary['pushed_acks']} ack" + ("s" if summary["pushed_acks"] != 1 else ""))
+    if summary["pushed_reopens"]:
+        pushed.append(f"{summary['pushed_reopens']} reopen" + ("s" if summary["pushed_reopens"] != 1 else ""))
+    if pushed:
+        parts.append("Pushed " + ", ".join(pushed))
+    pulled = []
+    if summary["pulled_acks"]:
+        pulled.append(f"{summary['pulled_acks']} ack" + ("s" if summary["pulled_acks"] != 1 else ""))
+    if summary["pulled_reopens"]:
+        pulled.append(f"{summary['pulled_reopens']} reopen" + ("s" if summary["pulled_reopens"] != 1 else ""))
+    if pulled:
+        parts.append("Pulled " + ", ".join(pulled))
+    typer.echo(" · ".join(parts) if parts else "Already up to date.")
 
 
 @loadout_app.command("list")
