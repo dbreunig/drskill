@@ -66,7 +66,7 @@ def test_wizard_publishes_the_confirmed_selection(wizard_env, monkeypatch):
     calls = wizard_env
     set_world(monkeypatch, make_world(contributor("alpha"), contributor("beta")))
 
-    result = runner.invoke(app, ["loadout", "create", "pack", "--from-project"],
+    result = runner.invoke(app, ["loadout", "create", "pack"],
                            input="\ny\n")  # accept preselection, confirm
     assert result.exit_code == 0, result.output
     assert "Published revision 1" in result.output
@@ -82,7 +82,7 @@ def test_toggling_removes_an_entry(wizard_env, monkeypatch):
     calls = wizard_env
     set_world(monkeypatch, make_world(contributor("alpha"), contributor("beta")))
 
-    result = runner.invoke(app, ["loadout", "create", "pack", "--from-project"],
+    result = runner.invoke(app, ["loadout", "create", "pack"],
                            input="2\n\ny\n")  # toggle #2 off, accept, confirm
     assert result.exit_code == 0, result.output
     entries = calls[1]["json_body"]["manifest"]["entries"]
@@ -94,7 +94,7 @@ def test_sections_and_preselection(wizard_env, monkeypatch):
         contributor("proj-skill", scope="project"),
         contributor("user-skill", scope="user"),
     ))
-    result = runner.invoke(app, ["loadout", "create", "pack", "--from-project"],
+    result = runner.invoke(app, ["loadout", "create", "pack"],
                            input="\nn\n")  # accept, then decline confirm
     output = result.output
     assert output.index("Project scope") < output.index("User scope")
@@ -110,7 +110,7 @@ def test_user_scope_is_unselected_by_default(wizard_env, monkeypatch):
         contributor("proj-skill", scope="project"),
         contributor("user-skill", scope="user"),
     ))
-    result = runner.invoke(app, ["loadout", "create", "pack", "--from-project"],
+    result = runner.invoke(app, ["loadout", "create", "pack"],
                            input="\ny\n")
     assert result.exit_code == 0, result.output
     entries = calls[1]["json_body"]["manifest"]["entries"]
@@ -125,7 +125,7 @@ def test_harness_filter_and_badges(wizard_env, monkeypatch):
         contributor("both", harnesses=("claude-code", "pi")),
     ))
     result = runner.invoke(
-        app, ["loadout", "create", "pack", "--from-project", "--harness", "claude-code"],
+        app, ["loadout", "create", "pack", "--harness", "claude-code"],
         input="\ny\n",
     )
     assert result.exit_code == 0, result.output
@@ -137,14 +137,14 @@ def test_harness_filter_and_badges(wizard_env, monkeypatch):
 
 def test_system_contributors_are_skipped(wizard_env, monkeypatch):
     set_world(monkeypatch, make_world(contributor("vendored", system=True)))
-    result = runner.invoke(app, ["loadout", "create", "pack", "--from-project"], input="")
+    result = runner.invoke(app, ["loadout", "create", "pack"], input="")
     assert result.exit_code == 1
     assert "No skills found" in result.output
 
 
 def test_local_only_warning_in_summary(wizard_env, monkeypatch):
     set_world(monkeypatch, make_world(contributor("untracked", prov_kind="unmanaged", source=None)))
-    result = runner.invoke(app, ["loadout", "create", "pack", "--from-project"],
+    result = runner.invoke(app, ["loadout", "create", "pack"],
                            input="\ny\n")
     assert "local-only" in result.output
     assert "blocks making this loadout public" in result.output
@@ -153,7 +153,7 @@ def test_local_only_warning_in_summary(wizard_env, monkeypatch):
 def test_decline_at_confirm_makes_no_server_calls(wizard_env, monkeypatch):
     calls = wizard_env
     set_world(monkeypatch, make_world(contributor("alpha")))
-    result = runner.invoke(app, ["loadout", "create", "pack", "--from-project"],
+    result = runner.invoke(app, ["loadout", "create", "pack"],
                            input="\nn\n")
     assert result.exit_code == 0
     assert calls == []
@@ -162,7 +162,7 @@ def test_decline_at_confirm_makes_no_server_calls(wizard_env, monkeypatch):
 def test_zero_selection_exits(wizard_env, monkeypatch):
     calls = wizard_env
     set_world(monkeypatch, make_world(contributor("alpha")))
-    result = runner.invoke(app, ["loadout", "create", "pack", "--from-project"],
+    result = runner.invoke(app, ["loadout", "create", "pack"],
                            input="n\n\n")  # clear all, accept
     assert result.exit_code == 1
     assert "Nothing selected" in result.output
@@ -181,7 +181,7 @@ def test_publish_failure_reports_created_but_empty(wizard_env, monkeypatch, tmp_
                                    details={"manifest": ["boom"]})
 
     monkeypatch.setattr(service, "api_request", failing_api)
-    result = runner.invoke(app, ["loadout", "create", "pack", "--from-project"],
+    result = runner.invoke(app, ["loadout", "create", "pack"],
                            input="\ny\n")
     assert result.exit_code == 1
     assert "Created drew/pack, but the publish failed" in result.output
@@ -196,7 +196,7 @@ def test_manifest_out_writes_the_manifest(wizard_env, monkeypatch, tmp_path):
     set_world(monkeypatch, make_world(contributor("alpha")))
     out = tmp_path / "m.json"
     result = runner.invoke(
-        app, ["loadout", "create", "pack", "--from-project", "--manifest-out", str(out)],
+        app, ["loadout", "create", "pack", "--manifest-out", str(out)],
         input="\ny\n",
     )
     assert result.exit_code == 0, result.output
@@ -208,7 +208,7 @@ def test_manifest_out_not_written_on_decline(wizard_env, monkeypatch, tmp_path):
     set_world(monkeypatch, make_world(contributor("alpha")))
     out = tmp_path / "m.json"
     result = runner.invoke(
-        app, ["loadout", "create", "pack", "--from-project", "--manifest-out", str(out)],
+        app, ["loadout", "create", "pack", "--manifest-out", str(out)],
         input="\nn\n",
     )
     assert result.exit_code == 0, result.output
@@ -222,7 +222,7 @@ def test_select_all_includes_user_scope(wizard_env, monkeypatch):
         contributor("proj-skill", scope="project"),
         contributor("user-skill", scope="user"),
     ))
-    result = runner.invoke(app, ["loadout", "create", "pack", "--from-project"],
+    result = runner.invoke(app, ["loadout", "create", "pack"],
                            input="a\n\ny\n")  # select all, accept, confirm
     assert result.exit_code == 0, result.output
     names = {entry["name"] for entry in calls[1]["json_body"]["manifest"]["entries"]}
@@ -240,7 +240,7 @@ def test_create_failure_stops_before_publish(wizard_env, monkeypatch):
         )
 
     monkeypatch.setattr(service, "api_request", failing_create)
-    result = runner.invoke(app, ["loadout", "create", "pack", "--from-project"],
+    result = runner.invoke(app, ["loadout", "create", "pack"],
                            input="\ny\n")
     assert result.exit_code == 1
     assert "The loadout is invalid." in result.output
@@ -250,29 +250,47 @@ def test_create_failure_stops_before_publish(wizard_env, monkeypatch):
 
 def test_unknown_harness_through_wizard(wizard_env):
     result = runner.invoke(
-        app, ["loadout", "create", "pack", "--from-project", "--harness", "nope"],
+        app, ["loadout", "create", "pack", "--harness", "nope"],
     )
     assert result.exit_code == 1
     assert "unknown harness" in result.output
     assert "valid ids" in result.output
 
 
-def test_non_tty_guard(wizard_env, monkeypatch):
+def test_non_tty_falls_back_to_plain_create(wizard_env, monkeypatch):
+    calls = wizard_env
     monkeypatch.setattr(loadout_wizard, "_stdin_is_tty", lambda: False)
-    result = runner.invoke(app, ["loadout", "create", "pack", "--from-project"])
-    assert result.exit_code == 1
-    assert "interactive terminal" in result.output
+    result = runner.invoke(app, ["loadout", "create", "pack"])
+    assert result.exit_code == 0
+    assert "contents: empty, no revisions yet" in result.output
+    assert calls[0]["path"] == "/api/v1/loadouts"
 
 
-def test_wizard_flags_require_from_project(wizard_env):
-    for flags in (["--harness", "claude-code"], ["--manifest-out", "m.json"]):
-        result = runner.invoke(app, ["loadout", "create", "pack", *flags])
-        assert result.exit_code == 1
-        assert "--from-project" in result.output
+def test_empty_flag_skips_the_wizard_interactively(wizard_env, monkeypatch):
+    calls = wizard_env
+    set_world(monkeypatch, make_world(contributor("alpha")))
+    result = runner.invoke(app, ["loadout", "create", "pack", "--empty"])
+    assert result.exit_code == 0
+    assert "contents: empty, no revisions yet" in result.output
+    assert len(calls) == 1  # create only, no publish
+
+
+def test_wizard_flags_error_when_wizard_cannot_run(wizard_env, monkeypatch):
+    for blocker in ("non-tty", "empty"):
+        if blocker == "non-tty":
+            monkeypatch.setattr(loadout_wizard, "_stdin_is_tty", lambda: False)
+            extra = []
+        else:
+            monkeypatch.setattr(loadout_wizard, "_stdin_is_tty", lambda: True)
+            extra = ["--empty"]
+        for flags in (["--harness", "claude-code"], ["--manifest-out", "m.json"]):
+            result = runner.invoke(app, ["loadout", "create", "pack", *flags, *extra])
+            assert result.exit_code == 1, (blocker, flags, result.output)
+            assert "interactive" in result.output or "--empty" in result.output
 
 
 def test_plain_create_still_works(wizard_env):
     calls = wizard_env
-    result = runner.invoke(app, ["loadout", "create", "plain-pack"])
+    result = runner.invoke(app, ["loadout", "create", "plain-pack", "--empty"])
     assert result.exit_code == 0
     assert calls[0]["json_body"]["loadout"]["name"] == "Plain Pack"

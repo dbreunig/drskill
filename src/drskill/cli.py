@@ -1051,25 +1051,29 @@ def create(
     slug: str = typer.Argument(..., help="URL slug for the new loadout"),
     name: str | None = typer.Option(None, "--name", help="display name (defaults from the slug)"),
     description: str | None = typer.Option(None, "--description", help="optional description"),
-    from_project: bool = typer.Option(False, "--from-project",
-        help="pick the contents interactively from this project's active skills"),
+    empty: bool = typer.Option(False, "--empty",
+        help="create an empty loadout without the interactive picker"),
     harness: str | None = typer.Option(None, "--harness",
-        help="with --from-project: only list skills active in this harness"),
+        help="interactive picker: only list skills active in this harness"),
     manifest_out: Path | None = typer.Option(None, "--manifest-out",
-        help="with --from-project: also save the generated manifest to a file"),
+        help="interactive picker: also save the generated manifest to a file"),
 ) -> None:
-    """Create a private loadout on the drskill service."""
-    if not from_project and (harness is not None or manifest_out is not None):
-        typer.echo("--harness and --manifest-out require --from-project.")
+    """Create a private loadout, picking its contents interactively in a terminal."""
+    from drskill import loadout_wizard
+
+    interactive = loadout_wizard._stdin_is_tty() and not empty
+    if not interactive and (harness is not None or manifest_out is not None):
+        typer.echo(
+            "--harness and --manifest-out need the interactive picker "
+            "(run in a terminal, without --empty)."
+        )
         raise typer.Exit(1)
     creds, base = _service_credentials()
     if name is None:
         name = slug.replace("-", " ").title()
-    if from_project:
+    if interactive:
         if harness is not None:
             _validate_harness(harness)
-        from drskill import loadout_wizard
-
         loadout_wizard.run(slug, name, description, harness, manifest_out,
                            creds, base, _home())
         return
