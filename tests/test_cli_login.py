@@ -94,6 +94,12 @@ def test_whoami_falls_back_to_current_service_url_for_old_credentials(tmp_path, 
     assert seen_base_urls == ["http://127.0.0.1:9"]
 
 
+def test_logout_when_signed_out_is_a_friendly_no_op(tmp_path):
+    result = runner.invoke(app, ["logout"], env=env_for(tmp_path))
+    assert result.exit_code == 0
+    assert "Not signed in." in result.output
+
+
 def test_logout_deletes_credentials_even_when_revoke_fails(tmp_path, monkeypatch):
     monkeypatch.setattr(service, "browser_login", lambda **kw: ("drsk_fake", "drew"))
     env = env_for(tmp_path)

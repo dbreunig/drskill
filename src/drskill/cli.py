@@ -995,7 +995,11 @@ def whoami() -> None:
 @app.command()
 def logout() -> None:
     """Sign out: revoke the service token and delete local credentials."""
-    creds, base = _service_credentials()
+    creds = service.load_credentials()
+    if not creds:
+        typer.echo("Not signed in.")
+        return
+    base = creds.get("service_url") or service.service_url()
     try:
         service.api_request("DELETE", "/api/v1/token", token=creds["token"], base_url=base)
         typer.echo("Token revoked on the server.")
@@ -1064,8 +1068,8 @@ def create(
     typer.echo(f"Created {loadout['owner']}/{loadout['slug']} ({loadout['visibility']})")
 
 
-@loadout_app.command()
-def show(
+@loadout_app.command("show")
+def loadout_show(
     ref: str = typer.Argument(..., help="owner/slug"),
     as_json: bool = typer.Option(False, "--json", help="emit the raw API response"),
 ) -> None:
