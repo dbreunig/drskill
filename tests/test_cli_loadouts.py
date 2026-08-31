@@ -75,6 +75,14 @@ def test_create_posts_and_prints_the_ref(signed_in, api):
     assert calls[0]["json_body"] == {"loadout": {"slug": "textbook", "name": "Textbook", "description": "d"}}
 
 
+def test_create_defaults_the_name_from_the_slug(signed_in, api):
+    calls, fake = api
+    fake.response = {"loadout": LOADOUT}
+    result = runner.invoke(app, ["loadout", "create", "textbook-pack"])
+    assert result.exit_code == 0
+    assert calls[0]["json_body"] == {"loadout": {"slug": "textbook-pack", "name": "Textbook Pack"}}
+
+
 def test_create_validation_failure_prints_details(signed_in, monkeypatch):
     def failing(*args, **kwargs):
         raise service.ServiceError("loadout_invalid", "The loadout is invalid.",

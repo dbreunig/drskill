@@ -1049,11 +1049,13 @@ def loadout_list(
 @loadout_app.command()
 def create(
     slug: str = typer.Argument(..., help="URL slug for the new loadout"),
-    name: str = typer.Option(..., "--name", help="display name"),
+    name: str | None = typer.Option(None, "--name", help="display name (defaults from the slug)"),
     description: str | None = typer.Option(None, "--description", help="optional description"),
 ) -> None:
     """Create a private loadout on the drskill service."""
     creds, base = _service_credentials()
+    if name is None:
+        name = slug.replace("-", " ").title()
     body: dict = {"loadout": {"slug": slug, "name": name}}
     if description is not None:
         body["loadout"]["description"] = description
