@@ -214,10 +214,15 @@ def _choose_skills(rows: list[_Row], chosen_harness: str | None) -> list[_Row]:
     current_scope = None
     for row in rows:
         if row.scope != current_scope:
+            # Only insert a divider at an actual transition between scope
+            # groups, not before the very first group (there's nothing above
+            # it to divide from, and the "Pick skills" heading already
+            # labels the list).
+            if current_scope is not None:
+                choices.append(questionary.Separator(
+                    "— Project scope —" if row.scope == "project" else "— User scope —"
+                ))
             current_scope = row.scope
-            choices.append(questionary.Separator(
-                "— Project scope —" if current_scope == "project" else "— User scope —"
-            ))
         choices.append(questionary.Choice(
             title=_row_label(row, chosen_harness, width), checked=row.selected, value=row,
         ))

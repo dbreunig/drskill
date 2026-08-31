@@ -2,6 +2,7 @@ import json
 from pathlib import Path
 
 import pytest
+import questionary
 from typer.testing import CliRunner
 
 from drskill import loadout_wizard, pipeline, service
@@ -10,6 +11,17 @@ from drskill.models import Contributor, Deployment, Provenance, TokenCost
 from drskill.resolution import World
 
 runner = CliRunner()
+
+
+class _FakeQuestion:
+    """Stands in for questionary's Question object: .ask() returns a canned
+    answer instead of driving a real interactive prompt."""
+
+    def __init__(self, answer):
+        self._answer = answer
+
+    def ask(self):
+        return self._answer
 
 
 def contributor(name, scope="project", prov_kind="gh-skill", source="friend/x@v1",
@@ -466,6 +478,126 @@ def test_scan_status_spinner_does_not_crash(wizard_env, monkeypatch):
     result = runner.invoke(app, ["loadout", "create", "pack"], input="y\n")
     assert result.exit_code == 0, result.output
     assert "Published revision 1" in result.output
+
+
+def test_choose_harness_builds_choices_and_returns_selection(monkeypatch):
+    captured = {}
+
+    def fake_select(message, choices=None, **kwargs):
+        captured["message"] = message
+        captured["choices"] = choices
+        return _FakeQuestion("claude-code")
+
+    monkeypatch.setattr(questionary, "select", fake_select)
+    result = loadout_wizard._choose_harness(["pi", "claude-code"])
+    assert captured["message"] == "Which harness should this loadout draw from?"
+    assert captured["choices"] == ["claude-code", "pi", "All harnesses"]
+    assert result == "claude-code"
+
+
+def test_choose_harness_all_harnesses_returns_none(monkeypatch):
+    monkeypatch.setattr(
+        questionary, "select",
+        lambda message, choices=None, **kwargs: _FakeQuestion("All harnesses"),
+    )
+    assert loadout_wizard._choose_harness(["pi", "claude-code"]) is None
+
+
+def test_choose_harness_ctrl_c_aborts(monkeypatch, capsys):
+    monkeypatch.setattr(
+        questionary, "select",
+        lambda message, choices=None, **kwargs: _FakeQuestion(None),
+    )
+    with pytest.raises(loadout_wizard.typer.Exit) as excinfo:
+        loadout_wizard._choose_harness(["pi", "claude-code"])
+    assert excinfo.value.exit_code == 0
+    assert "Aborted." in capsys.readouterr().out
+
+
+def test_choose_skills_builds_choices_with_separator_and_checked_state(monkeypatch):
+    proj_row = _row("proj-skill", scope="project", selected=True)
+    user_row = _row("user-skill", scope="user", selected=False)
+    captured = {}
+
+    def fake_checkbox(message, choices=None, **kwargs):
+        captured["message"] = message
+        captured["choices"] = choices
+        return _FakeQuestion([user_row])
+
+    monkeypatch.setattr(questionary, "checkbox", fake_checkbox)
+    result = loadout_wizard._choose_skills([proj_row, user_row], None)
+
+    choices = captured["choices"]
+    separators = [c for c in choices if isinstance(c, questionary.Separator)]
+    assert len(separators) == 1  # exactly one divider between the two scope groups
+
+    # questionary.Separator subclasses Choice, so exclude separators explicitly.
+    choice_items = [
+        c for c in choices
+        if isinstance(c, questionary.Choice) and not isinstance(c, questionary.Separator)
+    ]
+    assert len(choice_items) == 2
+    proj_choice = next(c for c in choice_items if c.value is proj_row)
+    user_choice = next(c for c in choice_items if c.value is user_row)
+    assert proj_choice.checked is True
+    assert user_choice.checked is False
+    # the project row (and its section) comes first, the separator sits
+    # between the two groups, and the user row follows it
+    assert choices.index(proj_choice) < choices.index(separators[0]) < choices.index(user_choice)
+
+    assert result == [user_row]
+    assert result[0] is user_row  # the widget hands back the actual _Row object
+
+
+def test_choose_skills_ctrl_c_aborts(monkeypatch, capsys):
+    row = _row("alpha")
+    monkeypatch.setattr(
+        questionary, "checkbox",
+        lambda message, choices=None, **kwargs: _FakeQuestion(None),
+    )
+    with pytest.raises(loadout_wizard.typer.Exit) as excinfo:
+        loadout_wizard._choose_skills([row], None)
+    assert excinfo.value.exit_code == 0
+    assert "Aborted." in capsys.readouterr().out
+
+
+def test_choose_skills_zero_selection_passes_through(monkeypatch):
+    row = _row("alpha")
+    monkeypatch.setattr(
+        questionary, "checkbox",
+        lambda message, choices=None, **kwargs: _FakeQuestion([]),
+    )
+    # _choose_skills itself just returns whatever questionary hands back;
+    # the "Nothing selected." exit lives in run(), not here.
+    assert loadout_wizard._choose_skills([row], None) == []
+
+
+def test_end_to_end_through_real_seams_with_only_questionary_patched(wizard_env, monkeypatch):
+    # Patches questionary itself (not the _choose_harness/_choose_skills
+    # seams), proving run() round-trips through the real seam functions:
+    # harness filtering, Separator/Choice construction, and the checked
+    # rows returned by the (faked) widget all flow through unmodified.
+    calls = wizard_env
+    set_world(monkeypatch, make_world(
+        contributor("cc-skill", harnesses=("claude-code",)),
+        contributor("codex-skill", harnesses=("codex",)),
+    ))
+
+    def fake_select(message, choices=None, **kwargs):
+        return _FakeQuestion("claude-code")
+
+    def fake_checkbox(message, choices=None, **kwargs):
+        # Accept whatever the real _choose_skills pre-checked (project-scope
+        # rows), mirroring a user who just hits enter on the defaults.
+        checked = [c.value for c in choices if isinstance(c, questionary.Choice) and c.checked]
+        return _FakeQuestion(checked)
+
+    monkeypatch.setattr(questionary, "select", fake_select)
+    monkeypatch.setattr(questionary, "checkbox", fake_checkbox)
+    result = runner.invoke(app, ["loadout", "create", "pack"], input="y\n")
+    assert result.exit_code == 0, result.output
+    entries = calls[1]["json_body"]["manifest"]["entries"]
+    assert [entry["name"] for entry in entries] == ["cc-skill"]
 
 
 def test_row_label_pads_short_names_to_the_given_width():
