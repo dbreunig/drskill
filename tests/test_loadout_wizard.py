@@ -1,6 +1,4 @@
 import json
-import sys
-import termios
 from pathlib import Path
 
 import pytest
@@ -37,13 +35,29 @@ def make_world(*contributors):
     return World(contributors={c.id: c for c in contributors})
 
 
-def _row(name, scope="project", harnesses=("claude-code",), selected=False):
+def _row(name, scope="project", harnesses=("claude-code",), selected=False,
+        source="friend/x@v1"):
     # Fabricates a _Row directly, bypassing _build_rows, for unit-testing
-    # the selection state machine and shell without a scan.
+    # _row_label/_label_width without a scan.
     return loadout_wizard._Row(
-        contributor=contributor(name, scope=scope, harnesses=harnesses),
+        contributor=contributor(name, scope=scope, harnesses=harnesses, source=source),
         harnesses=list(harnesses), scope=scope, selected=selected,
     )
+
+
+def _accept_preselected(rows, chosen_harness=None):
+    # Stands in for a user who accepts questionary's pre-checked rows as-is.
+    return [r for r in rows if r.selected]
+
+
+def _accept_all(rows, chosen_harness=None):
+    # Stands in for a user who checks every row, including unselected ones.
+    return list(rows)
+
+
+def _pick_all_harnesses(harness_ids):
+    # Stands in for a user who picks "All harnesses" in the harness picker.
+    return None
 
 
 @pytest.fixture
@@ -76,9 +90,9 @@ def set_world(monkeypatch, world):
 def test_wizard_publishes_the_confirmed_selection(wizard_env, monkeypatch):
     calls = wizard_env
     set_world(monkeypatch, make_world(contributor("alpha"), contributor("beta")))
+    monkeypatch.setattr(loadout_wizard, "_choose_skills", _accept_preselected)
 
-    result = runner.invoke(app, ["loadout", "create", "pack"],
-                           input="\ny\n")  # accept preselection, confirm
+    result = runner.invoke(app, ["loadout", "create", "pack"], input="y\n")  # confirm
     assert result.exit_code == 0, result.output
     assert "Published revision 1" in result.output
     create_call, publish_call = calls
@@ -92,9 +106,12 @@ def test_wizard_publishes_the_confirmed_selection(wizard_env, monkeypatch):
 def test_toggling_removes_an_entry(wizard_env, monkeypatch):
     calls = wizard_env
     set_world(monkeypatch, make_world(contributor("alpha"), contributor("beta")))
+    monkeypatch.setattr(
+        loadout_wizard, "_choose_skills",
+        lambda rows, chosen: [r for r in rows if r.contributor.name == "alpha"],
+    )
 
-    result = runner.invoke(app, ["loadout", "create", "pack"],
-                           input="2\n\ny\n")  # toggle #2 off, accept, confirm
+    result = runner.invoke(app, ["loadout", "create", "pack"], input="y\n")
     assert result.exit_code == 0, result.output
     entries = calls[1]["json_body"]["manifest"]["entries"]
     assert [entry["name"] for entry in entries] == ["alpha"]
@@ -105,14 +122,23 @@ def test_sections_and_preselection(wizard_env, monkeypatch):
         contributor("proj-skill", scope="project"),
         contributor("user-skill", scope="user"),
     ))
-    result = runner.invoke(app, ["loadout", "create", "pack"],
-                           input="\nn\n")  # accept, then decline confirm
-    output = result.output
-    assert output.index("Project scope") < output.index("User scope")
-    assert "[x] 1" in output.replace("  ", " ") or "[x]" in output.split("proj-skill")[0].rsplit("\n", 1)[-1]
-    # user-scope rows start unselected
-    before_user = output.split("user-skill")[0].rsplit("\n", 1)[-1]
-    assert "[ ]" in before_user
+    captured = {}
+
+    def fake_choose_skills(rows, chosen):
+        captured["rows"] = rows
+        return []
+
+    monkeypatch.setattr(loadout_wizard, "_choose_skills", fake_choose_skills)
+    runner.invoke(app, ["loadout", "create", "pack"])
+    rows = captured["rows"]
+    # Project-scope rows sort before user-scope rows and are the only ones
+    # pre-checked; this is what a real questionary checkbox would receive as
+    # its `checked=` state per row.
+    assert [row.scope for row in rows] == ["project", "user"]
+    proj_row = next(r for r in rows if r.contributor.name == "proj-skill")
+    user_row = next(r for r in rows if r.contributor.name == "user-skill")
+    assert proj_row.selected is True
+    assert user_row.selected is False
 
 
 def test_user_scope_is_unselected_by_default(wizard_env, monkeypatch):
@@ -121,8 +147,8 @@ def test_user_scope_is_unselected_by_default(wizard_env, monkeypatch):
         contributor("proj-skill", scope="project"),
         contributor("user-skill", scope="user"),
     ))
-    result = runner.invoke(app, ["loadout", "create", "pack"],
-                           input="\ny\n")
+    monkeypatch.setattr(loadout_wizard, "_choose_skills", _accept_preselected)
+    result = runner.invoke(app, ["loadout", "create", "pack"], input="y\n")
     assert result.exit_code == 0, result.output
     entries = calls[1]["json_body"]["manifest"]["entries"]
     assert [entry["name"] for entry in entries] == ["proj-skill"]
@@ -135,15 +161,27 @@ def test_harness_filter_and_badges(wizard_env, monkeypatch):
         contributor("pi-only", harnesses=("pi",)),
         contributor("both", harnesses=("claude-code", "pi")),
     ))
+    captured = {}
+
+    def fake_choose_skills(rows, chosen):
+        captured["rows"] = rows
+        captured["chosen"] = chosen
+        return list(rows)
+
+    monkeypatch.setattr(loadout_wizard, "_choose_skills", fake_choose_skills)
     result = runner.invoke(
-        app, ["loadout", "create", "pack", "--harness", "claude-code"],
-        input="\ny\n",
+        app, ["loadout", "create", "pack", "--harness", "claude-code"], input="y\n",
     )
     assert result.exit_code == 0, result.output
-    assert "pi-only" not in result.output
-    assert "[claude-code, pi]" in result.output
-    names = {entry["name"] for entry in calls[1]["json_body"]["manifest"]["entries"]}
-    assert names == {"cc-only", "both"}
+    names = {row.contributor.name for row in captured["rows"]}
+    assert names == {"cc-only", "both"}  # pi-only filtered out before the picker
+    assert captured["chosen"] == "claude-code"
+    # a harness was chosen (via --harness), so labels carry no badge even
+    # though "both" spans two harnesses
+    both_row = next(r for r in captured["rows"] if r.contributor.name == "both")
+    assert "[" not in loadout_wizard._row_label(both_row, captured["chosen"])
+    published = {entry["name"] for entry in calls[1]["json_body"]["manifest"]["entries"]}
+    assert published == {"cc-only", "both"}
 
 
 def test_system_contributors_are_skipped(wizard_env, monkeypatch):
@@ -155,8 +193,8 @@ def test_system_contributors_are_skipped(wizard_env, monkeypatch):
 
 def test_local_only_warning_in_summary(wizard_env, monkeypatch):
     set_world(monkeypatch, make_world(contributor("untracked", prov_kind="unmanaged", source=None)))
-    result = runner.invoke(app, ["loadout", "create", "pack"],
-                           input="\ny\n")
+    monkeypatch.setattr(loadout_wizard, "_choose_skills", _accept_preselected)
+    result = runner.invoke(app, ["loadout", "create", "pack"], input="y\n")
     assert "local-only" in result.output
     assert "blocks making this loadout public" in result.output
 
@@ -164,8 +202,8 @@ def test_local_only_warning_in_summary(wizard_env, monkeypatch):
 def test_decline_at_confirm_makes_no_server_calls(wizard_env, monkeypatch):
     calls = wizard_env
     set_world(monkeypatch, make_world(contributor("alpha")))
-    result = runner.invoke(app, ["loadout", "create", "pack"],
-                           input="\nn\n")
+    monkeypatch.setattr(loadout_wizard, "_choose_skills", _accept_preselected)
+    result = runner.invoke(app, ["loadout", "create", "pack"], input="n\n")
     assert result.exit_code == 0
     assert calls == []
 
@@ -173,8 +211,8 @@ def test_decline_at_confirm_makes_no_server_calls(wizard_env, monkeypatch):
 def test_zero_selection_exits(wizard_env, monkeypatch):
     calls = wizard_env
     set_world(monkeypatch, make_world(contributor("alpha")))
-    result = runner.invoke(app, ["loadout", "create", "pack"],
-                           input="n\n\n")  # clear all, accept
+    monkeypatch.setattr(loadout_wizard, "_choose_skills", lambda rows, chosen: [])
+    result = runner.invoke(app, ["loadout", "create", "pack"])
     assert result.exit_code == 1
     assert "Nothing selected" in result.output
     assert calls == []
@@ -182,6 +220,7 @@ def test_zero_selection_exits(wizard_env, monkeypatch):
 
 def test_publish_failure_reports_created_but_empty(wizard_env, monkeypatch, tmp_path):
     set_world(monkeypatch, make_world(contributor("alpha")))
+    monkeypatch.setattr(loadout_wizard, "_choose_skills", _accept_preselected)
 
     def failing_api(method, path, token=None, json_body=None, base_url=None, raw=False):
         if path == "/api/v1/loadouts":
@@ -192,8 +231,7 @@ def test_publish_failure_reports_created_but_empty(wizard_env, monkeypatch, tmp_
                                    details={"manifest": ["boom"]})
 
     monkeypatch.setattr(service, "api_request", failing_api)
-    result = runner.invoke(app, ["loadout", "create", "pack"],
-                           input="\ny\n")
+    result = runner.invoke(app, ["loadout", "create", "pack"], input="y\n")
     assert result.exit_code == 1
     assert "Created drew/pack, but the publish failed" in result.output
     assert "drskill loadout publish drew/pack" in result.output
@@ -205,10 +243,10 @@ def test_publish_failure_reports_created_but_empty(wizard_env, monkeypatch, tmp_
 
 def test_manifest_out_writes_the_manifest(wizard_env, monkeypatch, tmp_path):
     set_world(monkeypatch, make_world(contributor("alpha")))
+    monkeypatch.setattr(loadout_wizard, "_choose_skills", _accept_preselected)
     out = tmp_path / "m.json"
     result = runner.invoke(
-        app, ["loadout", "create", "pack", "--manifest-out", str(out)],
-        input="\ny\n",
+        app, ["loadout", "create", "pack", "--manifest-out", str(out)], input="y\n",
     )
     assert result.exit_code == 0, result.output
     assert json.loads(out.read_text(encoding="utf-8"))["schema_version"] == 1
@@ -217,10 +255,10 @@ def test_manifest_out_writes_the_manifest(wizard_env, monkeypatch, tmp_path):
 def test_manifest_out_not_written_on_decline(wizard_env, monkeypatch, tmp_path):
     calls = wizard_env
     set_world(monkeypatch, make_world(contributor("alpha")))
+    monkeypatch.setattr(loadout_wizard, "_choose_skills", _accept_preselected)
     out = tmp_path / "m.json"
     result = runner.invoke(
-        app, ["loadout", "create", "pack", "--manifest-out", str(out)],
-        input="\nn\n",
+        app, ["loadout", "create", "pack", "--manifest-out", str(out)], input="n\n",
     )
     assert result.exit_code == 0, result.output
     assert not out.exists()
@@ -233,8 +271,8 @@ def test_select_all_includes_user_scope(wizard_env, monkeypatch):
         contributor("proj-skill", scope="project"),
         contributor("user-skill", scope="user"),
     ))
-    result = runner.invoke(app, ["loadout", "create", "pack"],
-                           input="a\n\ny\n")  # select all, accept, confirm
+    monkeypatch.setattr(loadout_wizard, "_choose_skills", _accept_all)
+    result = runner.invoke(app, ["loadout", "create", "pack"], input="y\n")
     assert result.exit_code == 0, result.output
     names = {entry["name"] for entry in calls[1]["json_body"]["manifest"]["entries"]}
     assert names == {"proj-skill", "user-skill"}
@@ -242,6 +280,7 @@ def test_select_all_includes_user_scope(wizard_env, monkeypatch):
 
 def test_create_failure_stops_before_publish(wizard_env, monkeypatch):
     set_world(monkeypatch, make_world(contributor("alpha")))
+    monkeypatch.setattr(loadout_wizard, "_choose_skills", _accept_preselected)
     calls = []
 
     def failing_create(method, path, token=None, json_body=None, base_url=None, raw=False):
@@ -251,8 +290,7 @@ def test_create_failure_stops_before_publish(wizard_env, monkeypatch):
         )
 
     monkeypatch.setattr(service, "api_request", failing_create)
-    result = runner.invoke(app, ["loadout", "create", "pack"],
-                           input="\ny\n")
+    result = runner.invoke(app, ["loadout", "create", "pack"], input="y\n")
     assert result.exit_code == 1
     assert "The loadout is invalid." in result.output
     assert "is invalid" in result.output
@@ -276,10 +314,19 @@ def test_dedup_tracked_across_harnesses(wizard_env, monkeypatch):
         contributor("alpha", id="/tmp/alpha-cc", harnesses=("claude-code",)),
         contributor("alpha", id="/tmp/alpha-codex", harnesses=("codex",)),
     ))
-    result = runner.invoke(app, ["loadout", "create", "pack"],
-                           input="a\n\ny\n")  # keep all harnesses, accept, confirm
+    monkeypatch.setattr(loadout_wizard, "_choose_harness", _pick_all_harnesses)
+    captured = {}
+
+    def fake_choose_skills(rows, chosen):
+        captured["rows"] = rows
+        captured["chosen"] = chosen
+        return [r for r in rows if r.selected]
+
+    monkeypatch.setattr(loadout_wizard, "_choose_skills", fake_choose_skills)
+    result = runner.invoke(app, ["loadout", "create", "pack"], input="y\n")
     assert result.exit_code == 0, result.output
-    assert "[claude-code, codex]" in result.output
+    row = captured["rows"][0]
+    assert "[claude-code, codex]" in loadout_wizard._row_label(row, captured["chosen"])
     entries = calls[1]["json_body"]["manifest"]["entries"]
     assert len(entries) == 1
     assert entries[0]["name"] == "alpha"
@@ -293,16 +340,17 @@ def test_dedup_local_only_same_hash_merges(wizard_env, monkeypatch):
         contributor("untracked", id="/tmp/untracked-b", prov_kind="unmanaged", source=None,
                     content_hash="sha256:" + "11" * 32),
     ))
-    result = runner.invoke(app, ["loadout", "create", "pack"], input="\ny\n")
+    monkeypatch.setattr(loadout_wizard, "_choose_skills", _accept_preselected)
+    result = runner.invoke(app, ["loadout", "create", "pack"], input="y\n")
     assert result.exit_code == 0, result.output
     entries = calls[1]["json_body"]["manifest"]["entries"]
     assert len(entries) == 1
 
 
 def test_dedup_local_only_different_hash_merges_deterministically(wizard_env, monkeypatch):
-    # Rows now merge on (kind, normalized name) alone, so two local-only
-    # copies of the same name merge even with different content hashes.
-    # Neither member is tracked, so the representative is picked by id
+    # Rows merge on (kind, normalized name) alone, so two local-only copies
+    # of the same name merge even with different content hashes. Neither
+    # member is tracked, so the representative is picked by id
     # (lexicographically first) for determinism.
     calls = wizard_env
     set_world(monkeypatch, make_world(
@@ -311,7 +359,8 @@ def test_dedup_local_only_different_hash_merges_deterministically(wizard_env, mo
         contributor("untracked", id="/tmp/untracked-b", prov_kind="unmanaged", source=None,
                     content_hash="sha256:" + "22" * 32),
     ))
-    result = runner.invoke(app, ["loadout", "create", "pack"], input="\ny\n")
+    monkeypatch.setattr(loadout_wizard, "_choose_skills", _accept_preselected)
+    result = runner.invoke(app, ["loadout", "create", "pack"], input="y\n")
     assert result.exit_code == 0, result.output
     entries = calls[1]["json_body"]["manifest"]["entries"]
     assert len(entries) == 1
@@ -329,7 +378,8 @@ def test_dedup_merges_local_and_tracked_copies(wizard_env, monkeypatch):
         contributor("alpha", id="/tmp/alpha-tracked", prov_kind="gh-skill",
                     source="friend/x@v1", content_hash="sha256:" + "44" * 32),
     ))
-    result = runner.invoke(app, ["loadout", "create", "pack"], input="\ny\n")
+    monkeypatch.setattr(loadout_wizard, "_choose_skills", _accept_preselected)
+    result = runner.invoke(app, ["loadout", "create", "pack"], input="y\n")
     assert result.exit_code == 0, result.output
     assert "friend/x@v1" in result.output  # source summary shows the tracked source
     entries = calls[1]["json_body"]["manifest"]["entries"]
@@ -344,11 +394,18 @@ def test_dedup_merges_scope_prefers_project(wizard_env, monkeypatch):
         contributor("alpha", id="/tmp/alpha-user", scope="user", harnesses=("claude-code",)),
         contributor("alpha", id="/tmp/alpha-project", scope="project", harnesses=("codex",)),
     ))
-    result = runner.invoke(app, ["loadout", "create", "pack"],
-                           input="a\n\ny\n")  # keep all harnesses, accept, confirm
+    monkeypatch.setattr(loadout_wizard, "_choose_harness", _pick_all_harnesses)
+    captured = {}
+
+    def fake_choose_skills(rows, chosen):
+        captured["rows"] = rows
+        return [r for r in rows if r.selected]
+
+    monkeypatch.setattr(loadout_wizard, "_choose_skills", fake_choose_skills)
+    result = runner.invoke(app, ["loadout", "create", "pack"], input="y\n")
     assert result.exit_code == 0, result.output
-    assert "Project scope" in result.output
-    assert "User scope" not in result.output  # the one merged row is project-scoped
+    assert [row.scope for row in captured["rows"]] == ["project"]  # the one merged row
+    assert captured["rows"][0].selected is True
     entries = calls[1]["json_body"]["manifest"]["entries"]
     assert len(entries) == 1
 
@@ -359,10 +416,17 @@ def test_harness_step_prompts_when_multiple_harnesses(wizard_env, monkeypatch):
         contributor("cc-skill", harnesses=("claude-code",)),
         contributor("codex-skill", harnesses=("codex",)),
     ))
-    result = runner.invoke(app, ["loadout", "create", "pack"],
-                           input="1\n\ny\n")  # pick the sorted-first harness, accept, confirm
+    picked = {}
+
+    def fake_choose_harness(harness_ids):
+        picked["ids"] = harness_ids
+        return "claude-code"
+
+    monkeypatch.setattr(loadout_wizard, "_choose_harness", fake_choose_harness)
+    monkeypatch.setattr(loadout_wizard, "_choose_skills", _accept_preselected)
+    result = runner.invoke(app, ["loadout", "create", "pack"], input="y\n")
     assert result.exit_code == 0, result.output
-    assert "Which harness's skills should this loadout draw from?" in result.output
+    assert picked["ids"] == ["claude-code", "codex"]
     entries = calls[1]["json_body"]["manifest"]["entries"]
     assert [entry["name"] for entry in entries] == ["cc-skill"]
 
@@ -373,8 +437,9 @@ def test_harness_step_all_keeps_everything(wizard_env, monkeypatch):
         contributor("cc-skill", harnesses=("claude-code",)),
         contributor("codex-skill", harnesses=("codex",)),
     ))
-    result = runner.invoke(app, ["loadout", "create", "pack"],
-                           input="a\n\ny\n")
+    monkeypatch.setattr(loadout_wizard, "_choose_harness", _pick_all_harnesses)
+    monkeypatch.setattr(loadout_wizard, "_choose_skills", _accept_preselected)
+    result = runner.invoke(app, ["loadout", "create", "pack"], input="y\n")
     assert result.exit_code == 0, result.output
     names = {entry["name"] for entry in calls[1]["json_body"]["manifest"]["entries"]}
     assert names == {"cc-skill", "codex-skill"}
@@ -382,9 +447,14 @@ def test_harness_step_all_keeps_everything(wizard_env, monkeypatch):
 
 def test_harness_step_absent_for_single_harness(wizard_env, monkeypatch):
     set_world(monkeypatch, make_world(contributor("alpha", harnesses=("claude-code",))))
-    result = runner.invoke(app, ["loadout", "create", "pack"], input="\ny\n")
+
+    def boom(harness_ids):
+        raise AssertionError("should not be called for a single-harness world")
+
+    monkeypatch.setattr(loadout_wizard, "_choose_harness", boom)
+    monkeypatch.setattr(loadout_wizard, "_choose_skills", _accept_preselected)
+    result = runner.invoke(app, ["loadout", "create", "pack"], input="y\n")
     assert result.exit_code == 0, result.output
-    assert "Which harness's skills should this loadout draw from?" not in result.output
 
 
 def test_scan_status_spinner_does_not_crash(wizard_env, monkeypatch):
@@ -392,105 +462,65 @@ def test_scan_status_spinner_does_not_crash(wizard_env, monkeypatch):
     # line; this exercises that path end to end under CliRunner's captured,
     # non-tty stdout.
     set_world(monkeypatch, make_world(contributor("alpha")))
-    result = runner.invoke(app, ["loadout", "create", "pack"], input="\ny\n")
+    monkeypatch.setattr(loadout_wizard, "_choose_skills", _accept_preselected)
+    result = runner.invoke(app, ["loadout", "create", "pack"], input="y\n")
     assert result.exit_code == 0, result.output
     assert "Published revision 1" in result.output
 
 
-def test_apply_key_moves_cursor_and_clamps(monkeypatch):
-    rows = [_row("a"), _row("b"), _row("c")]
-    state = loadout_wizard._SelectState(rows=rows)
-    assert loadout_wizard._apply_key(state, "up") is None
-    assert state.cursor == 0  # already at the top, clamps
-    assert loadout_wizard._apply_key(state, "down") is None
-    assert state.cursor == 1
-    assert loadout_wizard._apply_key(state, "j") is None
-    assert state.cursor == 2
-    assert loadout_wizard._apply_key(state, "down") is None
-    assert state.cursor == 2  # already at the bottom, clamps
-    assert loadout_wizard._apply_key(state, "k") is None
-    assert state.cursor == 1
+def test_row_label_pads_short_names_to_the_given_width():
+    row = _row("x")
+    label = loadout_wizard._row_label(row, "claude-code", width=24)
+    assert label.startswith("x" + " " * 23 + "  ")
 
 
-def test_apply_key_scrolls_offset_beyond_window(monkeypatch):
-    window = loadout_wizard._WINDOW
-    rows = [_row(f"s{i}") for i in range(window + 5)]
-    state = loadout_wizard._SelectState(rows=rows)
-    for _ in range(window):  # walk the cursor past the bottom of the window
-        loadout_wizard._apply_key(state, "down")
-    assert state.cursor == window
-    assert state.offset == 1  # scrolled by exactly one to keep the cursor visible
-    for _ in range(window + 10):  # walk far past the end, clamped at len - 1
-        loadout_wizard._apply_key(state, "down")
-    assert state.cursor == len(rows) - 1
-    assert state.offset == len(rows) - window  # offset clamped to the max scroll
-    for _ in range(len(rows) + 5):  # walk all the way back to the top
-        loadout_wizard._apply_key(state, "up")
-    assert state.cursor == 0
-    assert state.offset == 0
+def test_row_label_does_not_truncate_names_longer_than_the_width():
+    long_name = "a" * 40
+    row = _row(long_name)
+    label = loadout_wizard._row_label(row, "claude-code", width=34)
+    assert label.startswith(long_name + "  ")
 
 
-def test_apply_key_toggle_all_none(monkeypatch):
-    rows = [_row("a"), _row("b")]
-    state = loadout_wizard._SelectState(rows=rows)
-    assert loadout_wizard._apply_key(state, "space") is None
-    assert rows[0].selected is True
-    assert rows[1].selected is False
-    loadout_wizard._apply_key(state, "space")
-    assert rows[0].selected is False
-    loadout_wizard._apply_key(state, "a")
-    assert all(r.selected for r in rows)
-    loadout_wizard._apply_key(state, "n")
-    assert not any(r.selected for r in rows)
+def test_row_label_strips_version_suffix():
+    row = _row("alpha", source="superpowers@claude-plugins-official==6.3.0")
+    label = loadout_wizard._row_label(row, "claude-code")
+    assert "superpowers@claude-plugins-official" in label
+    assert "==6.3.0" not in label
 
 
-def test_apply_key_accept_abort(monkeypatch):
-    rows = [_row("a")]
-    state = loadout_wizard._SelectState(rows=rows)
-    assert loadout_wizard._apply_key(state, "enter") == "accept"
-    assert loadout_wizard._apply_key(state, "q") == "abort"
+def test_row_label_keeps_sources_without_a_version_suffix():
+    row = _row("alpha", source="friend/x@v1")
+    label = loadout_wizard._row_label(row, "claude-code")
+    assert "friend/x@v1" in label
 
 
-def test_select_rows_falls_back_when_termios_setup_fails(monkeypatch):
-    rows = [_row("alpha")]
-    monkeypatch.setattr(sys.stdin, "isatty", lambda: True)
-
-    def boom(fd):
-        raise OSError("not a tty")
-
-    monkeypatch.setattr(termios, "tcgetattr", boom)
-    called = []
-    monkeypatch.setattr(loadout_wizard, "_selection_loop", lambda rs: called.append(rs))
-    loadout_wizard._select_rows(rows)
-    assert called == [rows]
+def test_row_label_no_badge_when_a_harness_is_chosen():
+    row = _row("alpha", harnesses=("claude-code", "codex"))
+    label = loadout_wizard._row_label(row, "claude-code")
+    assert "[" not in label
 
 
-def test_interactive_select_applies_scripted_keys(monkeypatch):
-    # Isolate the state machine + rendering shell from the real terminal:
-    # fake the termios setup/teardown calls the shell makes so this runs
-    # under plain pytest (no pty), and script _getkey with a fixed sequence.
-    monkeypatch.setattr(sys.stdin, "fileno", lambda: 0)
-    monkeypatch.setattr(termios, "tcgetattr", lambda fd: "orig-attrs")
-    monkeypatch.setattr(termios, "tcsetattr", lambda fd, when, attrs: None)
-    monkeypatch.setattr(loadout_wizard.tty, "setcbreak", lambda fd: None)
-    rows = [_row("alpha"), _row("beta")]
-    keys = iter(["down", "space", "enter"])
-    monkeypatch.setattr(loadout_wizard, "_getkey", lambda: next(keys))
-    loadout_wizard._interactive_select(rows)
-    assert rows[0].selected is False
-    assert rows[1].selected is True
+def test_row_label_lists_one_or_two_harnesses_when_none_chosen():
+    row1 = _row("alpha", harnesses=("claude-code",))
+    row2 = _row("beta", harnesses=("claude-code", "codex"))
+    assert "[claude-code]" in loadout_wizard._row_label(row1, None)
+    assert "[claude-code, codex]" in loadout_wizard._row_label(row2, None)
 
 
-def test_interactive_select_abort_raises_exit(monkeypatch):
-    monkeypatch.setattr(sys.stdin, "fileno", lambda: 0)
-    monkeypatch.setattr(termios, "tcgetattr", lambda fd: "orig-attrs")
-    monkeypatch.setattr(termios, "tcsetattr", lambda fd, when, attrs: None)
-    monkeypatch.setattr(loadout_wizard.tty, "setcbreak", lambda fd: None)
-    rows = [_row("alpha")]
-    monkeypatch.setattr(loadout_wizard, "_getkey", lambda: "q")
-    with pytest.raises(loadout_wizard.typer.Exit) as excinfo:
-        loadout_wizard._interactive_select(rows)
-    assert excinfo.value.exit_code == 0
+def test_row_label_compact_badge_for_more_than_two_harnesses():
+    row = _row("alpha", harnesses=("claude-code", "codex", "pi", "gemini"))
+    label = loadout_wizard._row_label(row, None)
+    assert "[claude-code +3]" in label
+
+
+def test_label_width_floors_at_24_and_caps_at_34():
+    short_rows = [_row("a"), _row("bb")]
+    assert loadout_wizard._label_width(short_rows) == 24
+    long_rows = [_row("a" * 40)]
+    assert loadout_wizard._label_width(long_rows) == 34
+    mid_rows = [_row("a" * 28)]
+    assert loadout_wizard._label_width(mid_rows) == 28
+    assert loadout_wizard._label_width([]) == 24
 
 
 def test_non_tty_falls_back_to_plain_create(wizard_env, monkeypatch):
