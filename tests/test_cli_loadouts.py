@@ -70,7 +70,10 @@ def test_create_posts_and_prints_the_ref(signed_in, api):
         app, ["loadout", "create", "textbook", "--name", "Textbook", "--description", "d"]
     )
     assert result.exit_code == 0
-    assert "drew/textbook" in result.output
+    assert "Created drew/textbook (private)" in result.output
+    assert "contents: empty, no revisions yet" in result.output
+    assert "drskill loadout publish drew/textbook <manifest.json>" in result.output
+    assert "numbered revision" in result.output
     assert calls[0]["method"] == "POST"
     assert calls[0]["json_body"] == {"loadout": {"slug": "textbook", "name": "Textbook", "description": "d"}}
 

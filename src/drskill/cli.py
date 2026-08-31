@@ -1067,7 +1067,14 @@ def create(
         _echo_service_error(err)
         raise typer.Exit(1)
     loadout = data["loadout"]
-    typer.echo(f"Created {loadout['owner']}/{loadout['slug']} ({loadout['visibility']})")
+    ref = f"{loadout['owner']}/{loadout['slug']}"
+    typer.echo(f"Created {ref} ({loadout['visibility']})")
+    typer.echo(f"  name: {loadout.get('name') or ''}")
+    typer.echo("  contents: empty, no revisions yet")
+    typer.echo("")
+    typer.echo("Publish your first revision with:")
+    typer.echo(f"  drskill loadout publish {ref} <manifest.json>")
+    typer.echo("Each publish adds a numbered revision that never changes after upload.")
 
 
 @loadout_app.command("show")
