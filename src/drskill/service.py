@@ -54,14 +54,34 @@ SUCCESS_PAGE = b"""<!DOCTYPE html>
 
 
 class ServiceError(Exception):
-    def __init__(self, code: str, message: str):
+    def __init__(self, code: str, message: str, details: dict | None = None):
         super().__init__(message)
         self.code = code
         self.message = message
+        self.details = details
 
 
 def service_url() -> str:
     return os.environ.get("DRSKILL_SERVICE_URL", DEFAULT_SERVICE_URL).rstrip("/")
+
+
+def _sorted_deep(node):
+    if isinstance(node, dict):
+        return {key: _sorted_deep(node[key]) for key in sorted(node)}
+    if isinstance(node, list):
+        return [_sorted_deep(item) for item in node]
+    return node
+
+
+def canonical_manifest(manifest: dict) -> tuple[str, str]:
+    """Mirror the server's Loadouts::CanonicalizeRevision byte-for-byte:
+    drop any client runtime_hash, sort object keys recursively, emit compact
+    UTF-8 JSON, and hash it. Verified against the Rails implementation by
+    tests/fixtures/manifests/basic.canonical.json."""
+    working = {key: value for key, value in manifest.items() if key != "runtime_hash"}
+    canonical = json.dumps(_sorted_deep(working), ensure_ascii=False, separators=(",", ":"))
+    digest = hashlib.sha256(canonical.encode()).hexdigest()
+    return canonical, f"sha256:{digest}"
 
 
 def _home() -> Path:
@@ -101,7 +121,8 @@ def api_request(
     token: str | None = None,
     json_body: dict | None = None,
     base_url: str | None = None,
-) -> dict:
+    raw: bool = False,
+) -> dict | str:
     base = base_url or service_url()
     data = json.dumps(json_body).encode() if json_body is not None else None
     request = urllib.request.Request(f"{base}{path}", data=data, method=method)
@@ -114,9 +135,9 @@ def api_request(
         with urllib.request.urlopen(request, timeout=15) as response:
             body = response.read().decode()
     except urllib.error.HTTPError as error:
-        raw = error.read().decode(errors="replace")
+        raw_error = error.read().decode(errors="replace")
         try:
-            parsed = json.loads(raw)
+            parsed = json.loads(raw_error)
         except json.JSONDecodeError:
             raise ServiceError("http_error", f"HTTP {error.code}") from None
         envelope = parsed.get("error") if isinstance(parsed, dict) else None
@@ -124,9 +145,12 @@ def api_request(
         raise ServiceError(
             envelope.get("code", "http_error"),
             envelope.get("message", f"HTTP {error.code}"),
+            details=envelope.get("details"),
         ) from None
     except urllib.error.URLError as error:
         raise ServiceError("connection_error", f"Could not reach {base}: {error.reason}") from None
+    if raw:
+        return body
     return json.loads(body) if body else {}
 
 
