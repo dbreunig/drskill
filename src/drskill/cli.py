@@ -961,19 +961,32 @@ def init(root: Path = typer.Option(Path("."), "--root", hidden=True)) -> None:
 def login() -> None:
     """Sign in to the drskill service via your browser."""
     base = service.service_url()
-    typer.echo(f"Opening your browser to sign in at {base}...")
-    try:
-        token, handle = service.browser_login()
-    except service.ServiceError as err:
-        typer.echo(f"Browser sign-in unavailable ({err.message}).")
-        typer.echo("Create a token at Settings → API tokens, then paste it below.")
+
+    def paste_flow() -> tuple[str, str]:
+        typer.echo(f"Create a token at {base}/settings/api_tokens, then paste it below.")
         token = typer.prompt("API token", hide_input=True).strip()
         try:
             identity = service.api_request("GET", "/api/v1/identity", token=token)
         except service.ServiceError as verify_err:
             typer.echo(f"Token rejected: {verify_err.message}")
             raise typer.Exit(1)
-        handle = identity["user"]["handle"]
+        return token, identity["user"]["handle"]
+
+    if os.environ.get("SSH_CONNECTION") or os.environ.get("SSH_TTY"):
+        # The loopback flow cannot work over SSH: the approve redirect goes to
+        # 127.0.0.1 on the machine running the browser, not this one.
+        typer.echo("SSH session detected; the browser flow needs a local browser.")
+        token, handle = paste_flow()
+    else:
+        typer.echo(f"Opening your browser to sign in at {base}...")
+        try:
+            token, handle = service.browser_login()
+        except KeyboardInterrupt:
+            typer.echo("")
+            token, handle = paste_flow()
+        except service.ServiceError as err:
+            typer.echo(f"Browser sign-in unavailable ({err.message}).")
+            token, handle = paste_flow()
     service.save_credentials(base, token)
     typer.echo(f"✓ Signed in as {handle}")
 

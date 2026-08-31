@@ -112,3 +112,34 @@ def test_logout_deletes_credentials_even_when_revoke_fails(tmp_path, monkeypatch
     result = runner.invoke(app, ["logout"], env=env)
     assert result.exit_code == 0
     assert runner.invoke(app, ["whoami"], env=env).exit_code == 1
+
+
+def test_login_over_ssh_skips_the_browser_flow(tmp_path, monkeypatch):
+    def exploding_browser_login(**kw):
+        raise AssertionError("browser_login must not be called over SSH")
+
+    monkeypatch.setattr(service, "browser_login", exploding_browser_login)
+    monkeypatch.setattr(
+        service, "api_request",
+        lambda *a, **kw: {"user": {"handle": "drew"}, "token": {"name": "pasted"}},
+    )
+    env = env_for(tmp_path)
+    env["SSH_CONNECTION"] = "10.0.0.1 50000 10.0.0.2 22"
+    result = runner.invoke(app, ["login"], env=env, input="drsk_pasted\n")
+    assert result.exit_code == 0
+    assert "SSH session" in result.output
+    assert "Signed in as drew" in result.output
+
+
+def test_login_ctrl_c_during_browser_wait_falls_back_to_paste(tmp_path, monkeypatch):
+    def interrupted_browser_login(**kw):
+        raise KeyboardInterrupt
+
+    monkeypatch.setattr(service, "browser_login", interrupted_browser_login)
+    monkeypatch.setattr(
+        service, "api_request",
+        lambda *a, **kw: {"user": {"handle": "drew"}, "token": {"name": "pasted"}},
+    )
+    result = runner.invoke(app, ["login"], env=env_for(tmp_path), input="drsk_pasted\n")
+    assert result.exit_code == 0
+    assert "Signed in as drew" in result.output
