@@ -74,10 +74,20 @@ def test_global_mode_ignores_project(tmp_path):
     assert r.exit_code == 0
 
 
-def test_bare_invocation_shows_usage_not_traceback(tmp_path):
+def test_bare_invocation_prints_help(tmp_path):
     r = runner.invoke(app, [], env=env_for(tmp_path))
-    assert r.exit_code == 2
+    assert r.exit_code == 2  # click's no-command exit code; help text, no error box
+    assert "Usage" in r.output
+    assert "Commands" in r.output
+    assert "Missing command" not in r.output
     assert "Traceback" not in r.output
+
+
+def test_bare_loadout_invocation_prints_help(tmp_path):
+    r = runner.invoke(app, ["loadout"], env=env_for(tmp_path))
+    assert r.exit_code == 2
+    assert "Usage" in r.output
+    assert "Missing command" not in r.output
 
 
 def test_malformed_config_reports_clean_error_not_traceback(tmp_path):

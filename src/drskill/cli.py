@@ -31,8 +31,8 @@ description_overlap = 0.6   # cosine similarity that clusters descriptions
 generic_min_distinct_tokens = 2  # fewer distinctive words than this is too vague
 """
 
-app = typer.Typer(add_completion=False, help="brew doctor for your agent's skill loadout")
-loadout_app = typer.Typer(add_completion=False, help="Manage loadouts on the drskill service")
+app = typer.Typer(add_completion=False, no_args_is_help=True, help="brew doctor for your agent's skill loadout")
+loadout_app = typer.Typer(add_completion=False, no_args_is_help=True, help="Manage loadouts on the drskill service")
 app.add_typer(loadout_app, name="loadout")
 console = Console()
 
