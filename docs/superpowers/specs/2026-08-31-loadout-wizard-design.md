@@ -212,3 +212,20 @@ of feedback, which revise the decisions above:
    mode with no new dependency; when raw mode is unavailable (non-POSIX or
    odd terminals), the wizard falls back to the existing numbered prompt
    loop automatically.
+
+## Third walk-through revisions (2026-08-31)
+
+6. **questionary for all interaction (new dependency, approved).** The
+   harness question and the skill list both become arrow-driven questionary
+   widgets: `select` for the harness (choices plus "All harnesses"),
+   `checkbox` for skills (space toggles, enter accepts, pre-checked
+   project-scope rows, real separators for the Project scope and User scope
+   sections). This replaces the hand-rolled termios selector, its state
+   machine, and the numbered prompt loop. Dependencies added: questionary
+   (with prompt_toolkit and wcwidth), all pure Python.
+7. **Readability pass.** Bold stage headings with blank lines between
+   stages; the skill name in a fixed aligned column; sources dim with the
+   `==version` dropped from the list view (kept in the summary); badges
+   dropped entirely when a single harness was chosen and rendered compact
+   and dim (`[claude-code +8]`) when "all harnesses" is selected; summary
+   line "Summary — N entries, M local-only"; result lines prefixed with ✓.
