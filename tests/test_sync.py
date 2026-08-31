@@ -86,6 +86,19 @@ def test_mint_events_uuids_are_unique_per_event(home):
     assert len(set(ids)) == 2
 
 
+def test_mint_events_caps_note_length_at_the_server_limit(home):
+    long_note = "n" * 1500
+    events, _ = sync.mint_events([ack(FP_A, note=long_note)], [])
+    minted_note = events[0]["note"]
+    assert len(minted_note) == 1000
+    assert long_note.startswith(minted_note)
+
+
+def test_mint_events_note_none_stays_none(home):
+    events, _ = sync.mint_events([ack(FP_A, note=None)], [])
+    assert events[0]["note"] is None
+
+
 def test_apply_remote_appends_and_removes_preserving_other_keys(home, tmp_path):
     ledger_file = tmp_path / ".drskill.toml"
     ledger_file.write_text(

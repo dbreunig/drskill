@@ -74,13 +74,18 @@ def mint_events(acks: list[Ack], base_fingerprints: list[str]) -> tuple[list[dic
             dt.datetime.combine(ack.date, dt.time.min, dt.timezone.utc).strftime("%Y-%m-%dT%H:%M:%SZ")
             if ack.date else _now_iso()
         )
+        # Mirror the server's 1000-char Acknowledgments::Ingest cap: a
+        # locally-written long note must never reach a batch the server
+        # atomically 422s, which would otherwise wedge the pending queue
+        # (same event id, forever rejected) until sync.toml is hand-edited.
+        note = ack.note[:1000] if ack.note else None
         events.append({
             "client_event_id": str(uuid.uuid4()),
             "fingerprint": fingerprint,
             "action": "acknowledged",
             "check_id": ack.check,
             "skill_identity": ",".join(ack.skills) or None,
-            "note": ack.note,
+            "note": note,
             "client_recorded_at": recorded,
         })
     for fingerprint in base - set(current):
