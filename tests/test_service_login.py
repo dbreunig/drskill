@@ -105,6 +105,28 @@ def test_browser_login_completes_the_loopback_flow(fake_service):
     assert b"Signed in to drskill" in captured_body[0]
 
 
+def test_browser_login_prints_the_full_url_when_the_browser_does_not_open(fake_service, capsys):
+    captured_urls: list[str] = []
+
+    def headless_browser(url):
+        captured_urls.append(url)
+        # No real browser to drive the flow, so complete it directly, the
+        # way a user copying the printed URL into another machine would.
+        urllib.request.urlopen(url, timeout=10).read()
+        return False
+
+    token, handle = service.browser_login(
+        base_url=fake_service.url, open_browser=headless_browser
+    )
+    assert token == "drsk_fake"
+    assert handle == "drew"
+    out = capsys.readouterr().out
+    assert captured_urls[0] in out
+    assert "port=" in out
+    assert "state=" in out
+    assert "challenge=" in out
+
+
 def test_browser_login_times_out_when_nothing_calls_back(fake_service):
     with pytest.raises(service.ServiceError) as excinfo:
         service.browser_login(

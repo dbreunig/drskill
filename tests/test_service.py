@@ -47,6 +47,15 @@ class _StubHandler(BaseHTTPRequestHandler):
         if self.path == "/ok":
             body = json.dumps({"user": {"handle": "drew"}}).encode()
             self.send_response(200)
+        elif self.path == "/bad_error_shape":
+            # A non-object JSON error body (e.g. a bare array), which
+            # api_request must not crash on when reaching for .get("error").
+            body = json.dumps(["oops"]).encode()
+            self.send_response(400)
+        elif self.path == "/invalid_utf8_error":
+            # Not valid JSON at all, and not valid UTF-8 either.
+            body = b"\xff\xfe not json"
+            self.send_response(400)
         else:
             body = json.dumps(
                 {"error": {"code": "not_found", "message": "Not found."}}
@@ -87,3 +96,17 @@ def test_api_request_connection_error():
     with pytest.raises(service.ServiceError) as excinfo:
         service.api_request("GET", "/x", base_url="http://127.0.0.1:1")
     assert excinfo.value.code == "connection_error"
+
+
+def test_api_request_falls_back_on_non_object_error_body(stub_server):
+    with pytest.raises(service.ServiceError) as excinfo:
+        service.api_request("GET", "/bad_error_shape", base_url=stub_server)
+    assert excinfo.value.code == "http_error"
+    assert "400" in excinfo.value.message
+
+
+def test_api_request_falls_back_on_undecodable_error_body(stub_server):
+    with pytest.raises(service.ServiceError) as excinfo:
+        service.api_request("GET", "/invalid_utf8_error", base_url=stub_server)
+    assert excinfo.value.code == "http_error"
+    assert "400" in excinfo.value.message

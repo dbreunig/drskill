@@ -77,8 +77,10 @@ def save_credentials(url: str, token: str) -> None:
     path = credentials_path()
     path.parent.mkdir(parents=True, exist_ok=True)
     os.chmod(path.parent, 0o700)
-    path.write_text(tomli_w.dumps({"service_url": url, "token": token}))
-    os.chmod(path, 0o600)
+    fd = os.open(path, os.O_WRONLY | os.O_CREAT | os.O_TRUNC, 0o600)
+    with os.fdopen(fd, "w") as f:
+        f.write(tomli_w.dumps({"service_url": url, "token": token}))
+    os.chmod(path, 0o600)  # correct pre-existing files regardless of creation mode
 
 
 def load_credentials() -> dict | None:
@@ -112,15 +114,17 @@ def api_request(
         with urllib.request.urlopen(request, timeout=15) as response:
             body = response.read().decode()
     except urllib.error.HTTPError as error:
-        raw = error.read().decode()
+        raw = error.read().decode(errors="replace")
         try:
-            envelope = json.loads(raw).get("error") or {}
-            raise ServiceError(
-                envelope.get("code", "http_error"),
-                envelope.get("message", f"HTTP {error.code}"),
-            ) from None
+            parsed = json.loads(raw)
         except json.JSONDecodeError:
             raise ServiceError("http_error", f"HTTP {error.code}") from None
+        envelope = parsed.get("error") if isinstance(parsed, dict) else None
+        envelope = envelope or {}
+        raise ServiceError(
+            envelope.get("code", "http_error"),
+            envelope.get("message", f"HTTP {error.code}"),
+        ) from None
     except urllib.error.URLError as error:
         raise ServiceError("connection_error", f"Could not reach {base}: {error.reason}") from None
     return json.loads(body) if body else {}
@@ -150,11 +154,13 @@ def browser_login(
             params = urllib.parse.parse_qs(parsed.query)
             received["grant"] = (params.get("grant") or [None])[0]
             received["state"] = (params.get("state") or [None])[0]
+            # Signal completion before writing the response body: a dropped
+            # connection while writing must not cause a spurious timeout.
+            done.set()
             self.send_response(200)
             self.send_header("Content-Type", "text/html; charset=utf-8")
             self.end_headers()
             self.wfile.write(SUCCESS_PAGE)
-            done.set()
 
         def log_message(self, *args):
             pass
@@ -167,7 +173,12 @@ def browser_login(
         authorize = f"{base}/cli/authorize?" + urllib.parse.urlencode(
             {"port": port, "state": state, "challenge": challenge}
         )
-        open_browser(authorize)
+        opened = open_browser(authorize)
+        if opened is False:
+            print(
+                "Could not open a browser. Visit this URL to continue:\n"
+                f"  {authorize}"
+            )
         if not done.wait(timeout):
             raise ServiceError("timeout", "Timed out waiting for browser authorization.")
     finally:

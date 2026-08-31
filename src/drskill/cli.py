@@ -935,7 +935,7 @@ def init(root: Path = typer.Option(Path("."), "--root", hidden=True)) -> None:
 def login() -> None:
     """Sign in to the drskill service via your browser."""
     base = service.service_url()
-    typer.echo(f"Opening {base}/cli/authorize in your browser...")
+    typer.echo(f"Opening your browser to sign in at {base}...")
     try:
         token, handle = service.browser_login()
     except service.ServiceError as err:
@@ -959,8 +959,9 @@ def whoami() -> None:
     if not creds:
         typer.echo("Not signed in. Run: drskill login")
         raise typer.Exit(1)
+    base = creds.get("service_url") or service.service_url()
     try:
-        identity = service.api_request("GET", "/api/v1/identity", token=creds["token"])
+        identity = service.api_request("GET", "/api/v1/identity", token=creds["token"], base_url=base)
     except service.ServiceError as err:
         typer.echo(f"Not signed in ({err.message}). Run: drskill login")
         raise typer.Exit(1)
@@ -976,8 +977,9 @@ def logout() -> None:
     if not creds:
         typer.echo("Not signed in.")
         return
+    base = creds.get("service_url") or service.service_url()
     try:
-        service.api_request("DELETE", "/api/v1/token", token=creds["token"])
+        service.api_request("DELETE", "/api/v1/token", token=creds["token"], base_url=base)
         typer.echo("Token revoked on the server.")
     except service.ServiceError as err:
         typer.echo(f"Could not revoke on the server ({err.message}); removing local credentials anyway.")
