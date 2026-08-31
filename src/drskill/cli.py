@@ -1051,11 +1051,28 @@ def create(
     slug: str = typer.Argument(..., help="URL slug for the new loadout"),
     name: str | None = typer.Option(None, "--name", help="display name (defaults from the slug)"),
     description: str | None = typer.Option(None, "--description", help="optional description"),
+    from_project: bool = typer.Option(False, "--from-project",
+        help="pick the contents interactively from this project's active skills"),
+    harness: str | None = typer.Option(None, "--harness",
+        help="with --from-project: only list skills active in this harness"),
+    manifest_out: Path | None = typer.Option(None, "--manifest-out",
+        help="with --from-project: also save the generated manifest to a file"),
 ) -> None:
     """Create a private loadout on the drskill service."""
+    if not from_project and (harness is not None or manifest_out is not None):
+        typer.echo("--harness and --manifest-out require --from-project.")
+        raise typer.Exit(1)
     creds, base = _service_credentials()
     if name is None:
         name = slug.replace("-", " ").title()
+    if from_project:
+        if harness is not None:
+            _validate_harness(harness)
+        from drskill import loadout_wizard
+
+        loadout_wizard.run(slug, name, description, harness, manifest_out,
+                           creds, base, _home())
+        return
     body: dict = {"loadout": {"slug": slug, "name": name}}
     if description is not None:
         body["loadout"]["description"] = description
