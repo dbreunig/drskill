@@ -196,3 +196,19 @@ of feedback, which revise the decisions above:
    badges across the group, sits in the project section when any member is
    project scope (and is preselected accordingly), and publishes one entry
    from its best member, preferring a tracked source over local-only.
+
+## Second walk-through revisions (2026-08-31)
+
+4. **Merge on name alone.** The provenance-keyed dedup still showed the same
+   skill twice when a local copy and a plugin-delivered copy coexist. Rows
+   now merge on (kind, normalized name). The representative, which is what
+   gets published, is a tracked member when the group has one (preferring a
+   member with a provenance source), else the local copy. Badges union
+   across the whole group. Rationale: a loadout wants one entry per skill,
+   and the server rejects duplicate selectors anyway.
+5. **Arrow-key selection.** The list is navigated with up/down arrows or
+   j/k, space toggles, `a`/`n` select all/none, enter accepts, q aborts.
+   Long lists render a scrolling window. Implemented on stdlib termios raw
+   mode with no new dependency; when raw mode is unavailable (non-POSIX or
+   odd terminals), the wizard falls back to the existing numbered prompt
+   loop automatically.
