@@ -86,20 +86,23 @@ def fake_service():
     fake.stop()
 
 
-def browser_that_follows_redirects(url):
-    urllib.request.urlopen(url, timeout=10).read()
-    return True
-
-
 def test_browser_login_completes_the_loopback_flow(fake_service):
+    captured_body: list[bytes] = []
+
+    def browser_that_captures_the_callback_body(url):
+        captured_body.append(urllib.request.urlopen(url, timeout=10).read())
+        return True
+
     token, handle = service.browser_login(
-        base_url=fake_service.url, open_browser=browser_that_follows_redirects
+        base_url=fake_service.url, open_browser=browser_that_captures_the_callback_body
     )
     assert token == "drsk_fake"
     assert handle == "drew"
     # The exchange carried the verifier whose hash matches the challenge.
     assert len(fake_service.exchanges) == 1
     assert "verifier" in fake_service.exchanges[0]
+    # The loopback callback served a styled success page, not bare HTML.
+    assert b"Signed in to drskill" in captured_body[0]
 
 
 def test_browser_login_times_out_when_nothing_calls_back(fake_service):

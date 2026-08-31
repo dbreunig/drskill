@@ -26,6 +26,33 @@ DEFAULT_SERVICE_URL = "http://localhost:3000"
 LOGIN_TIMEOUT_SECONDS = 120.0
 
 
+SUCCESS_PAGE = b"""<!DOCTYPE html>
+<html>
+<head>
+<meta charset="utf-8">
+<title>drskill</title>
+<style>
+  body { margin: 0; display: flex; align-items: center; justify-content: center;
+         min-height: 100vh; background: #f9fafb; color: #111827;
+         font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif; }
+  main { text-align: center; padding: 3rem; background: white;
+         border: 1px solid #e5e7eb; border-radius: 0.75rem; }
+  .check { font-size: 2.5rem; }
+  h1 { font-size: 1.25rem; margin: 0.75rem 0 0.25rem; }
+  p { margin: 0; color: #6b7280; font-size: 0.9rem; }
+</style>
+</head>
+<body>
+<main>
+  <div class="check">&#10003;</div>
+  <h1>Signed in to drskill</h1>
+  <p>You can close this tab and return to your terminal.</p>
+</main>
+</body>
+</html>
+"""
+
+
 class ServiceError(Exception):
     def __init__(self, code: str, message: str):
         super().__init__(message)
@@ -124,11 +151,9 @@ def browser_login(
             received["grant"] = (params.get("grant") or [None])[0]
             received["state"] = (params.get("state") or [None])[0]
             self.send_response(200)
-            self.send_header("Content-Type", "text/html")
+            self.send_header("Content-Type", "text/html; charset=utf-8")
             self.end_headers()
-            self.wfile.write(
-                b"<html><body><p>You're signed in &mdash; you can close this tab.</p></body></html>"
-            )
+            self.wfile.write(SUCCESS_PAGE)
             done.set()
 
         def log_message(self, *args):
