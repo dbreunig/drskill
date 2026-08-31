@@ -13,9 +13,9 @@ runner = CliRunner()
 
 
 def contributor(name, scope="project", prov_kind="gh-skill", source="friend/x@v1",
-                harnesses=("claude-code",), system=False):
+                harnesses=("claude-code",), system=False, content_hash=None, id=None):
     return Contributor(
-        id=f"/tmp/{name}",
+        id=id or f"/tmp/{name}",
         kind="skill",
         name=name,
         source=Provenance(kind=prov_kind, source=source),
@@ -26,7 +26,7 @@ def contributor(name, scope="project", prov_kind="gh-skill", source="friend/x@v1
             for h in harnesses
         ],
         token_cost=TokenCost(catalog_tokens=1, body_tokens=1),
-        content_hash="sha256:" + "ab" * 32,
+        content_hash=content_hash or "sha256:" + "ab" * 32,
         system=system,
     )
 
@@ -255,6 +255,110 @@ def test_unknown_harness_through_wizard(wizard_env):
     assert result.exit_code == 1
     assert "unknown harness" in result.output
     assert "valid ids" in result.output
+
+
+def test_dedup_tracked_across_harnesses(wizard_env, monkeypatch):
+    # Same tracked skill materialized once per harness (e.g. via a plugin
+    # install): same name + same provenance source, distinct ids/paths.
+    calls = wizard_env
+    set_world(monkeypatch, make_world(
+        contributor("alpha", id="/tmp/alpha-cc", harnesses=("claude-code",)),
+        contributor("alpha", id="/tmp/alpha-codex", harnesses=("codex",)),
+    ))
+    result = runner.invoke(app, ["loadout", "create", "pack"],
+                           input="a\n\ny\n")  # keep all harnesses, accept, confirm
+    assert result.exit_code == 0, result.output
+    assert "[claude-code, codex]" in result.output
+    entries = calls[1]["json_body"]["manifest"]["entries"]
+    assert len(entries) == 1
+    assert entries[0]["name"] == "alpha"
+
+
+def test_dedup_local_only_same_hash_merges(wizard_env, monkeypatch):
+    calls = wizard_env
+    set_world(monkeypatch, make_world(
+        contributor("untracked", id="/tmp/untracked-a", prov_kind="unmanaged", source=None,
+                    content_hash="sha256:" + "11" * 32),
+        contributor("untracked", id="/tmp/untracked-b", prov_kind="unmanaged", source=None,
+                    content_hash="sha256:" + "11" * 32),
+    ))
+    result = runner.invoke(app, ["loadout", "create", "pack"], input="\ny\n")
+    assert result.exit_code == 0, result.output
+    entries = calls[1]["json_body"]["manifest"]["entries"]
+    assert len(entries) == 1
+
+
+def test_dedup_local_only_different_hash_keeps_separate_rows(wizard_env, monkeypatch):
+    calls = wizard_env
+    set_world(monkeypatch, make_world(
+        contributor("untracked", id="/tmp/untracked-a", prov_kind="unmanaged", source=None,
+                    content_hash="sha256:" + "11" * 32),
+        contributor("untracked", id="/tmp/untracked-b", prov_kind="unmanaged", source=None,
+                    content_hash="sha256:" + "22" * 32),
+    ))
+    result = runner.invoke(app, ["loadout", "create", "pack"], input="\ny\n")
+    assert result.exit_code == 0, result.output
+    entries = calls[1]["json_body"]["manifest"]["entries"]
+    assert len(entries) == 2
+
+
+def test_dedup_merges_scope_prefers_project(wizard_env, monkeypatch):
+    calls = wizard_env
+    set_world(monkeypatch, make_world(
+        contributor("alpha", id="/tmp/alpha-user", scope="user", harnesses=("claude-code",)),
+        contributor("alpha", id="/tmp/alpha-project", scope="project", harnesses=("codex",)),
+    ))
+    result = runner.invoke(app, ["loadout", "create", "pack"],
+                           input="a\n\ny\n")  # keep all harnesses, accept, confirm
+    assert result.exit_code == 0, result.output
+    assert "Project scope" in result.output
+    assert "User scope" not in result.output  # the one merged row is project-scoped
+    entries = calls[1]["json_body"]["manifest"]["entries"]
+    assert len(entries) == 1
+
+
+def test_harness_step_prompts_when_multiple_harnesses(wizard_env, monkeypatch):
+    calls = wizard_env
+    set_world(monkeypatch, make_world(
+        contributor("cc-skill", harnesses=("claude-code",)),
+        contributor("codex-skill", harnesses=("codex",)),
+    ))
+    result = runner.invoke(app, ["loadout", "create", "pack"],
+                           input="1\n\ny\n")  # pick the sorted-first harness, accept, confirm
+    assert result.exit_code == 0, result.output
+    assert "Which harness's skills should this loadout draw from?" in result.output
+    entries = calls[1]["json_body"]["manifest"]["entries"]
+    assert [entry["name"] for entry in entries] == ["cc-skill"]
+
+
+def test_harness_step_all_keeps_everything(wizard_env, monkeypatch):
+    calls = wizard_env
+    set_world(monkeypatch, make_world(
+        contributor("cc-skill", harnesses=("claude-code",)),
+        contributor("codex-skill", harnesses=("codex",)),
+    ))
+    result = runner.invoke(app, ["loadout", "create", "pack"],
+                           input="a\n\ny\n")
+    assert result.exit_code == 0, result.output
+    names = {entry["name"] for entry in calls[1]["json_body"]["manifest"]["entries"]}
+    assert names == {"cc-skill", "codex-skill"}
+
+
+def test_harness_step_absent_for_single_harness(wizard_env, monkeypatch):
+    set_world(monkeypatch, make_world(contributor("alpha", harnesses=("claude-code",))))
+    result = runner.invoke(app, ["loadout", "create", "pack"], input="\ny\n")
+    assert result.exit_code == 0, result.output
+    assert "Which harness's skills should this loadout draw from?" not in result.output
+
+
+def test_scan_status_spinner_does_not_crash(wizard_env, monkeypatch):
+    # The scan step drives a rich console.status spinner instead of a static
+    # line; this exercises that path end to end under CliRunner's captured,
+    # non-tty stdout.
+    set_world(monkeypatch, make_world(contributor("alpha")))
+    result = runner.invoke(app, ["loadout", "create", "pack"], input="\ny\n")
+    assert result.exit_code == 0, result.output
+    assert "Published revision 1" in result.output
 
 
 def test_non_tty_falls_back_to_plain_create(wizard_env, monkeypatch):

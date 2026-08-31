@@ -14,9 +14,18 @@ from dataclasses import dataclass
 from pathlib import Path
 
 import typer
+from rich.console import Console
+from rich.markup import escape
 
 from drskill import manifest_build, pipeline, service
 from drskill.models import Contributor
+
+# The wizard's own Console instance, not cli.py's: cli.py imports this module
+# lazily inside `create` (to avoid a cycle at module-import time), so a
+# top-level `from drskill.cli import console` here would risk a circular
+# import if cli.py is ever mid-import when this module loads. A private
+# instance costs nothing and sidesteps the question entirely.
+console = Console()
 
 
 def _stdin_is_tty() -> bool:
@@ -25,7 +34,9 @@ def _stdin_is_tty() -> bool:
 
 @dataclass
 class _Row:
-    contributor: Contributor
+    contributor: Contributor  # representative: display name/source and the entry published
+    harnesses: list[str]  # union of harness ids across every merged member
+    scope: str  # merged section scope: "project" if any member is project-scoped
     selected: bool
 
 
@@ -43,13 +54,30 @@ def run(
         typer.echo("--from-project needs an interactive terminal.")
         raise typer.Exit(1)
 
-    typer.echo("Scanning the current project...")
-    # Scan ALL harnesses even when --harness filters the list: the filter
-    # narrows which rows appear, but badges must still show every harness a
-    # skill is deployed to (a harness-scoped scan would lose that).
-    world, _findings = pipeline.run_scan(Path.cwd(), home)
+    with console.status("[bold]starting[/bold]", spinner="dots") as status:
+        # Scan ALL harnesses even when --harness filters the list: the filter
+        # narrows which rows appear, but badges must still show every harness a
+        # skill is deployed to (a harness-scoped scan would lose that).
+        world, _findings = pipeline.run_scan(
+            Path.cwd(), home, progress=lambda m: status.update(f"[bold]{escape(m)}[/bold]")
+        )
 
-    rows = _build_rows(world, harness)
+    candidates = _build_rows(world)
+    if not candidates:
+        typer.echo("No skills found in this project to include.")
+        raise typer.Exit(1)
+
+    all_harnesses = sorted({h for row in candidates for h in row.harnesses})
+    if harness is not None:
+        rows = [row for row in candidates if harness in row.harnesses]
+    elif len(all_harnesses) > 1:
+        chosen = _select_harness(all_harnesses)
+        rows = candidates if chosen is None else [
+            row for row in candidates if chosen in row.harnesses
+        ]
+    else:
+        rows = candidates
+
     if not rows:
         typer.echo("No skills found in this project to include.")
         raise typer.Exit(1)
@@ -78,24 +106,80 @@ def run(
     _publish(ref, manifest, manifest_out, creds, base_url)
 
 
-def _build_rows(world, harness: str | None) -> list[_Row]:
-    contributors = [
-        c for c in world.contributors.values()
-        if not c.system
-        and (harness is None or any(d.harness == harness for d in c.deployments))
-    ]
-    contributors.sort(key=lambda c: (c.scope != "project", c.name.lower()))
-    return [_Row(contributor=c, selected=(c.scope == "project")) for c in contributors]
+def _is_tracked(c: Contributor) -> bool:
+    # Mirrors manifest_build's own local_only test: a tracked contributor has
+    # a source kind that maps to a real source type AND a source string.
+    return manifest_build._SOURCE_TYPES.get(c.source.kind) is not None and bool(c.source.source)
+
+
+def _group_key(c: Contributor) -> tuple:
+    # Resolution collapses skills only when harnesses share the same file;
+    # plugin installs materialize per-harness copies with distinct paths, so
+    # the same skill at the same version appears once per harness. Group
+    # those back together before rendering: tracked skills merge on (kind,
+    # normalized name, provenance source string, which carries the version);
+    # local-only skills merge on (kind, normalized name, content hash).
+    name = manifest_build.normalize_name(c.name)
+    if _is_tracked(c):
+        return ("tracked", c.kind, name, c.source.source)
+    return ("local", c.kind, name, c.content_hash)
+
+
+def _pick_representative(members: list[Contributor]) -> Contributor:
+    # Prefer a tracked member over local-only when the group has one; ties
+    # break on id for determinism.
+    tracked = [m for m in members if _is_tracked(m)]
+    pool = tracked or members
+    return sorted(pool, key=lambda m: m.id)[0]
+
+
+def _build_rows(world) -> list[_Row]:
+    groups: dict[tuple, list[Contributor]] = {}
+    order: list[tuple] = []
+    for c in world.contributors.values():
+        if c.system:
+            continue
+        key = _group_key(c)
+        if key not in groups:
+            groups[key] = []
+            order.append(key)
+        groups[key].append(c)
+
+    rows = []
+    for key in order:
+        members = groups[key]
+        representative = _pick_representative(members)
+        harnesses = sorted({d.harness for m in members for d in m.deployments})
+        scope = "project" if any(m.scope == "project" for m in members) else "user"
+        rows.append(
+            _Row(contributor=representative, harnesses=harnesses, scope=scope,
+                 selected=(scope == "project"))
+        )
+    rows.sort(key=lambda row: (row.scope != "project", row.contributor.name.lower()))
+    return rows
+
+
+def _select_harness(harnesses: list[str]) -> str | None:
+    typer.echo("Which harness's skills should this loadout draw from?")
+    for index, h in enumerate(harnesses, start=1):
+        typer.echo(f"  {index}  {h}")
+    typer.echo("  a  all harnesses")
+    while True:
+        raw = typer.prompt("Choice").strip().lower()
+        if raw == "a":
+            return None
+        if raw.isdigit() and 1 <= int(raw) <= len(harnesses):
+            return harnesses[int(raw) - 1]
+        typer.echo("Enter a number from the list above, or 'a' for all harnesses.")
 
 
 def _render(rows: list[_Row]) -> None:
     current_scope = None
     for index, row in enumerate(rows, start=1):
-        if row.contributor.scope != current_scope:
-            current_scope = row.contributor.scope
+        if row.scope != current_scope:
+            current_scope = row.scope
             typer.echo(f"\n{'Project scope' if current_scope == 'project' else 'User scope'}")
-        harnesses = sorted({d.harness for d in row.contributor.deployments})
-        badge = f"  [{', '.join(harnesses)}]" if harnesses else ""
+        badge = f"  [{', '.join(row.harnesses)}]" if row.harnesses else ""
         source = row.contributor.source.source or "local only"
         mark = "x" if row.selected else " "
         typer.echo(f"  [{mark}] {index:>2}  {row.contributor.name}  ({source}){badge}")
