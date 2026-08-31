@@ -9,7 +9,7 @@ import typer
 from rich.console import Console
 from rich.markup import escape
 
-from drskill import deep, interactive, ledger, mcp_connect as mcp_connect_mod, report, state
+from drskill import deep, interactive, ledger, mcp_connect as mcp_connect_mod, report, service, state
 from drskill.ledger import Ack
 from drskill.pipeline import run_scan
 
@@ -929,3 +929,59 @@ def init(root: Path = typer.Option(Path("."), "--root", hidden=True)) -> None:
         raise typer.Exit(1)
     path.write_text(INIT_TEMPLATE)
     console.print(f"Wrote {path}")
+
+
+@app.command()
+def login() -> None:
+    """Sign in to the drskill service via your browser."""
+    base = service.service_url()
+    typer.echo(f"Opening your browser to sign in at {base}...")
+    try:
+        token, handle = service.browser_login()
+    except service.ServiceError as err:
+        typer.echo(f"Browser sign-in unavailable ({err.message}).")
+        typer.echo("Create a token at Settings → API tokens, then paste it below.")
+        token = typer.prompt("API token", hide_input=True).strip()
+        try:
+            identity = service.api_request("GET", "/api/v1/identity", token=token)
+        except service.ServiceError as verify_err:
+            typer.echo(f"Token rejected: {verify_err.message}")
+            raise typer.Exit(1)
+        handle = identity["user"]["handle"]
+    service.save_credentials(base, token)
+    typer.echo(f"✓ Signed in as {handle}")
+
+
+@app.command()
+def whoami() -> None:
+    """Show the signed-in drskill service account."""
+    creds = service.load_credentials()
+    if not creds:
+        typer.echo("Not signed in. Run: drskill login")
+        raise typer.Exit(1)
+    base = creds.get("service_url") or service.service_url()
+    try:
+        identity = service.api_request("GET", "/api/v1/identity", token=creds["token"], base_url=base)
+    except service.ServiceError as err:
+        typer.echo(f"Not signed in ({err.message}). Run: drskill login")
+        raise typer.Exit(1)
+    user = identity["user"]
+    token_name = identity.get("token", {}).get("name", "")
+    typer.echo(f"{user['handle']} (token: {token_name})")
+
+
+@app.command()
+def logout() -> None:
+    """Sign out: revoke the service token and delete local credentials."""
+    creds = service.load_credentials()
+    if not creds:
+        typer.echo("Not signed in.")
+        return
+    base = creds.get("service_url") or service.service_url()
+    try:
+        service.api_request("DELETE", "/api/v1/token", token=creds["token"], base_url=base)
+        typer.echo("Token revoked on the server.")
+    except service.ServiceError as err:
+        typer.echo(f"Could not revoke on the server ({err.message}); removing local credentials anyway.")
+    service.delete_credentials()
+    typer.echo("Signed out.")
