@@ -203,6 +203,60 @@ def test_manifest_out_writes_the_manifest(wizard_env, monkeypatch, tmp_path):
     assert json.loads(out.read_text(encoding="utf-8"))["schema_version"] == 1
 
 
+def test_manifest_out_not_written_on_decline(wizard_env, monkeypatch, tmp_path):
+    calls = wizard_env
+    set_world(monkeypatch, make_world(contributor("alpha")))
+    out = tmp_path / "m.json"
+    result = runner.invoke(
+        app, ["loadout", "create", "pack", "--from-project", "--manifest-out", str(out)],
+        input="\nn\n",
+    )
+    assert result.exit_code == 0, result.output
+    assert not out.exists()
+    assert calls == []
+
+
+def test_select_all_includes_user_scope(wizard_env, monkeypatch):
+    calls = wizard_env
+    set_world(monkeypatch, make_world(
+        contributor("proj-skill", scope="project"),
+        contributor("user-skill", scope="user"),
+    ))
+    result = runner.invoke(app, ["loadout", "create", "pack", "--from-project"],
+                           input="a\n\ny\n")  # select all, accept, confirm
+    assert result.exit_code == 0, result.output
+    names = {entry["name"] for entry in calls[1]["json_body"]["manifest"]["entries"]}
+    assert names == {"proj-skill", "user-skill"}
+
+
+def test_create_failure_stops_before_publish(wizard_env, monkeypatch):
+    set_world(monkeypatch, make_world(contributor("alpha")))
+    calls = []
+
+    def failing_create(method, path, token=None, json_body=None, base_url=None, raw=False):
+        calls.append(path)
+        raise service.ServiceError(
+            "loadout_invalid", "The loadout is invalid.", details={"slug": ["is invalid"]}
+        )
+
+    monkeypatch.setattr(service, "api_request", failing_create)
+    result = runner.invoke(app, ["loadout", "create", "pack", "--from-project"],
+                           input="\ny\n")
+    assert result.exit_code == 1
+    assert "The loadout is invalid." in result.output
+    assert "is invalid" in result.output
+    assert calls == ["/api/v1/loadouts"]
+
+
+def test_unknown_harness_through_wizard(wizard_env):
+    result = runner.invoke(
+        app, ["loadout", "create", "pack", "--from-project", "--harness", "nope"],
+    )
+    assert result.exit_code == 1
+    assert "unknown harness" in result.output
+    assert "valid ids" in result.output
+
+
 def test_non_tty_guard(wizard_env, monkeypatch):
     monkeypatch.setattr(loadout_wizard, "_stdin_is_tty", lambda: False)
     result = runner.invoke(app, ["loadout", "create", "pack", "--from-project"])

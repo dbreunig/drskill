@@ -20,7 +20,7 @@ from drskill.models import Contributor
 
 
 def _stdin_is_tty() -> bool:
-    return sys.stdin.isatty()
+    return sys.stdin.isatty() and sys.stdout.isatty()
 
 
 @dataclass
@@ -63,15 +63,16 @@ def run(
 
     manifest, notes = manifest_build.contributors_to_manifest(selected)
     _print_summary(manifest, notes)
-    if manifest_out:
-        manifest_out.write_bytes(json.dumps(manifest, indent=2).encode())
-        typer.echo(f"Wrote manifest to {manifest_out}")
 
     if not typer.confirm(
         f"Create '{slug}' and publish these "
         f"{len(manifest['entries'])} entries as revision 1?", default=False
     ):
         raise typer.Exit(0)
+
+    if manifest_out:
+        manifest_out.write_bytes(json.dumps(manifest, indent=2).encode())
+        typer.echo(f"Wrote manifest to {manifest_out}")
 
     ref = _create_loadout(slug, name, description, creds, base_url)
     _publish(ref, manifest, manifest_out, creds, base_url)
