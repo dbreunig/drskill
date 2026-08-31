@@ -61,7 +61,7 @@ def _parse_ref(ref: str) -> tuple[str, str]:
 def _echo_service_error(err: "service.ServiceError") -> None:
     typer.echo(err.message)
     for field, messages in (err.details or {}).items():
-        for message in messages:
+        for message in messages if isinstance(messages, list) else [messages]:
             typer.echo(f"  {field}: {message}")
 
 
@@ -1136,7 +1136,7 @@ def revisions(
             str(revision.get("published_at") or ""),
             "yes" if revision.get("reproducible") else "no",
         )
-    Console().print(table)
+    console.print(table)
 
 
 @loadout_app.command()
@@ -1149,7 +1149,7 @@ def publish(
     creds, base = _service_credentials()
     owner, slug = _parse_ref(ref)
     try:
-        manifest = json.loads(manifest_path.read_text())
+        manifest = json.loads(manifest_path.read_text(encoding="utf-8"))
     except (OSError, json.JSONDecodeError) as err:
         typer.echo(f"Could not read manifest: {err}")
         raise typer.Exit(1)
@@ -1178,7 +1178,7 @@ def publish(
 @loadout_app.command()
 def fetch(
     target: str = typer.Argument(..., help="owner/slug, or a bare sha256:<hash>"),
-    revision: str = typer.Argument(None, help="revision number or sha256:<hash> (with owner/slug)"),
+    revision: str | None = typer.Argument(None, help="revision number or sha256:<hash> (with owner/slug)"),
     output: Path = typer.Option(None, "-o", "--output", help="write the document to a file"),
 ) -> None:
     """Fetch a revision's canonical manifest, byte-stable."""
@@ -1188,16 +1188,23 @@ def fetch(
     else:
         owner, slug = _parse_ref(target)
         if not revision:
-            typer.echo("Provide a revision number or sha256:<hash> after owner/slug.")
+            typer.echo("Provide a revision number or sha256:<hash> after owner/slug.", err=True)
             raise typer.Exit(1)
         path = f"/api/v1/loadouts/{owner}/{slug}/revisions/{revision}"
     try:
         document = service.api_request("GET", path, token=creds["token"], base_url=base, raw=True)
     except service.ServiceError as err:
-        _echo_service_error(err)
+        typer.echo(err.message, err=True)
+        for field, messages in (err.details or {}).items():
+            for message in messages if isinstance(messages, list) else [messages]:
+                typer.echo(f"  {field}: {message}", err=True)
         raise typer.Exit(1)
     if output:
-        output.write_text(document)
+        try:
+            output.write_bytes(document.encode())
+        except OSError as err:
+            typer.echo(f"Could not write {output}: {err}", err=True)
+            raise typer.Exit(1)
         typer.echo(f"Wrote {output}")
     else:
         typer.echo(document)

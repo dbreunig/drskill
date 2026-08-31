@@ -52,6 +52,7 @@ def test_list_json_emits_the_raw_response(signed_in, api):
     calls, fake = api
     fake.response = {"loadouts": [LOADOUT]}
     result = runner.invoke(app, ["loadout", "list", "--json"])
+    assert result.exit_code == 0
     assert json.loads(result.output)["loadouts"][0]["slug"] == "textbook"
 
 
@@ -86,6 +87,18 @@ def test_create_validation_failure_prints_details(signed_in, monkeypatch):
     assert "slug: is invalid" in result.output
 
 
+def test_create_validation_failure_handles_non_list_detail_values(signed_in, monkeypatch):
+    def failing(*args, **kwargs):
+        raise service.ServiceError(
+            "loadout_invalid", "The loadout is invalid.", details={"slug": "is invalid"}
+        )
+
+    monkeypatch.setattr(service, "api_request", failing)
+    result = runner.invoke(app, ["loadout", "create", "Bad Slug", "--name", "X"])
+    assert result.exit_code == 1
+    assert "slug: is invalid" in result.output
+
+
 def test_show_prints_metadata_and_provenance(signed_in, api):
     calls, fake = api
     fake.response = {"loadout": {**LOADOUT, "forked_from": {"owner": "ann", "slug": "orig", "revision_number": 2}}}
@@ -97,9 +110,11 @@ def test_show_prints_metadata_and_provenance(signed_in, api):
 
 
 def test_show_rejects_a_bad_ref(signed_in, api):
+    calls, fake = api
     result = runner.invoke(app, ["loadout", "show", "no-slash"])
     assert result.exit_code == 1
     assert "owner/slug" in result.output
+    assert calls == []
 
 
 def test_revisions_renders_a_table(signed_in, api):
@@ -190,7 +205,19 @@ def test_fetch_bare_hash_uses_the_global_lookup(signed_in, api):
 def test_fetch_ref_without_revision_errors(signed_in, api):
     result = runner.invoke(app, ["loadout", "fetch", "drew/textbook"])
     assert result.exit_code == 1
-    assert "revision number" in result.output
+    assert "revision number" in result.stderr
+    assert "revision number" not in result.stdout
+
+
+def test_fetch_service_error_writes_to_stderr(signed_in, monkeypatch):
+    def failing(*args, **kwargs):
+        raise service.ServiceError("not_found", "Revision not found.")
+
+    monkeypatch.setattr(service, "api_request", failing)
+    result = runner.invoke(app, ["loadout", "fetch", "drew/textbook", "3"])
+    assert result.exit_code == 1
+    assert "Revision not found." in result.stderr
+    assert "Revision not found." not in result.stdout
 
 
 def test_fetch_output_writes_the_file(signed_in, api, tmp_path):
@@ -200,3 +227,22 @@ def test_fetch_output_writes_the_file(signed_in, api, tmp_path):
     result = runner.invoke(app, ["loadout", "fetch", "drew/textbook", "3", "-o", str(out)])
     assert result.exit_code == 0
     assert out.read_text() == '{"a":1}'
+
+
+def test_fetch_output_writes_bytes_with_non_ascii_content(signed_in, api, tmp_path):
+    calls, fake = api
+    fake.response = '{"name":"café"}'
+    out = tmp_path / "manifest.json"
+    result = runner.invoke(app, ["loadout", "fetch", "drew/textbook", "3", "-o", str(out)])
+    assert result.exit_code == 0
+    assert out.read_bytes() == '{"name":"café"}'.encode()
+
+
+def test_fetch_output_write_failure_reports_to_stderr(signed_in, api, tmp_path):
+    calls, fake = api
+    fake.response = '{"a":1}'
+    out = tmp_path / "missing-dir" / "manifest.json"
+    result = runner.invoke(app, ["loadout", "fetch", "drew/textbook", "3", "-o", str(out)])
+    assert result.exit_code == 1
+    assert "Could not write" in result.stderr
+    assert "Could not write" not in result.stdout
