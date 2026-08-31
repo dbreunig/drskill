@@ -20,6 +20,13 @@ from rich.markup import escape
 from drskill import manifest_build, pipeline, service
 from drskill.models import Contributor
 
+try:  # POSIX only; the wizard falls back to the numbered prompt without it.
+    import termios
+    import tty
+except ImportError:  # pragma: no cover - non-POSIX (e.g. Windows)
+    termios = None  # type: ignore[assignment]
+    tty = None  # type: ignore[assignment]
+
 # The wizard's own Console instance, not cli.py's: cli.py imports this module
 # lazily inside `create` (to avoid a cycle at module-import time), so a
 # top-level `from drskill.cli import console` here would risk a circular
@@ -40,6 +47,16 @@ class _Row:
     selected: bool
 
 
+_WINDOW = 15  # visible rows in the arrow-key selector's scrolling window
+
+
+@dataclass
+class _SelectState:
+    rows: list[_Row]
+    cursor: int = 0
+    offset: int = 0  # scroll window top
+
+
 def run(
     slug: str,
     name: str,
@@ -51,7 +68,9 @@ def run(
     home: Path,
 ) -> None:
     if not _stdin_is_tty():
-        typer.echo("--from-project needs an interactive terminal.")
+        # Defense-in-depth: cli.py already checks _stdin_is_tty() before
+        # ever calling run(), so this should be unreachable in practice.
+        typer.echo("The interactive picker needs a terminal.")
         raise typer.Exit(1)
 
     with console.status("[bold]starting[/bold]", spinner="dots") as status:
@@ -82,7 +101,7 @@ def run(
         typer.echo("No skills found in this project to include.")
         raise typer.Exit(1)
 
-    _selection_loop(rows)
+    _select_rows(rows)
 
     selected = [row.contributor for row in rows if row.selected]
     if not selected:
@@ -113,16 +132,15 @@ def _is_tracked(c: Contributor) -> bool:
 
 
 def _group_key(c: Contributor) -> tuple:
-    # Resolution collapses skills only when harnesses share the same file;
-    # plugin installs materialize per-harness copies with distinct paths, so
-    # the same skill at the same version appears once per harness. Group
-    # those back together before rendering: tracked skills merge on (kind,
-    # normalized name, provenance source string, which carries the version);
-    # local-only skills merge on (kind, normalized name, content hash).
-    name = manifest_build.normalize_name(c.name)
-    if _is_tracked(c):
-        return ("tracked", c.kind, name, c.source.source)
-    return ("local", c.kind, name, c.content_hash)
+    # Rows merge on (kind, normalized name) alone: a local copy and a
+    # plugin-delivered copy of the same skill are still the same skill (the
+    # server rejects duplicate selectors anyway), and resolution only
+    # collapses skills that share a file, so a plugin install still
+    # materializes one contributor per harness for the wizard to re-merge
+    # here. The representative (see _pick_representative) prefers a tracked
+    # member so the published entry carries real provenance when the group
+    # has one.
+    return (c.kind, manifest_build.normalize_name(c.name))
 
 
 def _pick_representative(members: list[Contributor]) -> Contributor:
@@ -184,6 +202,124 @@ def _render(rows: list[_Row]) -> None:
         mark = "x" if row.selected else " "
         typer.echo(f"  [{mark}] {index:>2}  {row.contributor.name}  ({source}){badge}")
     typer.echo("")
+
+
+def _select_rows(rows: list[_Row]) -> None:
+    # Try the arrow-key selector only on a real POSIX tty; any failure
+    # setting up raw mode (module missing, odd terminal, non-tty despite
+    # isatty()) falls back to the numbered prompt loop automatically.
+    if termios is not None and sys.stdin.isatty():
+        try:
+            termios.tcgetattr(sys.stdin.fileno())
+        except Exception:
+            pass
+        else:
+            _interactive_select(rows)
+            return
+    _selection_loop(rows)
+
+
+def _apply_key(state: _SelectState, key: str) -> str | None:
+    rows = state.rows
+    n = len(rows)
+    if key == "enter":
+        return "accept"
+    if key == "q":
+        return "abort"
+    if n == 0:
+        return None
+    if key in ("up", "k"):
+        state.cursor = max(0, state.cursor - 1)
+    elif key in ("down", "j"):
+        state.cursor = min(n - 1, state.cursor + 1)
+    elif key == "space":
+        rows[state.cursor].selected = not rows[state.cursor].selected
+    elif key == "a":
+        for row in rows:
+            row.selected = True
+    elif key == "n":
+        for row in rows:
+            row.selected = False
+    # Keep the cursor inside the visible window, scrolling as needed.
+    if state.cursor < state.offset:
+        state.offset = state.cursor
+    elif state.cursor >= state.offset + _WINDOW:
+        state.offset = state.cursor - _WINDOW + 1
+    max_offset = max(0, n - _WINDOW)
+    state.offset = max(0, min(state.offset, max_offset))
+    return None
+
+
+def _getkey() -> str:
+    # Assumes stdin is already in cbreak mode (set by _interactive_select).
+    ch = sys.stdin.read(1)
+    if ch == "\x1b":
+        ch2 = sys.stdin.read(1)
+        if ch2 == "[":
+            ch3 = sys.stdin.read(1)
+            if ch3 == "A":
+                return "up"
+            if ch3 == "B":
+                return "down"
+        return "other"
+    if ch in ("\r", "\n"):
+        return "enter"
+    if ch == " ":
+        return "space"
+    return ch.lower()
+
+
+def _select_frame(state: _SelectState) -> str:
+    rows = state.rows
+    n = len(rows)
+    selected = sum(1 for row in rows if row.selected)
+    lines = [
+        f"{selected} selected · arrows/jk move · space toggle · "
+        "a all · n none · enter accept · q abort"
+    ]
+    window = rows[state.offset:state.offset + _WINDOW]
+    if state.offset > 0:
+        lines.append(f"  … {state.offset} more above")
+    current_scope = None
+    for i, row in enumerate(window):
+        absolute = state.offset + i
+        if row.scope != current_scope:
+            current_scope = row.scope
+            lines.append("Project scope" if current_scope == "project" else "User scope")
+        marker = ">" if absolute == state.cursor else " "
+        mark = "x" if row.selected else " "
+        badge = f"  [{', '.join(row.harnesses)}]" if row.harnesses else ""
+        source = row.contributor.source.source or "local only"
+        lines.append(f"{marker} [{mark}] {row.contributor.name}  ({source}){badge}")
+    below = n - (state.offset + len(window))
+    if below > 0:
+        lines.append(f"  … {below} more below")
+    return "\n".join(lines) + "\n"
+
+
+def _interactive_select(rows: list[_Row]) -> None:
+    state = _SelectState(rows=rows)
+    fd = sys.stdin.fileno()
+    old = termios.tcgetattr(fd)
+    lines_drawn = 0
+    typer.echo("\x1b[?25l", nl=False)  # hide cursor
+    try:
+        tty.setcbreak(fd)
+        while True:
+            frame = _select_frame(state)
+            if lines_drawn:
+                typer.echo(f"\x1b[{lines_drawn}A\x1b[J", nl=False)
+            typer.echo(frame, nl=False)
+            lines_drawn = frame.count("\n")
+            outcome = _apply_key(state, _getkey())
+            if outcome == "accept":
+                return
+            if outcome == "abort":
+                typer.echo("Aborted.")
+                raise typer.Exit(0)
+    finally:
+        termios.tcsetattr(fd, termios.TCSADRAIN, old)
+        typer.echo("\x1b[?25h", nl=False)  # show cursor
 
 
 def _selection_loop(rows: list[_Row]) -> None:

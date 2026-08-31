@@ -1,4 +1,6 @@
 import json
+import sys
+import termios
 from pathlib import Path
 
 import pytest
@@ -33,6 +35,15 @@ def contributor(name, scope="project", prov_kind="gh-skill", source="friend/x@v1
 
 def make_world(*contributors):
     return World(contributors={c.id: c for c in contributors})
+
+
+def _row(name, scope="project", harnesses=("claude-code",), selected=False):
+    # Fabricates a _Row directly, bypassing _build_rows, for unit-testing
+    # the selection state machine and shell without a scan.
+    return loadout_wizard._Row(
+        contributor=contributor(name, scope=scope, harnesses=harnesses),
+        harnesses=list(harnesses), scope=scope, selected=selected,
+    )
 
 
 @pytest.fixture
@@ -288,7 +299,11 @@ def test_dedup_local_only_same_hash_merges(wizard_env, monkeypatch):
     assert len(entries) == 1
 
 
-def test_dedup_local_only_different_hash_keeps_separate_rows(wizard_env, monkeypatch):
+def test_dedup_local_only_different_hash_merges_deterministically(wizard_env, monkeypatch):
+    # Rows now merge on (kind, normalized name) alone, so two local-only
+    # copies of the same name merge even with different content hashes.
+    # Neither member is tracked, so the representative is picked by id
+    # (lexicographically first) for determinism.
     calls = wizard_env
     set_world(monkeypatch, make_world(
         contributor("untracked", id="/tmp/untracked-a", prov_kind="unmanaged", source=None,
@@ -299,7 +314,28 @@ def test_dedup_local_only_different_hash_keeps_separate_rows(wizard_env, monkeyp
     result = runner.invoke(app, ["loadout", "create", "pack"], input="\ny\n")
     assert result.exit_code == 0, result.output
     entries = calls[1]["json_body"]["manifest"]["entries"]
-    assert len(entries) == 2
+    assert len(entries) == 1
+    assert entries[0]["content_hash"] == "sha256:" + "11" * 32
+
+
+def test_dedup_merges_local_and_tracked_copies(wizard_env, monkeypatch):
+    # A local-only copy and a plugin-tracked copy of the same skill merge
+    # into one row; the tracked member wins as representative so the
+    # published entry carries real provenance instead of local_only.
+    calls = wizard_env
+    set_world(monkeypatch, make_world(
+        contributor("alpha", id="/tmp/alpha-local", prov_kind="unmanaged", source=None,
+                    content_hash="sha256:" + "33" * 32),
+        contributor("alpha", id="/tmp/alpha-tracked", prov_kind="gh-skill",
+                    source="friend/x@v1", content_hash="sha256:" + "44" * 32),
+    ))
+    result = runner.invoke(app, ["loadout", "create", "pack"], input="\ny\n")
+    assert result.exit_code == 0, result.output
+    assert "friend/x@v1" in result.output  # source summary shows the tracked source
+    entries = calls[1]["json_body"]["manifest"]["entries"]
+    assert len(entries) == 1
+    assert entries[0]["local_only"] is False
+    assert entries[0]["source_type"] == "github"
 
 
 def test_dedup_merges_scope_prefers_project(wizard_env, monkeypatch):
@@ -359,6 +395,102 @@ def test_scan_status_spinner_does_not_crash(wizard_env, monkeypatch):
     result = runner.invoke(app, ["loadout", "create", "pack"], input="\ny\n")
     assert result.exit_code == 0, result.output
     assert "Published revision 1" in result.output
+
+
+def test_apply_key_moves_cursor_and_clamps(monkeypatch):
+    rows = [_row("a"), _row("b"), _row("c")]
+    state = loadout_wizard._SelectState(rows=rows)
+    assert loadout_wizard._apply_key(state, "up") is None
+    assert state.cursor == 0  # already at the top, clamps
+    assert loadout_wizard._apply_key(state, "down") is None
+    assert state.cursor == 1
+    assert loadout_wizard._apply_key(state, "j") is None
+    assert state.cursor == 2
+    assert loadout_wizard._apply_key(state, "down") is None
+    assert state.cursor == 2  # already at the bottom, clamps
+    assert loadout_wizard._apply_key(state, "k") is None
+    assert state.cursor == 1
+
+
+def test_apply_key_scrolls_offset_beyond_window(monkeypatch):
+    window = loadout_wizard._WINDOW
+    rows = [_row(f"s{i}") for i in range(window + 5)]
+    state = loadout_wizard._SelectState(rows=rows)
+    for _ in range(window):  # walk the cursor past the bottom of the window
+        loadout_wizard._apply_key(state, "down")
+    assert state.cursor == window
+    assert state.offset == 1  # scrolled by exactly one to keep the cursor visible
+    for _ in range(window + 10):  # walk far past the end, clamped at len - 1
+        loadout_wizard._apply_key(state, "down")
+    assert state.cursor == len(rows) - 1
+    assert state.offset == len(rows) - window  # offset clamped to the max scroll
+    for _ in range(len(rows) + 5):  # walk all the way back to the top
+        loadout_wizard._apply_key(state, "up")
+    assert state.cursor == 0
+    assert state.offset == 0
+
+
+def test_apply_key_toggle_all_none(monkeypatch):
+    rows = [_row("a"), _row("b")]
+    state = loadout_wizard._SelectState(rows=rows)
+    assert loadout_wizard._apply_key(state, "space") is None
+    assert rows[0].selected is True
+    assert rows[1].selected is False
+    loadout_wizard._apply_key(state, "space")
+    assert rows[0].selected is False
+    loadout_wizard._apply_key(state, "a")
+    assert all(r.selected for r in rows)
+    loadout_wizard._apply_key(state, "n")
+    assert not any(r.selected for r in rows)
+
+
+def test_apply_key_accept_abort(monkeypatch):
+    rows = [_row("a")]
+    state = loadout_wizard._SelectState(rows=rows)
+    assert loadout_wizard._apply_key(state, "enter") == "accept"
+    assert loadout_wizard._apply_key(state, "q") == "abort"
+
+
+def test_select_rows_falls_back_when_termios_setup_fails(monkeypatch):
+    rows = [_row("alpha")]
+    monkeypatch.setattr(sys.stdin, "isatty", lambda: True)
+
+    def boom(fd):
+        raise OSError("not a tty")
+
+    monkeypatch.setattr(termios, "tcgetattr", boom)
+    called = []
+    monkeypatch.setattr(loadout_wizard, "_selection_loop", lambda rs: called.append(rs))
+    loadout_wizard._select_rows(rows)
+    assert called == [rows]
+
+
+def test_interactive_select_applies_scripted_keys(monkeypatch):
+    # Isolate the state machine + rendering shell from the real terminal:
+    # fake the termios setup/teardown calls the shell makes so this runs
+    # under plain pytest (no pty), and script _getkey with a fixed sequence.
+    monkeypatch.setattr(sys.stdin, "fileno", lambda: 0)
+    monkeypatch.setattr(termios, "tcgetattr", lambda fd: "orig-attrs")
+    monkeypatch.setattr(termios, "tcsetattr", lambda fd, when, attrs: None)
+    monkeypatch.setattr(loadout_wizard.tty, "setcbreak", lambda fd: None)
+    rows = [_row("alpha"), _row("beta")]
+    keys = iter(["down", "space", "enter"])
+    monkeypatch.setattr(loadout_wizard, "_getkey", lambda: next(keys))
+    loadout_wizard._interactive_select(rows)
+    assert rows[0].selected is False
+    assert rows[1].selected is True
+
+
+def test_interactive_select_abort_raises_exit(monkeypatch):
+    monkeypatch.setattr(sys.stdin, "fileno", lambda: 0)
+    monkeypatch.setattr(termios, "tcgetattr", lambda fd: "orig-attrs")
+    monkeypatch.setattr(termios, "tcsetattr", lambda fd, when, attrs: None)
+    monkeypatch.setattr(loadout_wizard.tty, "setcbreak", lambda fd: None)
+    rows = [_row("alpha")]
+    monkeypatch.setattr(loadout_wizard, "_getkey", lambda: "q")
+    with pytest.raises(loadout_wizard.typer.Exit) as excinfo:
+        loadout_wizard._interactive_select(rows)
+    assert excinfo.value.exit_code == 0
 
 
 def test_non_tty_falls_back_to_plain_create(wizard_env, monkeypatch):
