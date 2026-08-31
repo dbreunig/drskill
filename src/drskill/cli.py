@@ -1102,3 +1102,102 @@ def loadout_show(
     if forked:
         suffix = f" · revision {forked['revision_number']}" if forked.get("revision_number") else ""
         typer.echo(f"  Forked from {forked['owner']}/{forked['slug']}{suffix}")
+
+
+@loadout_app.command()
+def revisions(
+    ref: str = typer.Argument(..., help="owner/slug"),
+    as_json: bool = typer.Option(False, "--json", help="emit the raw API response"),
+) -> None:
+    """List a loadout's revision history."""
+    creds, base = _service_credentials()
+    owner, slug = _parse_ref(ref)
+    try:
+        data = service.api_request(
+            "GET", f"/api/v1/loadouts/{owner}/{slug}/revisions", token=creds["token"], base_url=base
+        )
+    except service.ServiceError as err:
+        _echo_service_error(err)
+        raise typer.Exit(1)
+    if as_json:
+        typer.echo(json.dumps(data, indent=2))
+        return
+    from rich.table import Table
+
+    table = Table(title=f"Revisions of {owner}/{slug}")
+    table.add_column("rev")
+    table.add_column("runtime hash")
+    table.add_column("published")
+    table.add_column("reproducible")
+    for revision in data.get("revisions", []):
+        table.add_row(
+            str(revision["number"]),
+            revision["runtime_hash"],
+            str(revision.get("published_at") or ""),
+            "yes" if revision.get("reproducible") else "no",
+        )
+    Console().print(table)
+
+
+@loadout_app.command()
+def publish(
+    ref: str = typer.Argument(..., help="owner/slug"),
+    manifest_path: Path = typer.Argument(..., help="path to a resolved manifest JSON file"),
+    no_verify: bool = typer.Option(False, "--no-verify", help="do not send a client-computed runtime hash"),
+) -> None:
+    """Publish a manifest file as a new immutable revision."""
+    creds, base = _service_credentials()
+    owner, slug = _parse_ref(ref)
+    try:
+        manifest = json.loads(manifest_path.read_text())
+    except (OSError, json.JSONDecodeError) as err:
+        typer.echo(f"Could not read manifest: {err}")
+        raise typer.Exit(1)
+    if not isinstance(manifest, dict):
+        typer.echo("Manifest must be a JSON object.")
+        raise typer.Exit(1)
+    body: dict = {"manifest": manifest}
+    client_hash = None
+    if not no_verify:
+        _, client_hash = service.canonical_manifest(manifest)
+        body["runtime_hash"] = client_hash
+    try:
+        data = service.api_request(
+            "POST", f"/api/v1/loadouts/{owner}/{slug}/revisions",
+            token=creds["token"], json_body=body, base_url=base,
+        )
+    except service.ServiceError as err:
+        _echo_service_error(err)
+        if client_hash and err.code == "revision_invalid":
+            typer.echo(f"  client runtime_hash: {client_hash}")
+        raise typer.Exit(1)
+    revision = data["revision"]
+    typer.echo(f"Published revision {revision['number']} ({revision['runtime_hash']})")
+
+
+@loadout_app.command()
+def fetch(
+    target: str = typer.Argument(..., help="owner/slug, or a bare sha256:<hash>"),
+    revision: str = typer.Argument(None, help="revision number or sha256:<hash> (with owner/slug)"),
+    output: Path = typer.Option(None, "-o", "--output", help="write the document to a file"),
+) -> None:
+    """Fetch a revision's canonical manifest, byte-stable."""
+    creds, base = _service_credentials()
+    if target.startswith("sha256:"):
+        path = f"/api/v1/revision_hashes/{target}"
+    else:
+        owner, slug = _parse_ref(target)
+        if not revision:
+            typer.echo("Provide a revision number or sha256:<hash> after owner/slug.")
+            raise typer.Exit(1)
+        path = f"/api/v1/loadouts/{owner}/{slug}/revisions/{revision}"
+    try:
+        document = service.api_request("GET", path, token=creds["token"], base_url=base, raw=True)
+    except service.ServiceError as err:
+        _echo_service_error(err)
+        raise typer.Exit(1)
+    if output:
+        output.write_text(document)
+        typer.echo(f"Wrote {output}")
+    else:
+        typer.echo(document)

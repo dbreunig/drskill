@@ -100,3 +100,103 @@ def test_show_rejects_a_bad_ref(signed_in, api):
     result = runner.invoke(app, ["loadout", "show", "no-slash"])
     assert result.exit_code == 1
     assert "owner/slug" in result.output
+
+
+def test_revisions_renders_a_table(signed_in, api):
+    calls, fake = api
+    fake.response = {"revisions": [
+        {"number": 2, "runtime_hash": "sha256:" + "cd" * 32, "published_at": "2026-08-31T00:00:00Z",
+         "reproducible": True, "schema_version": 1},
+        {"number": 1, "runtime_hash": "sha256:" + "ab" * 32, "published_at": "2026-08-30T00:00:00Z",
+         "reproducible": False, "schema_version": 1},
+    ]}
+    result = runner.invoke(app, ["loadout", "revisions", "drew/textbook"])
+    assert result.exit_code == 0
+    assert "2" in result.output and "1" in result.output
+    assert calls[0]["path"] == "/api/v1/loadouts/drew/textbook/revisions"
+
+
+def test_publish_sends_the_computed_hash(signed_in, api, tmp_path):
+    calls, fake = api
+    fake.response = {"revision": {"number": 1, "runtime_hash": "sha256:" + "ee" * 32}}
+    manifest_path = tmp_path / "m.json"
+    manifest_path.write_text('{"schema_version":1,"entries":[],"harness_mappings":[]}')
+
+    result = runner.invoke(app, ["loadout", "publish", "drew/textbook", str(manifest_path)])
+    assert result.exit_code == 0
+    assert "Published revision 1" in result.output
+    body = calls[0]["json_body"]
+    _, expected_hash = service.canonical_manifest(json.loads(manifest_path.read_text()))
+    assert body["runtime_hash"] == expected_hash
+    assert body["manifest"]["schema_version"] == 1
+
+
+def test_publish_no_verify_omits_the_hash(signed_in, api, tmp_path):
+    calls, fake = api
+    fake.response = {"revision": {"number": 1, "runtime_hash": "sha256:" + "ee" * 32}}
+    manifest_path = tmp_path / "m.json"
+    manifest_path.write_text('{"schema_version":1,"entries":[],"harness_mappings":[]}')
+    runner.invoke(app, ["loadout", "publish", "drew/textbook", str(manifest_path), "--no-verify"])
+    assert "runtime_hash" not in calls[0]["json_body"]
+
+
+def test_publish_hash_mismatch_prints_both_hashes(signed_in, monkeypatch, tmp_path):
+    def failing(*args, **kwargs):
+        raise service.ServiceError(
+            "revision_invalid", "The revision manifest is invalid.",
+            details={"manifest": ["runtime_hash mismatch: client sent x, server computed y"]},
+        )
+
+    monkeypatch.setattr(service, "api_request", failing)
+    manifest_path = tmp_path / "m.json"
+    manifest_path.write_text('{"schema_version":1,"entries":[],"harness_mappings":[]}')
+    result = runner.invoke(app, ["loadout", "publish", "drew/textbook", str(manifest_path)])
+    assert result.exit_code == 1
+    assert "runtime_hash mismatch" in result.output
+    assert "client runtime_hash: sha256:" in result.output
+
+
+def test_publish_rejects_an_unreadable_or_invalid_manifest(signed_in, api, tmp_path):
+    result = runner.invoke(app, ["loadout", "publish", "drew/textbook", str(tmp_path / "missing.json")])
+    assert result.exit_code == 1
+    assert "Could not read manifest" in result.output
+
+    bad = tmp_path / "bad.json"
+    bad.write_text("[1,2]")
+    result = runner.invoke(app, ["loadout", "publish", "drew/textbook", str(bad)])
+    assert result.exit_code == 1
+    assert "JSON object" in result.output
+
+
+def test_fetch_by_number_prints_the_raw_document(signed_in, api):
+    calls, fake = api
+    fake.response = '{"a":1}'
+    result = runner.invoke(app, ["loadout", "fetch", "drew/textbook", "3"])
+    assert result.exit_code == 0
+    assert '{"a":1}' in result.output
+    assert calls[0]["path"] == "/api/v1/loadouts/drew/textbook/revisions/3"
+    assert calls[0]["raw"] is True
+
+
+def test_fetch_bare_hash_uses_the_global_lookup(signed_in, api):
+    calls, fake = api
+    fake.response = '{"a":1}'
+    target = "sha256:" + "ab" * 32
+    result = runner.invoke(app, ["loadout", "fetch", target])
+    assert result.exit_code == 0
+    assert calls[0]["path"] == f"/api/v1/revision_hashes/{target}"
+
+
+def test_fetch_ref_without_revision_errors(signed_in, api):
+    result = runner.invoke(app, ["loadout", "fetch", "drew/textbook"])
+    assert result.exit_code == 1
+    assert "revision number" in result.output
+
+
+def test_fetch_output_writes_the_file(signed_in, api, tmp_path):
+    calls, fake = api
+    fake.response = '{"a":1}'
+    out = tmp_path / "manifest.json"
+    result = runner.invoke(app, ["loadout", "fetch", "drew/textbook", "3", "-o", str(out)])
+    assert result.exit_code == 0
+    assert out.read_text() == '{"a":1}'
