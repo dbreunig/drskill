@@ -170,3 +170,29 @@ without any UI or network.
   The server deliberately does not constrain `source_type` yet.
 - `run_scan` can be slow on big projects. The wizard shows the same status
   spinner scan uses, or at minimum a "scanning..." line before the list.
+
+## Revisions after the live walk-through (2026-08-31)
+
+Drew ran the wizard against a real project (133 rows) and gave three pieces
+of feedback, which revise the decisions above:
+
+1. **Scan progress.** The wizard shows the same live status spinner
+   `drskill scan` uses, updating with the scan's progress messages, instead
+   of a single static "Scanning..." line.
+2. **Harness selection comes first (revises Decision 2's "no harness
+   step").** With user-scope skills active across many harnesses, the flat
+   list is too long. After the scan, when the candidate rows span more than
+   one harness, the wizard asks which harness to draw from (numbered
+   choices plus "all") before rendering the list. `--harness` skips the
+   question; a single-harness world never sees it. Badges still show every
+   harness a skill is deployed to.
+3. **Cross-harness dedup (new).** Resolution collapses skills only when
+   harnesses share the same file; plugin installs materialize per-harness
+   copies with distinct paths, so the same skill at the same version
+   appeared once per harness. The wizard merges candidate rows before
+   rendering: tracked skills merge on (kind, normalized name, provenance
+   source string, which carries the version); local-only skills merge on
+   (kind, normalized name, content hash). A merged row unions its harness
+   badges across the group, sits in the project section when any member is
+   project scope (and is preselected accordingly), and publishes one entry
+   from its best member, preferring a tracked source over local-only.
