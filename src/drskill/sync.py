@@ -142,3 +142,74 @@ def apply_remote(events: list[dict], ledger_file: Path) -> dict:
         ))
 
     return {"acks": len(to_add), "reopens": len(to_remove)}
+
+
+def run_sync(creds: dict, base_url: str, device_info: dict) -> dict:
+    """The full protocol: diff → mint → upload (durable pending) → download
+    → apply → persist state. Returns the printed summary counts."""
+    from drskill import ledger, service
+
+    ledger_file = _home() / ".drskill.toml"
+    config = ledger.load_config(ledger_file) if ledger_file.exists() else None
+    acks = config.ack if config else []
+
+    state = load_state()
+    fresh, minted = mint_events(acks, state["fingerprints"])
+    # A failed upload leaves its events in pending; a retry re-mints the same
+    # diff with new uuids. Skip anything pending already covers so the server
+    # never sees two ids for one logical change.
+    pending_keys = {(e["fingerprint"], e["action"]) for e in state["pending"]}
+    fresh = [e for e in fresh if (e["fingerprint"], e["action"]) not in pending_keys]
+    if fresh:
+        state["pending"] = state["pending"] + fresh
+        save_state(state)
+
+    pushed = {"acks": 0, "reopens": 0}
+    # Always POST at least once (an empty batch if there is nothing pending)
+    # so the device block reaches the server every sync, not only when there
+    # is something to push — the server registers/refreshes the device from
+    # this call regardless of whether events accompany it.
+    batches = [
+        state["pending"][start:start + 500]
+        for start in range(0, len(state["pending"]), 500)
+    ] or [[]]
+    for batch in batches:
+        service.api_request(
+            "POST", "/api/v1/acknowledgment_sync",
+            token=creds["token"],
+            json_body={"device": device_info, "events": batch},
+            base_url=base_url,
+        )
+    if state["pending"]:
+        pushed = {
+            "acks": sum(1 for e in state["pending"] if e["action"] == "acknowledged"),
+            "reopens": sum(1 for e in state["pending"] if e["action"] == "reopened"),
+        }
+        state["pending"] = []
+        save_state(state)
+
+    pulled = {"acks": 0, "reopens": 0}
+    cursor = state["cursor"]
+    while True:
+        data = service.api_request(
+            "GET", f"/api/v1/acknowledgment_sync?after={cursor}",
+            token=creds["token"], base_url=base_url,
+        )
+        events = data.get("events", [])
+        if events:
+            counts = apply_remote(events, ledger_file)
+            pulled["acks"] += counts["acks"]
+            pulled["reopens"] += counts["reopens"]
+        cursor = data.get("cursor", cursor)
+        if not data.get("has_more"):
+            break
+
+    final = ledger.load_config(ledger_file) if ledger_file.exists() else None
+    state["fingerprints"] = sorted({a.fingerprint for a in (final.ack if final else [])})
+    state["cursor"] = cursor
+    save_state(state)
+
+    return {
+        "pushed_acks": pushed["acks"], "pushed_reopens": pushed["reopens"],
+        "pulled_acks": pulled["acks"], "pulled_reopens": pulled["reopens"],
+    }

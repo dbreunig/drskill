@@ -41,6 +41,26 @@ def test_load_state_defaults_when_missing(home):
     assert sync.load_state() == {"cursor": 0, "fingerprints": [], "pending": []}
 
 
+def test_state_round_trip_strips_none_pending_keys(home):
+    pending_event = {
+        "client_event_id": "00000000-0000-0000-0000-000000000001",
+        "fingerprint": FP_A,
+        "action": "reopened",
+        "check_id": "sync",
+        "skill_identity": None,
+        "note": None,
+        "client_recorded_at": "2026-08-31T00:00:00Z",
+    }
+    state = {"cursor": 0, "fingerprints": [], "pending": [pending_event]}
+    sync.save_state(state)
+    loaded = sync.load_state()
+    assert loaded["pending"] == [
+        {k: v for k, v in pending_event.items() if v is not None}
+    ]
+    assert "skill_identity" not in loaded["pending"][0]
+    assert "note" not in loaded["pending"][0]
+
+
 def test_mint_events_diffs_against_the_base(home):
     events, summary = sync.mint_events([ack(FP_A)], [FP_B])
     assert summary == {"acks": 1, "reopens": 1}
