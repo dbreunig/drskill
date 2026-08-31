@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import datetime as dt
+import json
 import os
 from collections import Counter
 from pathlib import Path
@@ -31,12 +32,37 @@ generic_min_distinct_tokens = 2  # fewer distinctive words than this is too vagu
 """
 
 app = typer.Typer(add_completion=False, help="brew doctor for your agent's skill loadout")
+loadout_app = typer.Typer(add_completion=False, help="Manage loadouts on the drskill service")
+app.add_typer(loadout_app, name="loadout")
 console = Console()
 
 
 def _home() -> Path:
     env = os.environ.get("DRSKILL_HOME")
     return Path(env) if env else Path.home()
+
+
+def _service_credentials() -> tuple[dict, str]:
+    creds = service.load_credentials()
+    if not creds:
+        typer.echo("Not signed in. Run: drskill login")
+        raise typer.Exit(1)
+    return creds, creds.get("service_url") or service.service_url()
+
+
+def _parse_ref(ref: str) -> tuple[str, str]:
+    owner, _, slug = ref.partition("/")
+    if not owner or not slug or "/" in slug:
+        typer.echo(f"Expected owner/slug, got {ref!r}")
+        raise typer.Exit(1)
+    return owner, slug
+
+
+def _echo_service_error(err: "service.ServiceError") -> None:
+    typer.echo(err.message)
+    for field, messages in (err.details or {}).items():
+        for message in messages:
+            typer.echo(f"  {field}: {message}")
 
 
 def _validate_harness(harness: str | None) -> None:
@@ -955,11 +981,7 @@ def login() -> None:
 @app.command()
 def whoami() -> None:
     """Show the signed-in drskill service account."""
-    creds = service.load_credentials()
-    if not creds:
-        typer.echo("Not signed in. Run: drskill login")
-        raise typer.Exit(1)
-    base = creds.get("service_url") or service.service_url()
+    creds, base = _service_credentials()
     try:
         identity = service.api_request("GET", "/api/v1/identity", token=creds["token"], base_url=base)
     except service.ServiceError as err:
@@ -973,11 +995,7 @@ def whoami() -> None:
 @app.command()
 def logout() -> None:
     """Sign out: revoke the service token and delete local credentials."""
-    creds = service.load_credentials()
-    if not creds:
-        typer.echo("Not signed in.")
-        return
-    base = creds.get("service_url") or service.service_url()
+    creds, base = _service_credentials()
     try:
         service.api_request("DELETE", "/api/v1/token", token=creds["token"], base_url=base)
         typer.echo("Token revoked on the server.")
@@ -985,3 +1003,98 @@ def logout() -> None:
         typer.echo(f"Could not revoke on the server ({err.message}); removing local credentials anyway.")
     service.delete_credentials()
     typer.echo("Signed out.")
+
+
+@loadout_app.command("list")
+def loadout_list(
+    as_json: bool = typer.Option(False, "--json", help="emit the raw API response"),
+) -> None:
+    """List your loadouts on the drskill service."""
+    creds, base = _service_credentials()
+    try:
+        data = service.api_request("GET", "/api/v1/loadouts", token=creds["token"], base_url=base)
+    except service.ServiceError as err:
+        _echo_service_error(err)
+        raise typer.Exit(1)
+    if as_json:
+        typer.echo(json.dumps(data, indent=2))
+        return
+    loadouts = data.get("loadouts", [])
+    if not loadouts:
+        typer.echo("No loadouts yet. Create one with: drskill loadout create <slug> --name <name>")
+        return
+    from rich.table import Table
+
+    table = Table(title="Your loadouts")
+    table.add_column("ref")
+    table.add_column("name")
+    table.add_column("visibility")
+    table.add_column("current rev")
+    for loadout in loadouts:
+        revision = loadout.get("current_revision")
+        rev_text = f"#{revision['number']} {revision['runtime_hash'][:17]}…" if revision else "—"
+        table.add_row(
+            f"{loadout['owner']}/{loadout['slug']}",
+            loadout.get("name") or "",
+            loadout.get("visibility") or "",
+            rev_text,
+        )
+    console.print(table)
+
+
+@loadout_app.command()
+def create(
+    slug: str = typer.Argument(..., help="URL slug for the new loadout"),
+    name: str = typer.Option(..., "--name", help="display name"),
+    description: str | None = typer.Option(None, "--description", help="optional description"),
+) -> None:
+    """Create a private loadout on the drskill service."""
+    creds, base = _service_credentials()
+    body: dict = {"loadout": {"slug": slug, "name": name}}
+    if description is not None:
+        body["loadout"]["description"] = description
+    try:
+        data = service.api_request(
+            "POST", "/api/v1/loadouts", token=creds["token"], json_body=body, base_url=base
+        )
+    except service.ServiceError as err:
+        _echo_service_error(err)
+        raise typer.Exit(1)
+    loadout = data["loadout"]
+    typer.echo(f"Created {loadout['owner']}/{loadout['slug']} ({loadout['visibility']})")
+
+
+@loadout_app.command()
+def show(
+    ref: str = typer.Argument(..., help="owner/slug"),
+    as_json: bool = typer.Option(False, "--json", help="emit the raw API response"),
+) -> None:
+    """Show a loadout's metadata and current revision."""
+    creds, base = _service_credentials()
+    owner, slug = _parse_ref(ref)
+    try:
+        data = service.api_request(
+            "GET", f"/api/v1/loadouts/{owner}/{slug}", token=creds["token"], base_url=base
+        )
+    except service.ServiceError as err:
+        _echo_service_error(err)
+        raise typer.Exit(1)
+    if as_json:
+        typer.echo(json.dumps(data, indent=2))
+        return
+    loadout = data["loadout"]
+    typer.echo(f"{loadout['owner']}/{loadout['slug']} — {loadout.get('name') or ''}")
+    typer.echo(f"  visibility: {loadout.get('visibility')}")
+    if loadout.get("description"):
+        typer.echo(f"  description: {loadout['description']}")
+    revision = loadout.get("current_revision")
+    if revision:
+        typer.echo(f"  current revision: #{revision['number']} {revision['runtime_hash']}")
+    else:
+        typer.echo("  current revision: none")
+    if loadout.get("published_at"):
+        typer.echo(f"  published: {loadout['published_at']}")
+    forked = loadout.get("forked_from")
+    if forked:
+        suffix = f" · revision {forked['revision_number']}" if forked.get("revision_number") else ""
+        typer.echo(f"  Forked from {forked['owner']}/{forked['slug']}{suffix}")
