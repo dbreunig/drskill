@@ -170,3 +170,62 @@ without any UI or network.
   The server deliberately does not constrain `source_type` yet.
 - `run_scan` can be slow on big projects. The wizard shows the same status
   spinner scan uses, or at minimum a "scanning..." line before the list.
+
+## Revisions after the live walk-through (2026-08-31)
+
+Drew ran the wizard against a real project (133 rows) and gave three pieces
+of feedback, which revise the decisions above:
+
+1. **Scan progress.** The wizard shows the same live status spinner
+   `drskill scan` uses, updating with the scan's progress messages, instead
+   of a single static "Scanning..." line.
+2. **Harness selection comes first (revises Decision 2's "no harness
+   step").** With user-scope skills active across many harnesses, the flat
+   list is too long. After the scan, when the candidate rows span more than
+   one harness, the wizard asks which harness to draw from (numbered
+   choices plus "all") before rendering the list. `--harness` skips the
+   question; a single-harness world never sees it. Badges still show every
+   harness a skill is deployed to.
+3. **Cross-harness dedup (new).** Resolution collapses skills only when
+   harnesses share the same file; plugin installs materialize per-harness
+   copies with distinct paths, so the same skill at the same version
+   appeared once per harness. The wizard merges candidate rows before
+   rendering: tracked skills merge on (kind, normalized name, provenance
+   source string, which carries the version); local-only skills merge on
+   (kind, normalized name, content hash). A merged row unions its harness
+   badges across the group, sits in the project section when any member is
+   project scope (and is preselected accordingly), and publishes one entry
+   from its best member, preferring a tracked source over local-only.
+
+## Second walk-through revisions (2026-08-31)
+
+4. **Merge on name alone.** The provenance-keyed dedup still showed the same
+   skill twice when a local copy and a plugin-delivered copy coexist. Rows
+   now merge on (kind, normalized name). The representative, which is what
+   gets published, is a tracked member when the group has one (preferring a
+   member with a provenance source), else the local copy. Badges union
+   across the whole group. Rationale: a loadout wants one entry per skill,
+   and the server rejects duplicate selectors anyway.
+5. **Arrow-key selection.** The list is navigated with up/down arrows or
+   j/k, space toggles, `a`/`n` select all/none, enter accepts, q aborts.
+   Long lists render a scrolling window. Implemented on stdlib termios raw
+   mode with no new dependency; when raw mode is unavailable (non-POSIX or
+   odd terminals), the wizard falls back to the existing numbered prompt
+   loop automatically.
+
+## Third walk-through revisions (2026-08-31)
+
+6. **questionary for all interaction (new dependency, approved).** The
+   harness question and the skill list both become arrow-driven questionary
+   widgets: `select` for the harness (choices plus "All harnesses"),
+   `checkbox` for skills (space toggles, enter accepts, pre-checked
+   project-scope rows, real separators for the Project scope and User scope
+   sections). This replaces the hand-rolled termios selector, its state
+   machine, and the numbered prompt loop. Dependencies added: questionary
+   (with prompt_toolkit and wcwidth), all pure Python.
+7. **Readability pass.** Bold stage headings with blank lines between
+   stages; the skill name in a fixed aligned column; sources dim with the
+   `==version` dropped from the list view (kept in the summary); badges
+   dropped entirely when a single harness was chosen and rendered compact
+   and dim (`[claude-code +8]`) when "all harnesses" is selected; summary
+   line "Summary — N entries, M local-only"; result lines prefixed with ✓.

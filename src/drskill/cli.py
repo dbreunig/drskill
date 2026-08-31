@@ -961,19 +961,32 @@ def init(root: Path = typer.Option(Path("."), "--root", hidden=True)) -> None:
 def login() -> None:
     """Sign in to the drskill service via your browser."""
     base = service.service_url()
-    typer.echo(f"Opening your browser to sign in at {base}...")
-    try:
-        token, handle = service.browser_login()
-    except service.ServiceError as err:
-        typer.echo(f"Browser sign-in unavailable ({err.message}).")
-        typer.echo("Create a token at Settings → API tokens, then paste it below.")
+
+    def paste_flow() -> tuple[str, str]:
+        typer.echo(f"Create a token at {base}/settings/api_tokens, then paste it below.")
         token = typer.prompt("API token", hide_input=True).strip()
         try:
             identity = service.api_request("GET", "/api/v1/identity", token=token)
         except service.ServiceError as verify_err:
             typer.echo(f"Token rejected: {verify_err.message}")
             raise typer.Exit(1)
-        handle = identity["user"]["handle"]
+        return token, identity["user"]["handle"]
+
+    if os.environ.get("SSH_CONNECTION") or os.environ.get("SSH_TTY"):
+        # The loopback flow cannot work over SSH: the approve redirect goes to
+        # 127.0.0.1 on the machine running the browser, not this one.
+        typer.echo("SSH session detected; the browser flow needs a local browser.")
+        token, handle = paste_flow()
+    else:
+        typer.echo(f"Opening your browser to sign in at {base}...")
+        try:
+            token, handle = service.browser_login()
+        except KeyboardInterrupt:
+            typer.echo("")
+            token, handle = paste_flow()
+        except service.ServiceError as err:
+            typer.echo(f"Browser sign-in unavailable ({err.message}).")
+            token, handle = paste_flow()
     service.save_credentials(base, token)
     typer.echo(f"✓ Signed in as {handle}")
 
@@ -1051,11 +1064,32 @@ def create(
     slug: str = typer.Argument(..., help="URL slug for the new loadout"),
     name: str | None = typer.Option(None, "--name", help="display name (defaults from the slug)"),
     description: str | None = typer.Option(None, "--description", help="optional description"),
+    empty: bool = typer.Option(False, "--empty",
+        help="create an empty loadout without the interactive picker"),
+    harness: str | None = typer.Option(None, "--harness",
+        help="interactive picker: only list skills active in this harness"),
+    manifest_out: Path | None = typer.Option(None, "--manifest-out",
+        help="interactive picker: also save the generated manifest to a file"),
 ) -> None:
-    """Create a private loadout on the drskill service."""
+    """Create a private loadout, picking its contents interactively in a terminal."""
+    from drskill import loadout_wizard
+
+    interactive = loadout_wizard._stdin_is_tty() and not empty
+    if not interactive and (harness is not None or manifest_out is not None):
+        typer.echo(
+            "--harness and --manifest-out need the interactive picker "
+            "(run in a terminal, without --empty)."
+        )
+        raise typer.Exit(1)
     creds, base = _service_credentials()
     if name is None:
         name = slug.replace("-", " ").title()
+    if interactive:
+        if harness is not None:
+            _validate_harness(harness)
+        loadout_wizard.run(slug, name, description, harness, manifest_out,
+                           creds, base, _home())
+        return
     body: dict = {"loadout": {"slug": slug, "name": name}}
     if description is not None:
         body["loadout"]["description"] = description
