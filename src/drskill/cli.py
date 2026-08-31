@@ -1047,6 +1047,9 @@ def sync() -> None:
         _echo_service_error(err)
         raise typer.Exit(1)
 
+    for warning in summary.get("warnings", []):
+        typer.echo(warning)
+
     parts = []
     pushed = []
     if summary["pushed_acks"]:

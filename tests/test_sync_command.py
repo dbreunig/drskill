@@ -162,6 +162,36 @@ def test_failed_upload_retries_the_same_event_ids(fake_service, tmp_path, monkey
     assert sync.load_state()["pending"] == []
 
 
+def test_download_survives_a_failed_device_registration_post(fake_service, tmp_path, monkeypatch):
+    home_a = machine_home(tmp_path, "a", fake_service.url, monkeypatch)
+    home_b = machine_home(tmp_path, "b", fake_service.url, monkeypatch)
+
+    # Machine A acks and syncs normally, seeding an event on the server.
+    use_home(monkeypatch, home_a)
+    ledger.append_ack(home_a / ".drskill.toml",
+        Ack(check="c", skills=["s"], fingerprint=FP_A))
+    result = runner.invoke(app, ["sync"])
+    assert result.exit_code == 0, result.output
+
+    # Machine B has nothing pending, so its POST is a bare device
+    # registration. That POST fails, but B still has remote events to
+    # download and must not be blocked from getting them.
+    use_home(monkeypatch, home_b)
+    real_api_request = service.api_request
+
+    def failing_post(method, path, **kwargs):
+        if method == "POST":
+            raise service.ServiceError("connection_error", "down")
+        return real_api_request(method, path, **kwargs)
+
+    monkeypatch.setattr(service, "api_request", failing_post)
+    result = runner.invoke(app, ["sync"])
+    assert result.exit_code == 0, result.output
+    assert "device registration failed" in result.output
+    config_b = ledger.load_config(home_b / ".drskill.toml")
+    assert {a.fingerprint for a in config_b.ack} == {FP_A}
+
+
 def test_sync_requires_sign_in(tmp_path, monkeypatch):
     monkeypatch.setenv("DRSKILL_HOME", str(tmp_path))
     result = runner.invoke(app, ["sync"])

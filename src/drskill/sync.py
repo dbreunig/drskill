@@ -154,7 +154,7 @@ def run_sync(creds: dict, base_url: str, device_info: dict) -> dict:
     acks = config.ack if config else []
 
     state = load_state()
-    fresh, minted = mint_events(acks, state["fingerprints"])
+    fresh, _ = mint_events(acks, state["fingerprints"])
     # A failed upload leaves its events in pending; a retry re-mints the same
     # diff with new uuids. Skip anything pending already covers so the server
     # never sees two ids for one logical change.
@@ -164,29 +164,46 @@ def run_sync(creds: dict, base_url: str, device_info: dict) -> dict:
         state["pending"] = state["pending"] + fresh
         save_state(state)
 
+    warnings: list[str] = []
     pushed = {"acks": 0, "reopens": 0}
     # Always POST at least once (an empty batch if there is nothing pending)
     # so the device block reaches the server every sync, not only when there
     # is something to push — the server registers/refreshes the device from
     # this call regardless of whether events accompany it.
-    batches = [
-        state["pending"][start:start + 500]
-        for start in range(0, len(state["pending"]), 500)
-    ] or [[]]
-    for batch in batches:
-        service.api_request(
-            "POST", "/api/v1/acknowledgment_sync",
-            token=creds["token"],
-            json_body={"device": device_info, "events": batch},
-            base_url=base_url,
-        )
+    #
+    # With something pending, a failed upload must still hard-fail before
+    # download: pending durability and retry semantics depend on the upload
+    # completing (or not) before anything else changes. With nothing
+    # pending, the POST is a bare device-registration heartbeat with no
+    # events at stake, so a failure there is best-effort — it must not
+    # block a pure-download sync from completing.
     if state["pending"]:
+        for start in range(0, len(state["pending"]), 500):
+            batch = state["pending"][start:start + 500]
+            service.api_request(
+                "POST", "/api/v1/acknowledgment_sync",
+                token=creds["token"],
+                json_body={"device": device_info, "events": batch},
+                base_url=base_url,
+            )
         pushed = {
             "acks": sum(1 for e in state["pending"] if e["action"] == "acknowledged"),
             "reopens": sum(1 for e in state["pending"] if e["action"] == "reopened"),
         }
         state["pending"] = []
         save_state(state)
+    else:
+        try:
+            service.api_request(
+                "POST", "/api/v1/acknowledgment_sync",
+                token=creds["token"],
+                json_body={"device": device_info, "events": []},
+                base_url=base_url,
+            )
+        except service.ServiceError as err:
+            warnings.append(
+                f"device registration failed ({err.message}); continuing with download"
+            )
 
     pulled = {"acks": 0, "reopens": 0}
     cursor = state["cursor"]
@@ -212,4 +229,5 @@ def run_sync(creds: dict, base_url: str, device_info: dict) -> dict:
     return {
         "pushed_acks": pushed["acks"], "pushed_reopens": pushed["reopens"],
         "pulled_acks": pulled["acks"], "pulled_reopens": pulled["reopens"],
+        "warnings": warnings,
     }
