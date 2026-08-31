@@ -56,6 +56,15 @@ class _StubHandler(BaseHTTPRequestHandler):
             # Not valid JSON at all, and not valid UTF-8 either.
             body = b"\xff\xfe not json"
             self.send_response(400)
+        elif self.path == "/invalid":
+            body = json.dumps(
+                {"error": {"code": "revision_invalid", "message": "The revision manifest is invalid.",
+                           "details": {"manifest": ["schema_version must be 1"]}}}
+            ).encode()
+            self.send_response(422)
+        elif self.path == "/raw":
+            body = b'{"b":1,"a":2}'
+            self.send_response(200)
         else:
             body = json.dumps(
                 {"error": {"code": "not_found", "message": "Not found."}}
@@ -110,3 +119,13 @@ def test_api_request_falls_back_on_undecodable_error_body(stub_server):
         service.api_request("GET", "/invalid_utf8_error", base_url=stub_server)
     assert excinfo.value.code == "http_error"
     assert "400" in excinfo.value.message
+
+
+def test_api_request_passes_envelope_details_through(stub_server):
+    with pytest.raises(service.ServiceError) as excinfo:
+        service.api_request("GET", "/invalid", base_url=stub_server)
+    assert excinfo.value.details == {"manifest": ["schema_version must be 1"]}
+
+
+def test_api_request_raw_returns_the_body_verbatim(stub_server):
+    assert service.api_request("GET", "/raw", base_url=stub_server, raw=True) == '{"b":1,"a":2}'

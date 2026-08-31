@@ -1,0 +1,50 @@
+{
+  "schema_version": 1,
+  "source_reference": "git@github.com:drew/textbook@abc123",
+  "reproducible": true,
+  "health_report": {
+    "schema_version": 1,
+    "summary": { "errors": 0, "warnings": 1, "notices": 0 },
+    "findings": [
+      {
+        "id": "finding-1",
+        "check_id": "injection-egress",
+        "severity": "warning",
+        "entry_selector": "skill:citation-style",
+        "title": "Potential external data transmission",
+        "summary": "The skill references an external URL."
+      }
+    ]
+  },
+  "entries": [
+    {
+      "kind": "skill",
+      "selector": "skill:citation-style",
+      "name": "citation-style",
+      "source_type": "github",
+      "source_reference": "friend/citation-style",
+      "source_version": "v1.2.0",
+      "content_hash": "sha256:1111111111111111111111111111111111111111111111111111111111111111",
+      "local_only": false,
+      "metadata": {}
+    },
+    {
+      "kind": "mcp",
+      "selector": "mcp:papers-db",
+      "name": "papers-db",
+      "source_type": "github",
+      "source_reference": "friend/papers-db",
+      "source_version": "v0.3.0",
+      "content_hash": "sha256:2222222222222222222222222222222222222222222222222222222222222222",
+      "local_only": false,
+      "metadata": {}
+    }
+  ],
+  "harness_mappings": [
+    {
+      "harness": "claude-code",
+      "adapter_version": "1",
+      "configuration": { "schema_version": 1, "nodes": [] }
+    }
+  ]
+}
