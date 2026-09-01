@@ -206,7 +206,7 @@ def test_system_contributors_are_skipped(wizard_env, monkeypatch):
 def test_local_only_warning_in_summary(wizard_env, monkeypatch):
     set_world(monkeypatch, make_world(contributor("untracked", prov_kind="unmanaged", source=None)))
     monkeypatch.setattr(loadout_wizard, "_choose_skills", _accept_preselected)
-    result = runner.invoke(app, ["loadout", "create", "pack"], input="y\n")
+    result = runner.invoke(app, ["loadout", "create", "pack"], input="n\ny\n")
     assert "local-only" in result.output
     assert "blocks making this loadout public" in result.output
 
@@ -353,7 +353,7 @@ def test_dedup_local_only_same_hash_merges(wizard_env, monkeypatch):
                     content_hash="sha256:" + "11" * 32),
     ))
     monkeypatch.setattr(loadout_wizard, "_choose_skills", _accept_preselected)
-    result = runner.invoke(app, ["loadout", "create", "pack"], input="y\n")
+    result = runner.invoke(app, ["loadout", "create", "pack"], input="n\ny\n")
     assert result.exit_code == 0, result.output
     entries = calls[1]["json_body"]["manifest"]["entries"]
     assert len(entries) == 1
@@ -372,7 +372,7 @@ def test_dedup_local_only_different_hash_merges_deterministically(wizard_env, mo
                     content_hash="sha256:" + "22" * 32),
     ))
     monkeypatch.setattr(loadout_wizard, "_choose_skills", _accept_preselected)
-    result = runner.invoke(app, ["loadout", "create", "pack"], input="y\n")
+    result = runner.invoke(app, ["loadout", "create", "pack"], input="n\ny\n")
     assert result.exit_code == 0, result.output
     entries = calls[1]["json_body"]["manifest"]["entries"]
     assert len(entries) == 1
@@ -692,3 +692,83 @@ def test_plain_create_still_works(wizard_env):
     result = runner.invoke(app, ["loadout", "create", "plain-pack", "--empty"])
     assert result.exit_code == 0
     assert calls[0]["json_body"]["loadout"]["name"] == "Plain Pack"
+
+
+HOSTED_HASH = "sha256:" + "cd" * 32
+
+
+@pytest.fixture
+def fake_content(monkeypatch):
+    from drskill import content, service as service_module
+
+    uploads = []
+    files = [{"path": "SKILL.md", "data": b"# Local\n", "executable": False}]
+    monkeypatch.setattr(content, "collect_files", lambda contributor: list(files))
+
+    def fake_upload(file_list, token, base_url):
+        if fake_upload.error:
+            raise service_module.ServiceError("quota_exceeded", "Quota exceeded.")
+        uploads.append({"files": file_list, "token": token, "base_url": base_url})
+        return {"content_hash": HOSTED_HASH, "uploaded": True}
+
+    fake_upload.error = False
+    monkeypatch.setattr(content, "upload", fake_upload)
+    return uploads, fake_upload
+
+
+def test_local_skills_upload_on_confirmation(wizard_env, fake_content, monkeypatch):
+    calls = wizard_env
+    uploads, _ = fake_content
+    set_world(monkeypatch, make_world(
+        contributor("mine", prov_kind="unmanaged", source=None),
+        contributor("tracked"),
+    ))
+    monkeypatch.setattr(loadout_wizard, "_choose_skills", _accept_all)
+
+    result = runner.invoke(app, ["loadout", "create", "pack"], input="y\ny\n")
+    assert result.exit_code == 0, result.output
+    assert "exist only on this machine" in result.output
+    assert len(uploads) == 1
+    assert uploads[0]["base_url"] == "http://svc.test"
+
+    entries = {e["name"]: e for e in calls[-1]["json_body"]["manifest"]["entries"]}
+    assert entries["mine"]["source_type"] == "drskill"
+    assert entries["mine"]["content_hash"] == HOSTED_HASH
+    assert entries["mine"]["local_only"] is False
+    assert entries["tracked"]["source_type"] == "github"
+
+
+def test_declining_the_upload_keeps_entries_local(wizard_env, fake_content, monkeypatch):
+    calls = wizard_env
+    uploads, _ = fake_content
+    set_world(monkeypatch, make_world(contributor("mine", prov_kind="unmanaged", source=None)))
+    monkeypatch.setattr(loadout_wizard, "_choose_skills", _accept_all)
+
+    result = runner.invoke(app, ["loadout", "create", "pack"], input="n\ny\n")
+    assert result.exit_code == 0, result.output
+    assert uploads == []
+    entry = calls[-1]["json_body"]["manifest"]["entries"][0]
+    assert entry["source_type"] == "local"
+    assert entry["local_only"] is True
+
+
+def test_no_offer_when_nothing_is_local(wizard_env, fake_content, monkeypatch):
+    set_world(monkeypatch, make_world(contributor("tracked")))
+    monkeypatch.setattr(loadout_wizard, "_choose_skills", _accept_all)
+
+    result = runner.invoke(app, ["loadout", "create", "pack"], input="y\n")
+    assert result.exit_code == 0, result.output
+    assert "exist only on this machine" not in result.output
+
+
+def test_upload_failure_aborts_before_anything_is_created(wizard_env, fake_content, monkeypatch):
+    calls = wizard_env
+    _, fake_upload = fake_content
+    fake_upload.error = True
+    set_world(monkeypatch, make_world(contributor("mine", prov_kind="unmanaged", source=None)))
+    monkeypatch.setattr(loadout_wizard, "_choose_skills", _accept_all)
+
+    result = runner.invoke(app, ["loadout", "create", "pack"], input="y\n")
+    assert result.exit_code == 1
+    assert "Quota exceeded" in result.output
+    assert calls == []

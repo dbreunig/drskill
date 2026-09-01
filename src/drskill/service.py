@@ -122,13 +122,20 @@ def api_request(
     json_body: dict | None = None,
     base_url: str | None = None,
     raw: bool = False,
+    raw_body: bytes | None = None,
+    content_type: str | None = None,
 ) -> dict | str:
     base = base_url or service_url()
-    data = json.dumps(json_body).encode() if json_body is not None else None
+    if raw_body is not None:
+        data = raw_body
+    else:
+        data = json.dumps(json_body).encode() if json_body is not None else None
     request = urllib.request.Request(f"{base}{path}", data=data, method=method)
     request.add_header("Accept", "application/json")
     if json_body is not None:
         request.add_header("Content-Type", "application/json")
+    elif content_type is not None:
+        request.add_header("Content-Type", content_type)
     if token:
         request.add_header("Authorization", f"Bearer {token}")
     try:

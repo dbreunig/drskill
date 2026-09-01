@@ -29,7 +29,20 @@ def normalize_name(name: str) -> str:
     return collapsed or "skill"
 
 
-def contributors_to_manifest(contributors: list[Contributor]) -> tuple[dict, list[str]]:
+def is_local(contributor: Contributor) -> bool:
+    """True when the contributor has no installable source and would
+    publish as a local_only entry."""
+    source_type = _SOURCE_TYPES.get(contributor.source.kind)
+    return source_type is None or not contributor.source.source
+
+
+def contributors_to_manifest(
+    contributors: list[Contributor],
+    hosted: dict[str, str] | None = None,
+) -> tuple[dict, list[str]]:
+    """hosted maps contributor id -> content hash for skills whose content
+    was uploaded to the service; those become installable drskill entries."""
+    hosted = hosted or {}
     entries: list[dict] = []
     notes: list[str] = []
     used_selectors: set[str] = set()
@@ -50,17 +63,26 @@ def contributors_to_manifest(contributors: list[Contributor]) -> tuple[dict, lis
             notes.append(f"renamed a duplicate of {contributor.name!r} to {name!r}")
         used_selectors.add(selector)
 
-        source_type = _SOURCE_TYPES.get(contributor.source.kind)
-        source = contributor.source.source
-        local_only = source_type is None or not source
+        if contributor.id in hosted:
+            source_type = "drskill"
+            source_reference = "drskill"
+            content_hash = hosted[contributor.id]
+            local_only = False
+        else:
+            mapped = _SOURCE_TYPES.get(contributor.source.kind)
+            source = contributor.source.source
+            local_only = is_local(contributor)
+            source_type = "local" if local_only else mapped
+            source_reference = source or contributor.id
+            content_hash = contributor.content_hash
         entries.append(
             {
                 "kind": kind,
                 "selector": selector,
                 "name": name,
-                "source_type": "local" if local_only else source_type,
-                "source_reference": source or contributor.id,
-                "content_hash": contributor.content_hash,
+                "source_type": source_type,
+                "source_reference": source_reference,
+                "content_hash": content_hash,
                 "local_only": local_only,
                 "metadata": {},
             }

@@ -97,3 +97,28 @@ def test_manifest_is_canonicalizable():
     canonical, runtime_hash = service.canonical_manifest(manifest)
     assert runtime_hash.startswith("sha256:")
     assert '"entries"' in canonical
+
+
+def test_hosted_contributors_become_drskill_entries():
+    local = contributor("mine", prov_kind="unmanaged", source=None)
+    hosted_hash = "sha256:" + "cd" * 32
+    manifest, notes = manifest_build.contributors_to_manifest(
+        [local], hosted={local.id: hosted_hash})
+    entry = manifest["entries"][0]
+    assert entry["source_type"] == "drskill"
+    assert entry["source_reference"] == "drskill"
+    assert entry["content_hash"] == hosted_hash
+    assert entry["local_only"] is False
+
+
+def test_hosted_map_does_not_touch_other_contributors():
+    tracked = contributor("theirs")
+    manifest, _ = manifest_build.contributors_to_manifest(
+        [tracked], hosted={"/tmp/other": "sha256:" + "cd" * 32})
+    assert manifest["entries"][0]["source_type"] == "github"
+
+
+def test_is_local_matches_the_local_only_rule():
+    assert manifest_build.is_local(contributor("a", prov_kind="unmanaged", source=None))
+    assert manifest_build.is_local(contributor("b", prov_kind="gh-skill", source=None))
+    assert not manifest_build.is_local(contributor("c"))

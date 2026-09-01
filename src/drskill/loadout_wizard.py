@@ -19,7 +19,7 @@ import typer
 from rich.console import Console
 from rich.markup import escape
 
-from drskill import manifest_build, pipeline, service
+from drskill import content, manifest_build, pipeline, service
 from drskill.models import Contributor
 
 # The wizard's own Console instance, not cli.py's: cli.py imports this module
@@ -100,7 +100,8 @@ def run(
         typer.echo("Nothing selected.")
         raise typer.Exit(1)
 
-    manifest, notes = manifest_build.contributors_to_manifest(selected)
+    hosted = _offer_hosting(selected, creds, base_url)
+    manifest, notes = manifest_build.contributors_to_manifest(selected, hosted=hosted)
     _print_summary(manifest, notes)
 
     if not typer.confirm(
@@ -236,6 +237,55 @@ def _choose_skills(rows: list[_Row], chosen_harness: str | None) -> list[_Row]:
         raise typer.Exit(0)
     return answer
 
+
+
+def _human_size(size: int) -> str:
+    for unit in ("B", "KB", "MB"):
+        if size < 1024 or unit == "MB":
+            return f"{size:.0f} {unit}" if unit == "B" else f"{size / 1.0:.0f} {unit}"
+        size /= 1024
+    return f"{size:.0f} MB"
+
+
+def _offer_hosting(selected: list[Contributor], creds: dict, base_url: str) -> dict[str, str]:
+    """Offer to upload untracked skills so the loadout can install them
+    anywhere. Returns contributor id -> content hash for the uploads."""
+    local = [c for c in selected if manifest_build.is_local(c)]
+    if not local:
+        return {}
+
+    console.print(
+        f"\n[bold]{len(local)} selected "
+        f"skill{'s' if len(local) != 1 else ''} exist only on this machine:[/bold]"
+    )
+    for contributor in local:
+        # Sizes from the scan, not the disk: nothing is read before consent.
+        size = len(contributor.body.encode()) + sum(b.size for b in contributor.bundled_files)
+        count = 1 + len(contributor.bundled_files)
+        plural = "s" if count != 1 else ""
+        console.print(f"  {escape(contributor.name)}  ({count} file{plural}, {_human_size(size)})")
+
+    if not typer.confirm(
+        "Upload them to drskill so this loadout can install them anywhere?",
+        default=False,
+    ):
+        return {}
+
+    hosted: dict[str, str] = {}
+    for contributor in local:
+        try:
+            files = content.collect_files(contributor)
+            result = content.upload(files, creds["token"], base_url)
+        except OSError as err:
+            typer.echo(f"Could not read {contributor.name}: {err}")
+            raise typer.Exit(1)
+        except service.ServiceError as err:
+            typer.echo(f"Upload of {contributor.name} failed: {err.message}")
+            raise typer.Exit(1)
+        verb = "uploaded" if result["uploaded"] else "already on drskill"
+        typer.echo(f"  {contributor.name}: {verb} ({result['content_hash']})")
+        hosted[contributor.id] = result["content_hash"]
+    return hosted
 
 def _print_summary(manifest: dict, notes: list[str]) -> None:
     entries = manifest["entries"]
