@@ -1264,6 +1264,123 @@ def publish(
     typer.echo(f"Published revision {revision['number']} ({revision['runtime_hash']})")
 
 
+
+@loadout_app.command()
+def install(
+    ref: str = typer.Argument(..., help="owner/slug"),
+    revision: str | None = typer.Argument(None, help="revision number or sha256:<hash> (default: current)"),
+    harness: str | None = typer.Option(None, "--harness",
+        help="install into this harness's own skills directory instead of the shared .agents/skills store"),
+    project: bool = typer.Option(False, "--project", help="install into the project store"),
+    user: bool = typer.Option(False, "--user", help="install into the user store"),
+    yes: bool = typer.Option(False, "--yes", help="skip the confirmation"),
+    force: bool = typer.Option(False, "--force", help="replace installed skills whose content differs"),
+) -> None:
+    """Install a loadout's hosted skills into a skills directory."""
+    from drskill import content
+    from drskill.harnesses import detect_harnesses
+
+    creds, base = _service_credentials()
+    owner, slug = _parse_ref(ref)
+    if project and user:
+        typer.echo("Pass at most one of --project and --user.")
+        raise typer.Exit(1)
+
+    try:
+        if revision is None:
+            data = service.api_request(
+                "GET", f"/api/v1/loadouts/{owner}/{slug}", token=creds["token"], base_url=base)
+            current = data["loadout"].get("current_revision")
+            if not current:
+                typer.echo(f"{owner}/{slug} has no published revision.")
+                raise typer.Exit(1)
+            revision = str(current["number"])
+        document = service.api_request(
+            "GET", f"/api/v1/loadouts/{owner}/{slug}/revisions/{revision}",
+            token=creds["token"], base_url=base, raw=True)
+    except service.ServiceError as err:
+        _echo_service_error(err)
+        raise typer.Exit(1)
+
+    entries = json.loads(document).get("entries", [])
+    hosted = [e for e in entries if e.get("source_type") == "drskill"]
+    external = len(entries) - len(hosted)
+    if not hosted:
+        typer.echo(f"Revision {revision} of {owner}/{slug} has no hosted (drskill) entries.")
+        raise typer.Exit(0)
+
+    root = Path.cwd()
+    home = _home()
+    target, scope = _install_target(harness, project, user, root, home)
+
+    typer.echo(f"Install {len(hosted)} hosted skill{'s' if len(hosted) != 1 else ''} "
+               f"into {target} ({scope} store):")
+    for entry in hosted:
+        typer.echo(f"  {entry['name']}  ({entry['content_hash'][:19]}…)")
+    if external:
+        typer.echo(f"{external} entr{'ies' if external != 1 else 'y'} with external sources "
+                   "will not be installed (hosted install only for now).")
+    if harness is None:
+        blind = [h.display_name for h in detect_harnesses(root, home)
+                 if ".agents/skills" not in h.project_paths
+                 and "~/.agents/skills" not in h.global_paths]
+        if blind:
+            typer.echo(f"Note: {', '.join(blind)} does not read the shared store; "
+                       "pass --harness to target it directly.")
+    if not yes and not typer.confirm("Proceed?", default=False):
+        raise typer.Exit(0)
+
+    installed = unchanged = held = 0
+    for entry in hosted:
+        dest = target / entry["name"]
+        if dest.exists():
+            if content.manifest_hash(content.read_dir(dest)) == entry["content_hash"]:
+                typer.echo(f"  {entry['name']}: already installed")
+                unchanged += 1
+                continue
+            if not force:
+                typer.echo(f"  {entry['name']}: local copy differs; rerun with --force to replace it")
+                held += 1
+                continue
+        try:
+            files = content.download(entry["content_hash"], creds["token"], base)
+        except service.ServiceError as err:
+            _echo_service_error(err)
+            raise typer.Exit(1)
+        replaced = dest.exists()
+        content.write_skill(files, dest)
+        typer.echo(f"  {entry['name']}: {'replaced' if replaced else 'installed'}")
+        installed += 1
+    parts = [f"{installed} installed"]
+    if unchanged:
+        parts.append(f"{unchanged} already installed")
+    if held:
+        parts.append(f"{held} held (--force to replace)")
+    typer.echo(" · ".join(parts))
+
+
+def _install_target(harness_id: str | None, project: bool, user: bool,
+                    root: Path, home: Path) -> tuple[Path, str]:
+    from drskill.harnesses import load_harnesses
+
+    in_project = project or (not user and ((root / ".git").exists() or (root / ".agents").exists()))
+    scope = "project" if in_project else "user"
+    if harness_id is None:
+        base = (root if in_project else home) / ".agents" / "skills"
+        return base, scope
+    hd = next((h for h in load_harnesses() if h.id == harness_id), None)
+    if hd is None:
+        typer.echo(f"Unknown harness {harness_id!r}. Known: "
+                   + ", ".join(h.id for h in load_harnesses()))
+        raise typer.Exit(1)
+    specs = hd.project_paths if in_project else hd.global_paths
+    if not specs:
+        typer.echo(f"{hd.display_name} has no {scope} skills directory.")
+        raise typer.Exit(1)
+    spec = specs[0]
+    base = root / spec if in_project else home / spec.removeprefix("~/")
+    return base, scope
+
 @loadout_app.command()
 def fetch(
     target: str = typer.Argument(..., help="owner/slug, or a bare sha256:<hash>"),

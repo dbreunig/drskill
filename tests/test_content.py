@@ -85,7 +85,7 @@ def api(monkeypatch):
     calls = []
 
     def fake_api_request(method, path, token=None, json_body=None, base_url=None,
-                         raw=False, raw_body=None, content_type=None):
+                         raw=False, raw_body=None, content_type=None, binary=False):
         calls.append({"method": method, "path": path, "token": token,
                       "raw_body": raw_body, "content_type": content_type,
                       "base_url": base_url})
@@ -139,3 +139,86 @@ def test_upload_reraises_errors_that_are_not_a_miss(api):
         content.upload(VECTOR_FILES, token="drsk_x", base_url="http://svc.test")
     assert excinfo.value.code == "connection_error"
     assert len(calls) == 1
+
+
+# -- download / unpack / write ------------------------------------------------
+
+
+def test_unpack_round_trips_pack():
+    files = content.unpack(content.pack(VECTOR_FILES))
+    assert content.manifest_hash(files) == VECTOR_HASH
+    by_path = {f["path"]: f for f in files}
+    assert by_path["scripts/run.sh"]["executable"]
+    assert not by_path["SKILL.md"]["executable"]
+
+
+def test_unpack_rejects_garbage():
+    with pytest.raises(service.ServiceError) as excinfo:
+        content.unpack(b"not gzip")
+    assert excinfo.value.code == "content_invalid"
+
+
+def _tar_with_member(name, data=b"x", typeflag=b"0", mode=0o644, size=None):
+    """Hand-rolled single-member ustar for attack fixtures tarfile refuses to write."""
+    header = bytearray(512)
+    header[0:len(name.encode())] = name.encode()
+    header[100:108] = f"{mode:07o}\0".encode()
+    header[108:116] = b"0000000\0"
+    header[116:124] = b"0000000\0"
+    header[124:136] = f"{size if size is not None else len(data):011o}\0".encode()
+    header[136:148] = f"{0:011o}\0".encode()
+    header[148:156] = b" " * 8
+    header[156:157] = typeflag
+    header[257:263] = b"ustar\0"
+    header[263:265] = b"00"
+    checksum = sum(header)
+    header[148:156] = f"{checksum:06o}\0 ".encode()
+    padding = (512 - len(data) % 512) % 512
+    body = bytes(header) + data + b"\0" * padding + b"\0" * 1024
+    buffer = io.BytesIO()
+    with gzip.GzipFile(fileobj=buffer, mode="wb", mtime=0) as gz:
+        gz.write(body)
+    return buffer.getvalue()
+
+
+@pytest.mark.parametrize("name,typeflag", [
+    ("evil", b"2"),          # symlink
+    ("evil", b"1"),          # hard link
+    ("/etc/passwd", b"0"),   # absolute path
+    ("../evil", b"0"),       # dot-dot path
+])
+def test_unpack_rejects_unsafe_members(name, typeflag):
+    with pytest.raises(service.ServiceError) as excinfo:
+        content.unpack(_tar_with_member(name, typeflag=typeflag))
+    assert excinfo.value.code == "content_invalid"
+
+
+def test_download_verifies_the_manifest_hash(api):
+    calls, fake = api
+    fake.responses[("GET", f"/api/v1/content/{VECTOR_HASH}")] = content.pack(VECTOR_FILES)
+    files = content.download(VECTOR_HASH, token="drsk_x", base_url="http://svc.test")
+    assert content.manifest_hash(files) == VECTOR_HASH
+
+    wrong = "sha256:" + "00" * 32
+    fake.responses[("GET", f"/api/v1/content/{wrong}")] = content.pack(VECTOR_FILES)
+    with pytest.raises(service.ServiceError) as excinfo:
+        content.download(wrong, token="drsk_x", base_url="http://svc.test")
+    assert excinfo.value.code == "hash_mismatch"
+
+
+def test_write_skill_and_read_dir_round_trip(tmp_path):
+    target = tmp_path / "store" / "vector"
+    content.write_skill(VECTOR_FILES, target)
+    assert (target / "SKILL.md").read_bytes() == b"# Vector\n"
+    assert (target / "scripts" / "run.sh").stat().st_mode & 0o111
+    assert content.manifest_hash(content.read_dir(target)) == VECTOR_HASH
+
+
+def test_write_skill_replaces_an_existing_directory_atomically(tmp_path):
+    target = tmp_path / "vector"
+    content.write_skill(VECTOR_FILES, target)
+    (target / "stale.md").write_bytes(b"old")
+    content.write_skill(VECTOR_FILES, target)
+    assert not (target / "stale.md").exists()
+    assert content.manifest_hash(content.read_dir(target)) == VECTOR_HASH
+    assert not list(tmp_path.glob(".*tmp*"))
