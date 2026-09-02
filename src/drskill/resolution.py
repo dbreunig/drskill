@@ -181,7 +181,9 @@ def make_contributor(
         description = fm["description"]
     provenance = Provenance()
     if fm and GH_PROVENANCE_KEYS & fm.keys():
-        provenance = Provenance(kind="gh-skill", source=fm.get("source"))
+        fm_ref = fm.get("ref")
+        provenance = Provenance(kind="gh-skill", source=fm.get("source"),
+                                ref=fm_ref if isinstance(fm_ref, str) else None)
     elif _in_agents_store(real):
         provenance = Provenance(kind="linked")
     bundled: list[BundledFile] = []

@@ -112,6 +112,7 @@ def test_gh_provenance_detected(tmp_path):
     c = next(iter(world.contributors.values()))
     assert c.source.kind == "gh-skill"
     assert c.source.source == "octo/repo"
+    assert c.source.ref == "main"
 
 
 def test_unreadable_skill_recorded_and_not_a_contributor(tmp_path):

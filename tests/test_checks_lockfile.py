@@ -123,3 +123,35 @@ def test_lockfile_entry_beats_linked(tmp_path):
     world, _ = run_scan(proj, home)
     c = next(c for c in world.contributors.values() if c.name == "pinned")
     assert c.source.kind == "skills-lock"
+
+
+def test_lockfile_skill_path_lands_in_provenance(tmp_path):
+    import json as _json
+    proj, home = tmp_path / "p", tmp_path / "h"
+    home.mkdir()
+    d = proj / ".agents" / "skills" / "pinned"
+    d.mkdir(parents=True)
+    (d / "SKILL.md").write_text("---\nname: pinned\ndescription: d\n---\nbody\n")
+    (proj / ".pi").mkdir()
+    (proj / "skills-lock.json").write_text(_json.dumps({"skills": {"pinned": {
+        "source": "friend/pack", "skillPath": "skills/pinned/SKILL.md",
+        "hash": compute_tree_hash(d)}}}))
+    world, _ = run_scan(proj, home)
+    c = next(c for c in world.contributors.values() if c.name == "pinned")
+    assert c.source.path == "skills/pinned"
+
+
+def test_lockfile_root_skill_path_is_empty_string(tmp_path):
+    import json as _json
+    proj, home = tmp_path / "p", tmp_path / "h"
+    home.mkdir()
+    d = proj / ".agents" / "skills" / "pinned"
+    d.mkdir(parents=True)
+    (d / "SKILL.md").write_text("---\nname: pinned\ndescription: d\n---\nbody\n")
+    (proj / ".pi").mkdir()
+    (proj / "skills-lock.json").write_text(_json.dumps({"skills": {"pinned": {
+        "source": "friend/pack", "skillPath": "SKILL.md",
+        "hash": compute_tree_hash(d)}}}))
+    world, _ = run_scan(proj, home)
+    c = next(c for c in world.contributors.values() if c.name == "pinned")
+    assert c.source.path == ""

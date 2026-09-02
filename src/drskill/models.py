@@ -31,6 +31,8 @@ class Deployment(BaseModel):
 class Provenance(BaseModel):
     kind: Literal["skills-lock", "gh-skill", "linked", "unmanaged", "plugin"] = "unmanaged"
     source: str | None = None
+    path: str | None = None  # skill directory inside the source repo
+    ref: str | None = None   # pinned git ref when known
 
 
 class TokenCost(BaseModel):

@@ -87,7 +87,8 @@ def run_scan(
                 world.contributors[c.id] = c.model_copy(
                     update={
                         "source": Provenance(
-                            kind="skills-lock", source=entry.get("source")
+                            kind="skills-lock", source=entry.get("source"),
+                            path=_lock_skill_dir(entry.get("skillPath"))
                         )
                     }
                 )
@@ -129,3 +130,10 @@ def run_scan(
         )
     findings = deep.apply_verdicts(world, findings, cache, acked_fps)
     return world, findings
+
+
+def _lock_skill_dir(skill_path) -> str | None:
+    """skillPath points at SKILL.md; provenance records its directory."""
+    if not isinstance(skill_path, str):
+        return None
+    return skill_path.removesuffix("SKILL.md").rstrip("/")
