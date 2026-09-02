@@ -21,6 +21,43 @@ _SOURCE_TYPES = {
 
 _KINDS = {"skill": "skill", "mcp_tool": "mcp"}
 
+_REPO = re.compile(r"^[A-Za-z0-9_.-]+/[A-Za-z0-9_.-]+$")
+
+
+def parse_repo(source: str | None) -> str | None:
+    """owner/repo from an ecosystem source string, or None."""
+    if not isinstance(source, str):
+        return None
+    s = source.strip()
+    s = s.removeprefix("https://github.com/").removeprefix("github.com/").removeprefix("github:")
+    s = s.removesuffix(".git")
+    s = s.split("@", 1)[0]
+    parts = s.split("/")
+    if len(parts) >= 2 and _REPO.match("/".join(parts[:2])):
+        return "/".join(parts[:2])
+    return None
+
+
+def _github_metadata(contributor: Contributor) -> dict:
+    from drskill import content
+
+    md: dict = {}
+    repo = parse_repo(contributor.source.source)
+    if repo:
+        md["repo"] = repo
+    if contributor.source.path is not None:
+        md["skill_path"] = contributor.source.path
+    if contributor.source.ref:
+        md["ref"] = contributor.source.ref
+    tree_sha = contributor.frontmatter.get("tree_sha")
+    if isinstance(tree_sha, str) and tree_sha:
+        md["tree_sha"] = tree_sha
+    try:
+        md["directory_hash"] = content.manifest_hash(content.collect_files(contributor))
+    except OSError:
+        pass
+    return md
+
 
 def normalize_name(name: str) -> str:
     lowered = name.strip().lower()
@@ -75,6 +112,7 @@ def contributors_to_manifest(
             source_type = "local" if local_only else mapped
             source_reference = source or contributor.id
             content_hash = contributor.content_hash
+        metadata = _github_metadata(contributor) if source_type == "github" else {}
         entries.append(
             {
                 "kind": kind,
@@ -84,7 +122,7 @@ def contributors_to_manifest(
                 "source_reference": source_reference,
                 "content_hash": content_hash,
                 "local_only": local_only,
-                "metadata": {},
+                "metadata": metadata,
             }
         )
 

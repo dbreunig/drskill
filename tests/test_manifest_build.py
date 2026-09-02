@@ -29,7 +29,7 @@ def test_envelope_shape_and_github_mapping():
         "source_reference": "friend/skill@v1",
         "content_hash": "sha256:" + "ab" * 32,
         "local_only": False,
-        "metadata": {},
+        "metadata": {"repo": "friend/skill"},
     }
     assert notes == []
 
@@ -122,3 +122,54 @@ def test_is_local_matches_the_local_only_rule():
     assert manifest_build.is_local(contributor("a", prov_kind="unmanaged", source=None))
     assert manifest_build.is_local(contributor("b", prov_kind="gh-skill", source=None))
     assert not manifest_build.is_local(contributor("c"))
+
+
+def test_github_entries_record_fetch_metadata(monkeypatch):
+    from drskill import content
+    monkeypatch.setattr(content, "collect_files",
+        lambda c: [{"path": "SKILL.md", "data": b"x", "executable": False}])
+    c = contributor("citation")
+    c.source.path = "skills/citation"
+    c.source.ref = "v1.2.0"
+    c.frontmatter["tree_sha"] = "abc123"
+    manifest, _ = manifest_build.contributors_to_manifest([c])
+    md = manifest["entries"][0]["metadata"]
+    assert md["repo"] == "friend/skill"
+    assert md["skill_path"] == "skills/citation"
+    assert md["ref"] == "v1.2.0"
+    assert md["tree_sha"] == "abc123"
+    assert md["directory_hash"].startswith("sha256:")
+
+
+def test_unreadable_directory_omits_the_hash(monkeypatch):
+    from drskill import content
+
+    def boom(c):
+        raise OSError("gone")
+
+    monkeypatch.setattr(content, "collect_files", boom)
+    manifest, _ = manifest_build.contributors_to_manifest([contributor("citation")])
+    md = manifest["entries"][0]["metadata"]
+    assert "directory_hash" not in md
+    assert md["repo"] == "friend/skill"
+
+
+def test_parse_repo():
+    assert manifest_build.parse_repo("friend/skill@v1") == "friend/skill"
+    assert manifest_build.parse_repo("friend/skill") == "friend/skill"
+    assert manifest_build.parse_repo("https://github.com/friend/skill.git") == "friend/skill"
+    assert manifest_build.parse_repo("github:friend/skill") == "friend/skill"
+    assert manifest_build.parse_repo("not a repo") is None
+    assert manifest_build.parse_repo(None) is None
+
+
+def test_local_and_hosted_entries_get_no_fetch_metadata(monkeypatch):
+    from drskill import content
+    monkeypatch.setattr(content, "collect_files",
+        lambda c: [{"path": "SKILL.md", "data": b"x", "executable": False}])
+    local = contributor("mine", prov_kind="unmanaged", source=None)
+    hosted = contributor("uploaded", prov_kind="unmanaged", source=None)
+    manifest, _ = manifest_build.contributors_to_manifest(
+        [local, hosted], hosted={hosted.id: "sha256:" + "cd" * 32})
+    assert manifest["entries"][0]["metadata"] == {}
+    assert manifest["entries"][1]["metadata"] == {}
