@@ -88,7 +88,7 @@ def extract_skill(tar_bytes: bytes, entry: dict) -> list[dict]:
             members = tar.getmembers()
             skill_path = metadata.get("skill_path")
             if skill_path is not None:
-                return _extract_dir(tar, members, skill_path)
+                return _apply_file_list(_extract_dir(tar, members, skill_path), entry)
             return _search(tar, members, entry)
     except FetchError:
         raise
@@ -143,6 +143,19 @@ def _check_relpath(relpath: str) -> None:
         raise FetchError(f"unsafe path {relpath!r} in the skill directory")
 
 
+def _apply_file_list(files: list[dict], entry: dict) -> list[dict]:
+    """Keep only the files the publisher recorded as the skill; repository
+    housekeeping files around a root-level skill are not the skill."""
+    recorded = (entry.get("metadata") or {}).get("files")
+    if not (isinstance(recorded, list) and recorded):
+        return files
+    wanted = set(recorded)
+    kept = [f for f in files if f["path"] in wanted]
+    if not kept:
+        raise FetchError("none of the recorded skill files exist in the repository")
+    return kept
+
+
 def _search(tar, members, entry: dict) -> list[dict]:
     candidates = sorted({
         (_stripped(m.name) or "").rsplit("/", 1)[0] if "/" in (_stripped(m.name) or "") else ""
@@ -152,7 +165,7 @@ def _search(tar, members, entry: dict) -> list[dict]:
     matches: list[list[dict]] = []
     for candidate in candidates:
         try:
-            files = _extract_dir(tar, members, candidate)
+            files = _apply_file_list(_extract_dir(tar, members, candidate), entry)
         except FetchError:
             continue
         if verify(files, entry) != "mismatch":

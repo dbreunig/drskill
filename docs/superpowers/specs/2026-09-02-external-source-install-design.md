@@ -35,10 +35,15 @@ with a stated caveat.
 `manifest_build.contributors_to_manifest` writes these keys into the
 `metadata` object of every entry whose `source_type` is `github`:
 
-- `directory_hash`: the manifest hash of the skill directory, computed
+- `directory_hash`: the manifest hash of the skill's files, computed
   from disk with `content.manifest_hash(content.collect_files(c))`. This
   is the same algorithm hosted content uses, so one identity verifies
   everything. Omitted when the files cannot be read.
+- `files`: the sorted relative paths the hash covers. Install extracts
+  only these paths from the repository, so housekeeping files around a
+  root-level skill (README, dotfiles, a docs directory) are never treated
+  as part of the skill and never cause false drift. Recorded and omitted
+  together with `directory_hash`.
 - `repo`: `owner/repo`, parsed from the provenance source string.
 - `skill_path`: the skill directory's path inside the repo, derived from
   the ecosystem lockfile's `skillPath` (its value points at SKILL.md; the
@@ -73,7 +78,10 @@ entries:
    picks the one whose contents match the verification hash (the
    `directory_hash`, or failing that the SKILL.md `content_hash`). Zero or
    several matches make the entry uninstallable, reported and skipped.
-4. Extract. Members under the skill directory pass the same gate as
+4. Extract. When the entry records a `files` list, only those paths are
+   taken from the skill directory; other repository files are ignored,
+   and an entry none of whose recorded files exist is uninstallable.
+   Members under the skill directory pass the same gate as
    hosted downloads: regular files only, no symlinks or links or devices,
    safe relative paths, at most 200 files and 20 MB unpacked. The result
    is the same `[{path, data, executable}]` shape the rest of content.py
@@ -111,7 +119,8 @@ The user's loadout:
 2. It then prompts: "Publish revision N+1 of <owner>/<slug> with the
    updated skill and install it? [y/N]", default no.
 3. On yes, it takes the current revision's manifest, updates that entry's
-   `metadata.directory_hash` (and `ref`/`tree_sha` when newly known),
+   `metadata.directory_hash` and `metadata.files` from the fetched set
+   (and `ref` when newly known),
    refreshes that entry's findings in the manifest's `health_report` from
    the review run, publishes through the existing revisions endpoint, and
    installs the now-verified content. On no, nothing is written or

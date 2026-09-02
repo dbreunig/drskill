@@ -53,7 +53,11 @@ def _github_metadata(contributor: Contributor) -> dict:
     if isinstance(tree_sha, str) and tree_sha:
         md["tree_sha"] = tree_sha
     try:
-        md["directory_hash"] = content.manifest_hash(content.collect_files(contributor))
+        files = content.collect_files(contributor)
+        md["directory_hash"] = content.manifest_hash(files)
+        # The exact file set the hash covers. Install extracts only these
+        # paths, so repo housekeeping files never count as the skill.
+        md["files"] = sorted(f["path"] for f in files)
     except OSError:
         pass
     return md

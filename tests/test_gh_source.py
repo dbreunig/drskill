@@ -195,3 +195,50 @@ def test_fetch_tarball_enforces_the_size_cap(codeload, monkeypatch):
     with pytest.raises(gh_source.FetchError) as excinfo:
         gh_source.fetch_tarball("friend/pack", "v1.2.0", base_url=codeload)
     assert "cap" in str(excinfo.value)
+
+
+# -- recorded file list filtering ---------------------------------------------
+
+
+def test_extract_filters_to_the_recorded_file_list():
+    # A root-level skill: the repo carries housekeeping files the installer
+    # never materialized. Only the recorded files are the skill.
+    repo = {
+        "SKILL.md": SKILL_MD,
+        "reference/tips.md": b"tips\n",
+        "README.md": b"# repo\n",
+        ".gitignore": b"*.pyc\n",
+        "docs/dev-notes.md": b"internal\n",
+    }
+    recorded = [
+        {"path": "SKILL.md", "data": SKILL_MD, "executable": False},
+        {"path": "reference/tips.md", "data": b"tips\n", "executable": False},
+    ]
+    e = entry(metadata={
+        "repo": "friend/pack", "skill_path": "",
+        "files": ["SKILL.md", "reference/tips.md"],
+        "directory_hash": content.manifest_hash(recorded),
+    })
+    files = gh_source.extract_skill(repo_tarball(files=repo), e)
+    assert sorted(f["path"] for f in files) == ["SKILL.md", "reference/tips.md"]
+    assert gh_source.verify(files, e) == "ok"
+
+
+def test_extract_with_file_list_detects_true_drift():
+    repo = {"SKILL.md": b"changed body\n", "README.md": b"# repo\n"}
+    recorded = [{"path": "SKILL.md", "data": SKILL_MD, "executable": False}]
+    e = entry(metadata={
+        "repo": "friend/pack", "skill_path": "",
+        "files": ["SKILL.md"],
+        "directory_hash": content.manifest_hash(recorded),
+    })
+    files = gh_source.extract_skill(repo_tarball(files=repo), e)
+    assert gh_source.verify(files, e) == "mismatch"
+
+
+def test_extract_fails_when_every_recorded_file_is_gone():
+    repo = {"README.md": b"# repo\n"}
+    e = entry(metadata={"repo": "friend/pack", "skill_path": "",
+                        "files": ["SKILL.md"], "directory_hash": CITATION_HASH})
+    with pytest.raises(gh_source.FetchError):
+        gh_source.extract_skill(repo_tarball(files=repo), e)

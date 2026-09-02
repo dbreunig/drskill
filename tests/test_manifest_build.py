@@ -173,3 +173,13 @@ def test_local_and_hosted_entries_get_no_fetch_metadata(monkeypatch):
         [local, hosted], hosted={hosted.id: "sha256:" + "cd" * 32})
     assert manifest["entries"][0]["metadata"] == {}
     assert manifest["entries"][1]["metadata"] == {}
+
+
+def test_github_metadata_records_the_file_list(monkeypatch):
+    from drskill import content
+    monkeypatch.setattr(content, "collect_files",
+        lambda c: [{"path": "b.md", "data": b"2", "executable": False},
+                   {"path": "a.md", "data": b"1", "executable": False}])
+    manifest, _ = manifest_build.contributors_to_manifest([contributor("citation")])
+    md = manifest["entries"][0]["metadata"]
+    assert md["files"] == ["a.md", "b.md"]

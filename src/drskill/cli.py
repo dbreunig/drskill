@@ -1565,6 +1565,7 @@ def _publish_updated_entry(entry: dict, files: list[dict], ref: str,
         if candidate.get("selector") == entry.get("selector"):
             metadata = candidate.setdefault("metadata", {})
             metadata["directory_hash"] = content.manifest_hash(files)
+            metadata["files"] = sorted(f["path"] for f in files)
             metadata["ref"] = ref
             break
     if not typer.confirm(f"Publish a new revision of {owner}/{slug} with the "
