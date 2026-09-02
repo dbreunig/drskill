@@ -2,10 +2,12 @@
 
 Status: Approved (design approved in discussion 2026-09-02)
 Date: 2026-09-02
-Scope: drskill CLI only. Publish records fetch coordinates and a directory
-hash for external entries; `drskill loadout install` fetches `github`
-entries from GitHub, verifies them, and installs them alongside hosted
-entries. The drskill-web service is unchanged.
+Scope: Mostly drskill CLI. Publish records fetch coordinates and a
+directory hash for external entries; `drskill loadout install` fetches
+`github` entries from GitHub, verifies them, and installs them alongside
+hosted entries. A verification mismatch starts an interactive remediation
+flow: review, then republish or fork. The drskill-web service gains one
+endpoint, fork over the API.
 
 ## Goal
 
@@ -18,8 +20,10 @@ with a stated caveat.
 
 ## Out of scope
 
-- Server changes. Entry `metadata` is already free-form, and the server
-  validates nothing new.
+- Server changes beyond the fork endpoint. Entry `metadata` is already
+  free-form, and the server validates nothing new about it.
+- Per-file hashes in entry metadata (they would enable file-level diffs
+  at review time; the review runs the checks instead).
 - Escrow (uploading copies of external skills to the service). Considered
   and set aside for licensing reasons.
 - Sources other than GitHub. `source_type` values besides `drskill` and
@@ -78,25 +82,89 @@ entries:
 ## Verification policy
 
 - An entry with `metadata.directory_hash` must match it exactly. A
-  mismatch fails that entry with "upstream has changed since this revision
-  was published", and nothing is written for it.
+  mismatch starts the remediation flow below; nothing installs
+  unverified.
 - An entry without `directory_hash` (published before this feature) is
   verified by its existing `content_hash` against the fetched SKILL.md
   text, normalized the way the scanner normalizes
   (`resolution.normalize_content` under `resolution.content_hash`). On a
   match the install proceeds and prints one caveat naming the entry:
-  bundled files are unverified. On a mismatch the entry fails.
-- There is no flag to skip verification.
+  bundled files are unverified. On a mismatch the entry enters the same
+  remediation flow.
+- There is no flag to skip verification. The only way past a mismatch is
+  a new published revision that pins what the user reviewed.
+
+## Mismatch remediation flow
+
+A mismatch prints: "The remote skill has been updated since this loadout
+was created and the original version was not pinned." What follows
+depends on whether the signed-in user owns the loadout. The CLI learns
+its own handle from one `GET /api/v1/identity` call, made only when a
+mismatch occurs.
+
+The user's loadout:
+
+1. The CLI holds the fetched new version, so it reviews it in place: it
+   runs the standard skill checks on the fetched content and displays the
+   findings the way `drskill scan` does. The user may ack findings, and
+   acks are recorded in the machine ledger with the normal semantics.
+2. It then prompts: "Publish revision N+1 of <owner>/<slug> with the
+   updated skill and install it? [y/N]", default no.
+3. On yes, it takes the current revision's manifest, updates that entry's
+   `metadata.directory_hash` (and `ref`/`tree_sha` when newly known),
+   refreshes that entry's findings in the manifest's `health_report` from
+   the review run, publishes through the existing revisions endpoint, and
+   installs the now-verified content. On no, nothing is written or
+   published.
+
+Someone else's loadout:
+
+1. The CLI prompts: "Fork <owner>/<slug> to your account and review the
+   updated skill? [y/N]", default no.
+2. On yes, it calls the new fork endpoint. The fork keeps the origin's
+   slug and name by default; on a slug collision the CLI prompts for a
+   different slug and retries. The fork is private and carries the
+   origin's current revision, so its entries are identical.
+3. The CLI then continues the owner flow against the fork: review with
+   checks and acks, publish the fork's next revision, install.
+
+Non-interactive runs (`--yes`, or stdin is not a terminal) skip
+remediation entirely: the entry fails with the message above plus a hint
+to rerun interactively, and the command continues with other entries.
+
+## Server: fork over the API
+
+drskill-web gains `POST /api/v1/loadouts/:owner_handle/:slug/fork` under
+the existing bearer authentication:
+
+- Authorization is `LoadoutPolicy#fork?` (signed in and able to view the
+  origin); failures are the uniform 404.
+- The optional body `{loadout: {slug, name, description}}` overrides the
+  fork's attributes; each defaults to the origin's value.
+- The controller is a thin wrapper over the existing `Loadouts::Fork`
+  service. A slug collision returns the 422 `loadout_invalid` envelope
+  with details; an origin without a published revision returns 422 with
+  code `fork_invalid`.
+- The response is 201 with the same loadout JSON the create endpoint
+  returns. The operation is added to the OpenAPI document and its drift
+  test.
+
+No other server change. Fork republishes the origin's manifest through
+`PublishRevision`, and its hosted-content validation already passes for
+forkers because the download policy accepts any hash referenced by a
+loadout the user can view.
 
 ## Install command behavior
 
 - The plan listing shows hosted and github entries together. A github
   entry's line shows its repo and ref. Unfetchable entries (unparseable
   source, unknown source type) are listed with the reason.
-- Per-entry failures (fetch error, locate ambiguity, verification
-  mismatch) are reported and counted; the command continues with the
-  remaining entries. The exit code is 1 only when at least one entry
-  failed and nothing was installed or already present; otherwise 0.
+- Per-entry failures (fetch error, locate ambiguity, declined or
+  non-interactive remediation) are reported and counted; the command
+  continues with the remaining entries. An entry installed through
+  remediation counts as installed. The exit code is 1 only when at least
+  one entry failed and nothing was installed or already present;
+  otherwise 0.
 - Collision handling is unchanged: identical content is "already
   installed", differing content requires `--force`, writes are atomic.
 - Target resolution (shared store default, `--harness`, scope rules) is
@@ -111,8 +179,15 @@ entries:
 - Command: a local HTTP stub stands in for codeload.github.com (the
   fetcher takes an overridable base URL for exactly this). Tests cover a
   mixed revision (hosted plus github plus unparseable), the legacy
-  SKILL.md-only path with its caveat, a directory-hash mismatch, and the
-  exit codes.
+  SKILL.md-only path with its caveat, and the exit codes.
+- Remediation: the owner path (review shown, publish on confirm, decline
+  publishes nothing), the fork path (fork called, slug collision reprompt,
+  then publish against the fork), and non-interactive runs skipping
+  remediation with the hint.
+- Server (drskill-web): request tests for the fork endpoint covering
+  authorization, attribute defaults and overrides, slug collision, the
+  no-revision error, forking a loadout with hosted entries, and OpenAPI
+  drift.
 - Manifest build: metadata recording for lockfile-governed, frontmatter,
   and unreadable-directory cases.
 - No live GitHub in the suite. One manual live verification against a
