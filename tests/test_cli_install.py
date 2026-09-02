@@ -241,3 +241,113 @@ def test_loadout_without_a_revision_errors(env):
     result = runner.invoke(app, ["loadout", "install", "drew/empty", "--yes"])
     assert result.exit_code == 1
     assert "no published revision" in result.output
+
+
+# -- mismatch remediation -----------------------------------------------------
+
+from drskill import cli as cli_mod  # noqa: E402
+
+
+def keys(*seq):
+    it = iter(seq)
+    return lambda: next(it)
+
+
+@pytest.fixture
+def remediation(env, monkeypatch):
+    """A mismatching github entry plus fakes for identity, publish, and fork."""
+    home, project, state = env
+    state["manifest"] = manifest([github_entry(directory_hash="sha256:" + "00" * 32)])
+    monkeypatch.setattr(cli_mod.interactive, "can_interact", lambda *a, **k: None)
+    monkeypatch.setattr(cli_mod, "_review_fetched", lambda *a, **k: True)
+
+    calls = {"publish": [], "fork": [], "identity": "drew", "fork_fail_once": False}
+    real = service.api_request
+
+    def fake(method, path, token=None, json_body=None, base_url=None,
+             raw=False, raw_body=None, content_type=None, binary=False):
+        if path == "/api/v1/identity":
+            return {"user": {"handle": calls["identity"], "display_name": None}}
+        if method == "POST" and path.endswith("/fork"):
+            if calls["fork_fail_once"]:
+                calls["fork_fail_once"] = False
+                raise service.ServiceError("loadout_invalid", "The loadout is invalid.",
+                                           details={"slug": ["has already been taken"]})
+            calls["fork"].append(json_body)
+            slug = (json_body or {}).get("loadout", {}).get("slug") or "pack"
+            return {"loadout": {"owner": calls["identity"], "slug": slug, "name": "Pack",
+                                "visibility": "private", "description": None,
+                                "published_at": None, "current_revision": None}}
+        if method == "POST" and path.endswith("/revisions"):
+            calls["publish"].append({"path": path, "json_body": json_body})
+            return {"revision": {"number": 3, "runtime_hash": "sha256:" + "ff" * 32}}
+        return real(method, path, token=token, json_body=json_body, base_url=base_url,
+                    raw=raw, raw_body=raw_body, content_type=content_type, binary=binary)
+
+    monkeypatch.setattr(service, "api_request", fake)
+    return home, state, calls
+
+
+def test_owner_mismatch_reviews_and_republishes(remediation):
+    home, state, calls = remediation
+    result = runner.invoke(app, ["loadout", "install", "drew/pack"], input="y\ny\n")
+    assert result.exit_code == 0, result.output
+    assert "The remote skill has been updated" in result.output
+    assert len(calls["publish"]) == 1
+    assert calls["publish"][0]["path"] == "/api/v1/loadouts/drew/pack/revisions"
+    published = calls["publish"][0]["json_body"]["manifest"]
+    entry = published["entries"][0]
+    assert entry["metadata"]["directory_hash"] == GH_HASH
+    assert "runtime_hash" in calls["publish"][0]["json_body"]
+    assert (skills_dir(home) / "citation" / "SKILL.md").exists()
+    assert "1 installed" in result.output
+
+
+def test_owner_declining_publish_installs_nothing(remediation):
+    home, state, calls = remediation
+    result = runner.invoke(app, ["loadout", "install", "drew/pack"], input="y\nn\n")
+    assert result.exit_code == 1
+    assert calls["publish"] == []
+    assert not (skills_dir(home) / "citation").exists()
+
+
+def test_review_quit_aborts_the_entry(remediation, monkeypatch):
+    home, state, calls = remediation
+    monkeypatch.setattr(cli_mod, "_review_fetched", lambda *a, **k: False)
+    result = runner.invoke(app, ["loadout", "install", "drew/pack"], input="y\n")
+    assert result.exit_code == 1
+    assert calls["publish"] == []
+
+
+def test_non_owner_forks_then_republishes(remediation):
+    home, state, calls = remediation
+    calls["identity"] = "me"
+    result = runner.invoke(app, ["loadout", "install", "drew/pack"], input="y\ny\ny\n")
+    assert result.exit_code == 0, result.output
+    assert "Fork drew/pack" in result.output
+    assert len(calls["fork"]) == 1
+    assert calls["publish"][0]["path"] == "/api/v1/loadouts/me/pack/revisions"
+    assert (skills_dir(home) / "citation" / "SKILL.md").exists()
+
+
+def test_fork_slug_collision_reprompts(remediation):
+    home, state, calls = remediation
+    calls["identity"] = "me"
+    calls["fork_fail_once"] = True
+    result = runner.invoke(app, ["loadout", "install", "drew/pack"],
+                           input="y\ny\npack-two\ny\n")
+    assert result.exit_code == 0, result.output
+    assert calls["fork"][0]["loadout"]["slug"] == "pack-two"
+    assert calls["publish"][0]["path"] == "/api/v1/loadouts/me/pack-two/revisions"
+
+
+def test_review_fetched_runs_lint_and_records_acks(tmp_path, monkeypatch):
+    home = tmp_path / "home"
+    home.mkdir()
+    files = [{"path": "SKILL.md",
+              "data": b"---\nname: vague\ndescription: Helps with various tasks.\n---\nbody\n",
+              "executable": False}]
+    monkeypatch.setattr(cli_mod, "key_source", keys("a", "s", "s"))
+    assert cli_mod._review_fetched(files, home, name="vague") is True
+    ledger_text = (home / ".drskill.toml").read_text()
+    assert "[[ack]]" in ledger_text

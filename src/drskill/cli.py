@@ -1355,8 +1355,10 @@ def install(
             typer.echo(f"  {entry['name']}: {'replaced' if replaced else 'installed'}")
             status = "installed"
         counts[status] += 1
+    ctx = {"owner": owner, "slug": slug, "manifest": json.loads(document),
+           "creds": creds, "base": base, "home": home}
     for entry in github:
-        status = _install_one_github(entry, target, force=force, yes=yes)
+        status = _install_one_github(entry, target, force=force, yes=yes, ctx=ctx)
         counts[status] += 1
     parts = [f"{counts['installed']} installed"]
     if counts["unchanged"]:
@@ -1386,7 +1388,8 @@ def _existing_dir_status(expected_hash: str, dest: Path, name: str, force: bool)
     return None
 
 
-def _install_one_github(entry: dict, target: Path, *, force: bool, yes: bool) -> str:
+def _install_one_github(entry: dict, target: Path, *, force: bool, yes: bool,
+                        ctx: dict) -> str:
     from drskill import content, gh_source
 
     coords = gh_source.coordinates(entry)
@@ -1403,7 +1406,7 @@ def _install_one_github(entry: dict, target: Path, *, force: bool, yes: bool) ->
         return "failed"
     outcome = gh_source.verify(files, entry)
     if outcome == "mismatch":
-        return _remediate(entry, files, dest, force=force, yes=yes)
+        return _remediate(entry, files, dest, ref=ref, force=force, yes=yes, ctx=ctx)
     status = _existing_dir_status(content.manifest_hash(files), dest, entry["name"], force)
     if status is not None:
         return status
@@ -1416,11 +1419,169 @@ def _install_one_github(entry: dict, target: Path, *, force: bool, yes: bool) ->
     return "installed"
 
 
-def _remediate(entry: dict, files: list[dict], dest: Path, *, force: bool, yes: bool) -> str:
+def _remediate(entry: dict, files: list[dict], dest: Path, *, ref: str,
+               force: bool, yes: bool, ctx: dict) -> str:
+    """Interactive recovery for an upstream drift: review the fetched
+    version with the standard checks, then republish (owner) or fork and
+    republish (non-owner), then install."""
+    from drskill import content
+
     typer.echo("The remote skill has been updated since this loadout was "
                "created and the original version was not pinned.")
-    typer.echo("Rerun interactively to review and republish.")
-    return "failed"
+    if yes or interactive.can_interact() is not None:
+        typer.echo("Rerun interactively to review and republish.")
+        return "failed"
+
+    creds, base, home = ctx["creds"], ctx["base"], ctx["home"]
+    owner, slug = ctx["owner"], ctx["slug"]
+    try:
+        identity = service.api_request("GET", "/api/v1/identity",
+                                       token=creds["token"], base_url=base)
+        handle = identity["user"]["handle"]
+    except service.ServiceError as err:
+        _echo_service_error(err)
+        return "failed"
+
+    if handle != owner:
+        if not typer.confirm(f"Fork {owner}/{slug} to your account and review "
+                             "the updated skill?", default=False):
+            return "failed"
+        forked = _fork_loadout(owner, slug, creds, base)
+        if forked is None:
+            return "failed"
+        owner, slug = forked
+
+    if not _review_fetched(files, home, manifest=ctx["manifest"],
+                           selector=entry.get("selector"), name=entry["name"]):
+        return "failed"
+
+    published = _publish_updated_entry(entry, files, ref, owner, slug, creds, base,
+                                       ctx["manifest"])
+    if not published:
+        return "failed"
+
+    status = _existing_dir_status(content.manifest_hash(files), dest, entry["name"], force)
+    if status is not None:
+        return status
+    replaced = dest.exists()
+    content.write_skill(files, dest)
+    typer.echo(f"  {entry['name']}: {'replaced' if replaced else 'installed'}")
+    return "installed"
+
+
+def _fork_loadout(owner: str, slug: str, creds: dict, base: str) -> tuple[str, str] | None:
+    body: dict = {}
+    while True:
+        try:
+            data = service.api_request(
+                "POST", f"/api/v1/loadouts/{owner}/{slug}/fork",
+                token=creds["token"], json_body=body or None, base_url=base)
+        except service.ServiceError as err:
+            if err.code == "loadout_invalid" and (err.details or {}).get("slug"):
+                new_slug = typer.prompt("That slug is taken; choose a slug for your fork").strip()
+                if not new_slug:
+                    return None
+                body = {"loadout": {"slug": new_slug}}
+                continue
+            _echo_service_error(err)
+            return None
+        fork = data["loadout"]
+        typer.echo(f"Forked to {fork['owner']}/{fork['slug']}.")
+        return fork["owner"], fork["slug"]
+
+
+def _review_fetched(files: list[dict], home: Path, manifest: dict | None = None,
+                    selector: str | None = None, name: str = "skill") -> bool:
+    """Write the fetched skill to a temp directory, run the standard checks,
+    and offer acks. False when the user quits the review. When a manifest
+    with a health_report is given, that entry's findings are refreshed in
+    place from this run."""
+    import tempfile
+
+    from drskill import content, lint as lint_mod
+
+    with tempfile.TemporaryDirectory(prefix="drskill-review-") as tmp:
+        skill_dir = Path(tmp) / name
+        content.write_skill(files, skill_dir)
+        target = lint_mod.classify(skill_dir, "skill")
+        config = _load_effective_config_or_exit(Path(tmp), home, False)
+        world, findings = lint_mod.run_lint(target, config, Path(tmp), home)
+        active, acked = ledger.filter_findings(findings, config)
+        active = [f for f in active if f.severity != "note"]
+        if manifest is not None and selector is not None:
+            _refresh_health_report(manifest, selector, active)
+        if not active:
+            typer.echo("Review: no findings.")
+            return True
+        report.print_findings(world, active, console)
+        machine_ledger = home / ".drskill.toml"
+        for finding in active:
+            console.print("[bold]a[/bold] ack · [bold]s[/bold] skip · [bold]q[/bold] quit review")
+            while True:
+                key = key_source()
+                if key == "a":
+                    ledger.append_ack(machine_ledger, ledger.Ack(
+                        check=finding.check_id, skills=finding.contributor_names,
+                        fingerprint=finding.fingerprint, date=dt.date.today()))
+                    typer.echo(f"  acked {finding.check_id}")
+                    break
+                if key == "s":
+                    break
+                if key == "q":
+                    return False
+        return True
+
+
+def _refresh_health_report(manifest: dict, selector: str, findings) -> None:
+    """Replace the selector's findings in an existing health_report with
+    this review run's results and recompute the summary."""
+    health_report = manifest.get("health_report")
+    if not isinstance(health_report, dict) or not isinstance(health_report.get("findings"), list):
+        return
+    kept = [f for f in health_report["findings"]
+            if not (isinstance(f, dict) and f.get("entry_selector") == selector)]
+    kept += [{
+        "id": f.fingerprint, "check_id": f.check_id, "severity": f.severity,
+        "entry_selector": selector, "title": f.check_id, "summary": f.message,
+    } for f in findings]
+    health_report["findings"] = kept
+    if isinstance(health_report.get("summary"), dict):
+        health_report["summary"] = {
+            "errors": sum(1 for f in kept if isinstance(f, dict) and f.get("severity") == "error"),
+            "warnings": sum(1 for f in kept if isinstance(f, dict) and f.get("severity") == "warning"),
+            "notices": sum(1 for f in kept if isinstance(f, dict) and f.get("severity") not in ("error", "warning")),
+        }
+
+
+def _publish_updated_entry(entry: dict, files: list[dict], ref: str,
+                           owner: str, slug: str, creds: dict, base: str,
+                           current_manifest: dict) -> bool:
+    import copy
+
+    from drskill import content
+
+    manifest = copy.deepcopy(current_manifest)
+    for candidate in manifest.get("entries", []):
+        if candidate.get("selector") == entry.get("selector"):
+            metadata = candidate.setdefault("metadata", {})
+            metadata["directory_hash"] = content.manifest_hash(files)
+            metadata["ref"] = ref
+            break
+    if not typer.confirm(f"Publish a new revision of {owner}/{slug} with the "
+                         "updated skill and install it?", default=False):
+        return False
+    _, runtime_hash = service.canonical_manifest(manifest)
+    try:
+        data = service.api_request(
+            "POST", f"/api/v1/loadouts/{owner}/{slug}/revisions",
+            token=creds["token"], base_url=base,
+            json_body={"manifest": manifest, "runtime_hash": runtime_hash})
+    except service.ServiceError as err:
+        _echo_service_error(err)
+        return False
+    revision = data["revision"]
+    typer.echo(f"Published revision {revision['number']} ({revision['runtime_hash']}).")
+    return True
 
 
 def _install_target(harness_id: str | None, project: bool, user: bool,
