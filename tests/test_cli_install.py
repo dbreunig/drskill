@@ -1,4 +1,8 @@
+import io
 import json
+import tarfile
+import threading
+from http.server import BaseHTTPRequestHandler, HTTPServer
 
 import pytest
 from typer.testing import CliRunner
@@ -14,18 +18,61 @@ FILES = [
 ]
 HASH = content.manifest_hash(FILES)
 
-MANIFEST = {
-    "schema_version": 1,
-    "entries": [
-        {"kind": "skill", "selector": "skill:vector", "name": "vector",
-         "source_type": "drskill", "source_reference": "drskill",
-         "content_hash": HASH, "local_only": False, "metadata": {}},
-        {"kind": "skill", "selector": "skill:tracked", "name": "tracked",
-         "source_type": "github", "source_reference": "friend/tracked@v1",
-         "content_hash": "sha256:" + "ab" * 32, "local_only": False, "metadata": {}},
-    ],
-    "harness_mappings": [],
-}
+GH_SKILL_MD = b"---\nname: citation\ndescription: d\n---\nbody\n"
+GH_FILES = [
+    {"path": "SKILL.md", "data": GH_SKILL_MD, "executable": False},
+    {"path": "reference/tips.md", "data": b"tips\n", "executable": False},
+]
+GH_HASH = content.manifest_hash(GH_FILES)
+
+
+def repo_tarball():
+    buf = io.BytesIO()
+    with tarfile.open(fileobj=buf, mode="w:gz") as tar:
+        for f in GH_FILES:
+            info = tarfile.TarInfo(f"pack-abc/skills/citation/{f['path']}")
+            info.size = len(f["data"])
+            tar.addfile(info, io.BytesIO(f["data"]))
+    return buf.getvalue()
+
+
+def hosted_entry():
+    return {"kind": "skill", "selector": "skill:vector", "name": "vector",
+            "source_type": "drskill", "source_reference": "drskill",
+            "content_hash": HASH, "local_only": False, "metadata": {}}
+
+
+def github_entry(**metadata_overrides):
+    metadata = {"repo": "friend/pack", "skill_path": "skills/citation",
+                "ref": "v1", "directory_hash": GH_HASH}
+    metadata.update(metadata_overrides)
+    metadata = {k: v for k, v in metadata.items() if v is not None}
+    return {"kind": "skill", "selector": "skill:citation", "name": "citation",
+            "source_type": "github", "source_reference": "friend/pack@v1",
+            "source_version": "v1", "content_hash": "sha256:" + "ab" * 32,
+            "local_only": False, "metadata": metadata}
+
+
+def manifest(entries):
+    return {"schema_version": 1, "entries": entries, "harness_mappings": []}
+
+
+MANIFEST = manifest([hosted_entry(), github_entry()])
+
+
+class _CodeloadStub(BaseHTTPRequestHandler):
+    def do_GET(self):
+        if self.path.startswith("/friend/pack/tar.gz/"):
+            body = repo_tarball()
+            self.send_response(200)
+        else:
+            body = b"nope"
+            self.send_response(404)
+        self.end_headers()
+        self.wfile.write(body)
+
+    def log_message(self, *args):
+        pass
 
 
 @pytest.fixture
@@ -39,6 +86,14 @@ def env(tmp_path, monkeypatch):
     monkeypatch.chdir(project)
     service.save_credentials("http://svc.test", "drsk_x")
 
+    server = HTTPServer(("127.0.0.1", 0), _CodeloadStub)
+    thread = threading.Thread(target=server.serve_forever, daemon=True)
+    thread.start()
+    monkeypatch.setenv("DRSKILL_CODELOAD_URL",
+                       f"http://127.0.0.1:{server.server_address[1]}")
+
+    state = {"manifest": MANIFEST}
+
     def fake_api_request(method, path, token=None, json_body=None, base_url=None,
                          raw=False, raw_body=None, content_type=None, binary=False):
         if path == "/api/v1/loadouts/drew/pack":
@@ -47,7 +102,7 @@ def env(tmp_path, monkeypatch):
                                 "published_at": None,
                                 "current_revision": {"number": 2, "runtime_hash": "sha256:" + "ee" * 32}}}
         if path == "/api/v1/loadouts/drew/pack/revisions/2":
-            return json.dumps(MANIFEST)
+            return json.dumps(state["manifest"])
         if path == f"/api/v1/content/{HASH}":
             return content.pack(FILES)
         if path == "/api/v1/loadouts/drew/empty":
@@ -57,74 +112,126 @@ def env(tmp_path, monkeypatch):
         raise service.ServiceError("not_found", "Not found.")
 
     monkeypatch.setattr(service, "api_request", fake_api_request)
-    return home, project
+    yield home, project, state
+    server.shutdown()
+    thread.join(timeout=5)
+    server.server_close()
 
 
-def installed_dir(home):
-    return home / ".agents" / "skills" / "vector"
+def skills_dir(home):
+    return home / ".agents" / "skills"
 
 
-def test_install_into_the_shared_user_store_by_default(env):
-    home, project = env
+def test_install_hosted_and_github_entries(env):
+    home, _, _ = env
     result = runner.invoke(app, ["loadout", "install", "drew/pack"], input="y\n")
     assert result.exit_code == 0, result.output
-    assert (installed_dir(home) / "SKILL.md").read_bytes() == b"# Vector\n"
-    assert (installed_dir(home) / "scripts" / "run.sh").stat().st_mode & 0o111
-    assert str(home / ".agents" / "skills") in result.output
-    assert "1 entr" in result.output and "external" in result.output  # skipped github entry
+    assert (skills_dir(home) / "vector" / "SKILL.md").read_bytes() == b"# Vector\n"
+    assert (skills_dir(home) / "citation" / "reference" / "tips.md").read_bytes() == b"tips\n"
+    assert "friend/pack @ v1" in result.output
+    assert "2 installed" in result.output
+
+
+def test_reinstall_is_a_no_op_for_both_kinds(env):
+    home, _, _ = env
+    runner.invoke(app, ["loadout", "install", "drew/pack", "--yes"])
+    result = runner.invoke(app, ["loadout", "install", "drew/pack", "--yes"])
+    assert result.exit_code == 0, result.output
+    assert "vector: already installed" in result.output
+    assert "citation: already installed" in result.output
+    assert "2 already installed" in result.output
+
+
+def test_legacy_entry_installs_with_the_caveat(env):
+    home, _, state = env
+    from drskill import resolution
+    legacy = github_entry(directory_hash=None)
+    legacy["content_hash"] = resolution.content_hash(GH_SKILL_MD.decode())
+    state["manifest"] = manifest([legacy])
+    result = runner.invoke(app, ["loadout", "install", "drew/pack", "--yes"])
+    assert result.exit_code == 0, result.output
+    assert "bundled files are unverified" in result.output
+    assert (skills_dir(home) / "citation" / "SKILL.md").exists()
+
+
+def test_mismatch_with_yes_fails_that_entry_only(env):
+    home, _, state = env
+    state["manifest"] = manifest([
+        hosted_entry(),
+        github_entry(directory_hash="sha256:" + "00" * 32),
+    ])
+    result = runner.invoke(app, ["loadout", "install", "drew/pack", "--yes"])
+    assert result.exit_code == 0, result.output
+    assert "The remote skill has been updated since this loadout was created" in result.output
+    assert "Rerun interactively" in result.output
+    assert (skills_dir(home) / "vector").exists()
+    assert not (skills_dir(home) / "citation").exists()
+
+
+def test_unparseable_source_is_reported_and_skipped(env):
+    home, _, state = env
+    broken = github_entry()
+    broken["metadata"] = {}
+    broken["source_reference"] = "???"
+    broken["source_version"] = None
+    state["manifest"] = manifest([hosted_entry(), broken])
+    result = runner.invoke(app, ["loadout", "install", "drew/pack", "--yes"])
+    assert result.exit_code == 0, result.output
+    assert "not fetchable" in result.output
+    assert (skills_dir(home) / "vector").exists()
+
+
+def test_all_entries_failing_exits_one(env):
+    home, _, state = env
+    state["manifest"] = manifest([github_entry(directory_hash="sha256:" + "00" * 32)])
+    result = runner.invoke(app, ["loadout", "install", "drew/pack", "--yes"])
+    assert result.exit_code == 1
+    assert not (skills_dir(home) / "citation").exists()
 
 
 def test_install_prefers_the_project_store_inside_a_project(env):
-    home, project = env
+    home, project, _ = env
     (project / ".git").mkdir()
     result = runner.invoke(app, ["loadout", "install", "drew/pack"], input="y\n")
     assert result.exit_code == 0, result.output
     assert (project / ".agents" / "skills" / "vector" / "SKILL.md").exists()
-    assert not installed_dir(home).exists()
-
-
-def test_reinstalling_identical_content_is_a_no_op(env):
-    home, _ = env
-    runner.invoke(app, ["loadout", "install", "drew/pack", "--yes"])
-    result = runner.invoke(app, ["loadout", "install", "drew/pack", "--yes"])
-    assert result.exit_code == 0, result.output
-    assert "already installed" in result.output
+    assert not skills_dir(home).exists()
 
 
 def test_changed_content_needs_force(env):
-    home, _ = env
+    home, _, _ = env
     runner.invoke(app, ["loadout", "install", "drew/pack", "--yes"])
-    (installed_dir(home) / "SKILL.md").write_bytes(b"edited locally")
+    (skills_dir(home) / "vector" / "SKILL.md").write_bytes(b"edited locally")
 
     kept = runner.invoke(app, ["loadout", "install", "drew/pack", "--yes"])
     assert kept.exit_code == 0
     assert "--force" in kept.output
-    assert (installed_dir(home) / "SKILL.md").read_bytes() == b"edited locally"
+    assert (skills_dir(home) / "vector" / "SKILL.md").read_bytes() == b"edited locally"
 
     replaced = runner.invoke(app, ["loadout", "install", "drew/pack", "--yes", "--force"])
     assert replaced.exit_code == 0, replaced.output
-    assert (installed_dir(home) / "SKILL.md").read_bytes() == b"# Vector\n"
+    assert (skills_dir(home) / "vector" / "SKILL.md").read_bytes() == b"# Vector\n"
 
 
 def test_declining_the_confirmation_writes_nothing(env):
-    home, _ = env
+    home, _, _ = env
     result = runner.invoke(app, ["loadout", "install", "drew/pack"], input="n\n")
     assert result.exit_code == 0
-    assert not installed_dir(home).exists()
+    assert not skills_dir(home).exists()
 
 
 def test_harness_flag_targets_that_harness_directory(env):
-    home, _ = env
+    home, _, _ = env
     result = runner.invoke(
         app, ["loadout", "install", "drew/pack", "--harness", "claude-code", "--yes"])
     assert result.exit_code == 0, result.output
     assert (home / ".claude" / "skills" / "vector" / "SKILL.md").exists()
-    assert not installed_dir(home).exists()
+    assert not skills_dir(home).exists()
 
 
 def test_shared_default_warns_about_harnesses_that_cannot_see_it(env):
-    home, _ = env
-    (home / ".claude").mkdir()  # detect marker for claude-code
+    home, _, _ = env
+    (home / ".claude").mkdir()
     result = runner.invoke(app, ["loadout", "install", "drew/pack"], input="n\n")
     assert "Claude Code" in result.output
     assert "--harness" in result.output

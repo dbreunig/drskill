@@ -1302,24 +1302,34 @@ def install(
         _echo_service_error(err)
         raise typer.Exit(1)
 
+    from drskill import gh_source
+
     entries = json.loads(document).get("entries", [])
     hosted = [e for e in entries if e.get("source_type") == "drskill"]
-    external = len(entries) - len(hosted)
-    if not hosted:
-        typer.echo(f"Revision {revision} of {owner}/{slug} has no hosted (drskill) entries.")
+    github = [e for e in entries if e.get("source_type") == "github"]
+    other = len(entries) - len(hosted) - len(github)
+    installable = len(hosted) + len(github)
+    if not installable:
+        typer.echo(f"Revision {revision} of {owner}/{slug} has no installable entries.")
         raise typer.Exit(0)
 
     root = Path.cwd()
     home = _home()
     target, scope = _install_target(harness, project, user, root, home)
 
-    typer.echo(f"Install {len(hosted)} hosted skill{'s' if len(hosted) != 1 else ''} "
+    typer.echo(f"Install {installable} skill{'s' if installable != 1 else ''} "
                f"into {target} ({scope} store):")
     for entry in hosted:
         typer.echo(f"  {entry['name']}  ({entry['content_hash'][:19]}…)")
-    if external:
-        typer.echo(f"{external} entr{'ies' if external != 1 else 'y'} with external sources "
-                   "will not be installed (hosted install only for now).")
+    for entry in github:
+        coords = gh_source.coordinates(entry)
+        if coords:
+            typer.echo(f"  {entry['name']}  ({coords[0]} @ {coords[1]})")
+        else:
+            typer.echo(f"  {entry['name']}  (source {entry.get('source_reference')!r} is not fetchable)")
+    if other:
+        typer.echo(f"{other} entr{'ies' if other != 1 else 'y'} with other source types "
+                   "will not be installed.")
     if harness is None:
         blind = [h.display_name for h in detect_harnesses(root, home)
                  if ".agents/skills" not in h.project_paths
@@ -1330,33 +1340,87 @@ def install(
     if not yes and not typer.confirm("Proceed?", default=False):
         raise typer.Exit(0)
 
-    installed = unchanged = held = 0
+    counts = {"installed": 0, "unchanged": 0, "held": 0, "failed": 0}
     for entry in hosted:
         dest = target / entry["name"]
-        if dest.exists():
-            if content.manifest_hash(content.read_dir(dest)) == entry["content_hash"]:
-                typer.echo(f"  {entry['name']}: already installed")
-                unchanged += 1
-                continue
-            if not force:
-                typer.echo(f"  {entry['name']}: local copy differs; rerun with --force to replace it")
-                held += 1
-                continue
-        try:
-            files = content.download(entry["content_hash"], creds["token"], base)
-        except service.ServiceError as err:
-            _echo_service_error(err)
-            raise typer.Exit(1)
-        replaced = dest.exists()
-        content.write_skill(files, dest)
-        typer.echo(f"  {entry['name']}: {'replaced' if replaced else 'installed'}")
-        installed += 1
-    parts = [f"{installed} installed"]
-    if unchanged:
-        parts.append(f"{unchanged} already installed")
-    if held:
-        parts.append(f"{held} held (--force to replace)")
+        status = _existing_dir_status(entry["content_hash"], dest, entry["name"], force)
+        if status is None:
+            try:
+                files = content.download(entry["content_hash"], creds["token"], base)
+            except service.ServiceError as err:
+                _echo_service_error(err)
+                raise typer.Exit(1)
+            replaced = dest.exists()
+            content.write_skill(files, dest)
+            typer.echo(f"  {entry['name']}: {'replaced' if replaced else 'installed'}")
+            status = "installed"
+        counts[status] += 1
+    for entry in github:
+        status = _install_one_github(entry, target, force=force, yes=yes)
+        counts[status] += 1
+    parts = [f"{counts['installed']} installed"]
+    if counts["unchanged"]:
+        parts.append(f"{counts['unchanged']} already installed")
+    if counts["held"]:
+        parts.append(f"{counts['held']} held (--force to replace)")
+    if counts["failed"]:
+        parts.append(f"{counts['failed']} failed")
     typer.echo(" · ".join(parts))
+    if counts["failed"] and not counts["installed"] and not counts["unchanged"]:
+        raise typer.Exit(1)
+
+
+def _existing_dir_status(expected_hash: str, dest: Path, name: str, force: bool) -> str | None:
+    """"unchanged" or "held" for an existing install, None when writing
+    should proceed."""
+    from drskill import content
+
+    if not dest.exists():
+        return None
+    if content.manifest_hash(content.read_dir(dest)) == expected_hash:
+        typer.echo(f"  {name}: already installed")
+        return "unchanged"
+    if not force:
+        typer.echo(f"  {name}: local copy differs; rerun with --force to replace it")
+        return "held"
+    return None
+
+
+def _install_one_github(entry: dict, target: Path, *, force: bool, yes: bool) -> str:
+    from drskill import content, gh_source
+
+    coords = gh_source.coordinates(entry)
+    if coords is None:
+        typer.echo(f"  {entry['name']}: source {entry.get('source_reference')!r} is not fetchable")
+        return "failed"
+    repo, ref = coords
+    dest = target / entry["name"]
+    try:
+        tar_bytes = gh_source.fetch_tarball(repo, ref)
+        files = gh_source.extract_skill(tar_bytes, entry)
+    except gh_source.FetchError as error:
+        typer.echo(f"  {entry['name']}: {error}")
+        return "failed"
+    outcome = gh_source.verify(files, entry)
+    if outcome == "mismatch":
+        return _remediate(entry, files, dest, force=force, yes=yes)
+    status = _existing_dir_status(content.manifest_hash(files), dest, entry["name"], force)
+    if status is not None:
+        return status
+    if outcome == "legacy_ok":
+        typer.echo(f"  {entry['name']}: bundled files are unverified "
+                   "(published before directory hashes)")
+    replaced = dest.exists()
+    content.write_skill(files, dest)
+    typer.echo(f"  {entry['name']}: {'replaced' if replaced else 'installed'}")
+    return "installed"
+
+
+def _remediate(entry: dict, files: list[dict], dest: Path, *, force: bool, yes: bool) -> str:
+    typer.echo("The remote skill has been updated since this loadout was "
+               "created and the original version was not pinned.")
+    typer.echo("Rerun interactively to review and republish.")
+    return "failed"
 
 
 def _install_target(harness_id: str | None, project: bool, user: bool,
