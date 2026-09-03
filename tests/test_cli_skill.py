@@ -107,6 +107,7 @@ def test_quitting_the_review_publishes_nothing(env, tmp_path, monkeypatch):
     result = runner.invoke(app, ["skill", "publish", str(d)])
     assert result.exit_code == 1
     assert state["publishes"] == []
+    assert state["uploads"] == []
 
 
 def test_missing_skill_md_errors(env, tmp_path):
@@ -292,3 +293,89 @@ def test_skill_install_decline_and_missing(install_env):
 
     result = runner.invoke(app, ["skill", "install", "drew/missing", "--yes"])
     assert result.exit_code == 1
+
+
+# -- review fixes -----------------------------------------------------------------
+
+
+def test_non_slug_frontmatter_name_publishes_clean(env, tmp_path):
+    # The gate must lint under the skill's real folder name; naming the tmp
+    # copy after the normalized slug used to fire spec-name-mismatch falsely.
+    home, state = env
+    d = tmp_path / "proj" / "My Skill"
+    d.mkdir(parents=True)
+    (d / "SKILL.md").write_text(
+        "---\nname: My Skill\ndescription: Use when demonstrating slug normalization on publish.\n---\nBody.\n")
+    result = runner.invoke(app, ["skill", "publish", str(d)])
+    assert result.exit_code == 0, result.output
+    assert state["publishes"][0]["skill"]["slug"] == "my-skill"
+
+
+def test_underscored_names_slugify_for_the_server(env, tmp_path):
+    home, state = env
+    d = tmp_path / "proj" / "my_skill.v2"
+    d.mkdir(parents=True)
+    (d / "SKILL.md").write_text(
+        "---\nname: my_skill.v2\ndescription: Use when demonstrating slug rules for odd names.\n---\nBody.\n")
+    result = runner.invoke(app, ["skill", "publish", str(d)])
+    assert result.exit_code == 0, result.output
+    assert state["publishes"][0]["skill"]["slug"] == "my-skill-v2"
+
+
+def test_acking_an_error_finding_unblocks(env, tmp_path, monkeypatch):
+    # A real folder/frontmatter mismatch fires spec-name-mismatch (error).
+    home, state = env
+    d = tmp_path / "proj" / "actual-folder"
+    d.mkdir(parents=True)
+    (d / "SKILL.md").write_text(
+        "---\nname: different-name\ndescription: Use when demonstrating error acks on publish.\n---\nBody.\n")
+    blocked = runner.invoke(app, ["skill", "publish", str(d)])
+    assert blocked.exit_code == 1
+    assert state["publishes"] == []
+
+    monkeypatch.setattr(cli_mod.interactive, "can_interact", lambda *a, **k: None)
+    monkeypatch.setattr(cli_mod, "key_source", keys("a"))
+    result = runner.invoke(app, ["skill", "publish", str(d)])
+    assert result.exit_code == 0, result.output
+    assert len(state["publishes"]) == 1
+
+
+def test_symlinks_are_rejected_loudly(env, tmp_path):
+    home, state = env
+    d = write_skill_dir(tmp_path)
+    (d / "link.md").symlink_to(d / "SKILL.md")
+    result = runner.invoke(app, ["skill", "publish", str(d)])
+    assert result.exit_code == 1
+    assert "symlink" in result.output.lower()
+    assert state["uploads"] == []
+
+
+def test_publish_prints_an_upload_summary(env, tmp_path):
+    home, state = env
+    d = write_skill_dir(tmp_path)
+    result = runner.invoke(app, ["skill", "publish", str(d)])
+    assert result.exit_code == 0
+    assert "1 file" in result.output
+
+
+def test_log_and_diff_reject_pinned_refs(read_env):
+    result = runner.invoke(app, ["skill", "log", "drew/citation-style@2"])
+    assert result.exit_code == 1
+    result = runner.invoke(app, ["skill", "diff", "drew/citation-style@2", "@2", "@1"])
+    assert result.exit_code == 1
+
+
+def test_show_file_is_binary_safe_and_url_encodes(read_env, monkeypatch):
+    from drskill import service as service_module
+
+    def fake_binary(method, path, token=None, json_body=None, base_url=None,
+                    raw=False, raw_body=None, content_type=None, binary=False):
+        assert binary
+        assert path == "/api/v1/skills/drew/citation-style/files/data%20file.bin"
+        return b"\xff\xfebytes"
+
+    monkeypatch.setattr(service_module, "api_request", fake_binary)
+    result = runner.invoke(app, ["skill", "show", "drew/citation-style",
+                                 "--file", "data file.bin"])
+    assert result.exit_code == 0
+    assert b"\xff\xfebytes" in result.stdout_bytes

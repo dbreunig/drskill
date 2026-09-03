@@ -705,7 +705,7 @@ def fake_content(monkeypatch):
     files = [{"path": "SKILL.md", "data": b"# Local\n", "executable": False}]
     monkeypatch.setattr(content, "collect_files", lambda contributor: list(files))
 
-    def fake_publish_flow(file_list, name, description, note, creds, base_url, home):
+    def fake_publish_flow(file_list, name, description, note, creds, base_url, home, **kwargs):
         if fake_publish_flow.blocked:
             return None
         published.append({"files": file_list, "name": name, "base_url": base_url})

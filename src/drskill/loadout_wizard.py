@@ -286,7 +286,8 @@ def _offer_registry(selected: list[Contributor], creds: dict, base_url: str,
         description = contributor.frontmatter.get("description")
         description = description if isinstance(description, str) else None
         result = cli_mod._skill_publish_flow(
-            files, name, description, None, creds, base_url, home)
+            files, name, description, None, creds, base_url, home,
+            dir_name=Path(contributor.id).parent.name, config_root=Path.cwd())
         if result is None:
             typer.echo(f"Publishing {contributor.name} was blocked; "
                        "fix or ack its findings and retry.")

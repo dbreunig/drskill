@@ -12,23 +12,39 @@ _REF = re.compile(r"^([A-Za-z0-9-]+)/([A-Za-z0-9-]+)(?:@([1-9]\d*))?$")
 
 
 def collect_dir(path: Path) -> list[dict]:
-    """Every regular file under path (skipping .git and symlinks), in the
-    content.py file shape. The directory must hold a SKILL.md at its root."""
+    """Every regular file under path (skipping .git), in the content.py
+    file shape. The directory must hold a SKILL.md at its root. Symlinks
+    are rejected loudly rather than silently dropped, so an upload never
+    quietly diverges from what is on disk."""
     root = Path(path)
-    if not (root / "SKILL.md").is_file():
-        raise ValueError(f"{root} has no SKILL.md")
     files = []
+    symlinks = []
     for p in sorted(root.rglob("*")):
         if ".git" in p.relative_to(root).parts:
             continue
-        if p.is_symlink() or not p.is_file():
+        if p.is_symlink():
+            symlinks.append(p.relative_to(root).as_posix())
+            continue
+        if not p.is_file():
             continue
         files.append({
             "path": p.relative_to(root).as_posix(),
             "data": p.read_bytes(),
             "executable": bool(p.stat().st_mode & 0o111),
         })
+    if symlinks:
+        raise ValueError(
+            f"{root} contains symlinks ({', '.join(symlinks[:5])}); resolve them before publishing")
+    if not any(f["path"] == "SKILL.md" for f in files):
+        raise ValueError(f"{root} has no SKILL.md")
     return files
+
+
+def skill_slug(name: str) -> str:
+    """The server slug for a skill name: normalized, then restricted to
+    the server's [a-z0-9-] rule."""
+    slug = re.sub(r"-{2,}", "-", re.sub(r"[^a-z0-9-]+", "-", normalize_name(name))).strip("-")
+    return slug or "skill"
 
 
 def frontmatter_meta(files: list[dict], fallback: str) -> tuple[str, str | None]:

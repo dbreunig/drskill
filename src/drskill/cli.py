@@ -1086,23 +1086,35 @@ def skill_publish(
     except (ValueError, OSError) as err:
         typer.echo(str(err))
         raise typer.Exit(1)
+    from drskill import lint as lint_mod
+
     name, description = skill_pub.frontmatter_meta(files, fallback=path.resolve().name)
-    result = _skill_publish_flow(files, name, description, message, creds, base, home)
+    result = _skill_publish_flow(
+        files, name, description, message, creds, base, home,
+        dir_name=path.resolve().name,
+        config_root=lint_mod.find_config_root(path.resolve()))
     raise typer.Exit(0 if result else 1)
 
 
-def _skill_publish_flow(files, name, description, note, creds, base, home):
+def _skill_publish_flow(files, name, description, note, creds, base, home,
+                        dir_name=None, config_root=None):
     """Gate, upload, and publish one skill. The wizard reuses this. Returns
-    {"reference", "content_hash"} or None when blocked or failed."""
-    from drskill import content
+    {"reference", "content_hash"} or None when blocked or failed. The gate
+    lints under dir_name (the skill's real folder name) so its findings
+    match what drskill lint reports in place."""
+    from drskill import content, skill_pub
 
-    if not _publish_gate(files, name, home):
+    if not _publish_gate(files, dir_name or name, home, config_root=config_root):
         return None
+    total = sum(len(f["data"]) for f in files)
+    typer.echo(f"Publishing {len(files)} file{'s' if len(files) != 1 else ''} "
+               f"({total} B) as {skill_pub.skill_slug(name)}")
     try:
         uploaded = content.upload(files, creds["token"], base)
         data = service.api_request(
             "POST", "/api/v1/skills", token=creds["token"], base_url=base,
-            json_body={"skill": {"slug": name, "name": name, "description": description,
+            json_body={"skill": {"slug": skill_pub.skill_slug(name), "name": name,
+                                 "description": description,
                                  "note": note, "content_hash": uploaded["content_hash"]}})
     except service.ServiceError as err:
         _echo_service_error(err)
@@ -1116,7 +1128,7 @@ def _skill_publish_flow(files, name, description, note, creds, base, home):
     return {"reference": ref, "content_hash": version["content_hash"]}
 
 
-def _publish_gate(files, name, home) -> bool:
+def _publish_gate(files, dir_name, home, config_root=None) -> bool:
     """Run the standard checks over the files about to publish. Active
     errors and warnings block; interactive acks (the sanctioned override)
     unblock; notes never block. Nothing uploads before this passes."""
@@ -1125,10 +1137,11 @@ def _publish_gate(files, name, home) -> bool:
     from drskill import content, lint as lint_mod, skill_pub
 
     with tempfile.TemporaryDirectory(prefix="drskill-publish-") as tmp:
-        skill_dir = Path(tmp) / name
+        skill_dir = Path(tmp) / dir_name
         content.write_skill(files, skill_dir)
         target = lint_mod.classify(skill_dir, "skill")
-        config = _load_effective_config_or_exit(Path(tmp), home, False)
+        root = config_root if config_root is not None else Path(tmp)
+        config = _load_effective_config_or_exit(root, home, False)
         world, findings = lint_mod.run_lint(target, config, Path(tmp), home)
         active, _ = ledger.filter_findings(findings, config)
         blocking = skill_pub.blocking_findings(active)
@@ -1155,7 +1168,7 @@ def _publish_gate(files, name, home) -> bool:
                 if key == "q":
                     return False
 
-        config = _load_effective_config_or_exit(Path(tmp), home, False)
+        config = _load_effective_config_or_exit(root, home, False)
         active, _ = ledger.filter_findings(findings, config)
         remaining = skill_pub.blocking_findings(active)
         if remaining:
@@ -1191,7 +1204,10 @@ def skill_log(ref: str = typer.Argument(..., help="owner/slug")) -> None:
     from drskill import skill_pub
 
     creds, base = _service_credentials()
-    owner, slug, _ = _parse_skill_ref_or_exit(ref, skill_pub)
+    owner, slug, number = _parse_skill_ref_or_exit(ref, skill_pub)
+    if number is not None:
+        typer.echo("log takes an unpinned owner/slug.")
+        raise typer.Exit(1)
     try:
         data = service.api_request("GET", f"/api/v1/skills/{owner}/{slug}/versions",
                                    token=creds["token"], base_url=base)
@@ -1223,10 +1239,13 @@ def skill_show(
                 marker = "" if entry.get("text") else "  (binary)"
                 typer.echo(f"{entry['path']}  {entry['size']} B{marker}")
             return
-        path = file or "SKILL.md"
+        import urllib.parse
+
+        path = urllib.parse.quote(file or "SKILL.md", safe="/")
         body = service.api_request("GET", f"{prefix}/files/{path}",
-                                   token=creds["token"], base_url=base, raw=True)
-        typer.echo(body)
+                                   token=creds["token"], base_url=base, binary=True)
+        sys.stdout.buffer.write(body if isinstance(body, bytes) else str(body).encode())
+        sys.stdout.buffer.flush()
     except service.ServiceError as err:
         _echo_service_error(err)
         raise typer.Exit(1)
@@ -1242,7 +1261,10 @@ def skill_diff(
     from drskill import skill_pub
 
     creds, base = _service_credentials()
-    owner, slug, _ = _parse_skill_ref_or_exit(ref, skill_pub)
+    owner, slug, number = _parse_skill_ref_or_exit(ref, skill_pub)
+    if number is not None:
+        typer.echo("diff takes an unpinned owner/slug plus @N @M.")
+        raise typer.Exit(1)
     new_number = _version_arg_or_exit(new)
     base_number = _version_arg_or_exit(base_ref)
     try:
