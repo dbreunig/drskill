@@ -1265,6 +1265,106 @@ def publish(
 
 
 
+
+_STATUS_LINES = {
+    "matches": "matches",
+    "changed": "changed locally since publish",
+    "missing": "not found on this machine",
+    "unreadable": "unreadable",
+    "unchecked": "not checked (mcp)",
+}
+
+
+@loadout_app.command()
+def status(
+    ref: str | None = typer.Argument(None, help="owner/slug (default: all your loadouts)"),
+    remote: bool = typer.Option(False, "--remote", help="also fetch github entries' upstreams"),
+) -> None:
+    """Report drift between local skills and published loadout revisions."""
+    from drskill import loadout_drift
+
+    creds, base = _service_credentials()
+    home = _home()
+    try:
+        targets, skipped = _status_targets(ref, creds, base)
+    except service.ServiceError as err:
+        _echo_service_error(err)
+        raise typer.Exit(1)
+    for owner, slug in skipped:
+        typer.echo(f"{owner}/{slug}: no published revision; skipped")
+    if not targets:
+        typer.echo("No loadouts with a published revision.")
+        return
+
+    world, _ = _scan_with_status(lambda p: run_scan(Path.cwd(), home, progress=p))
+    contributors = list(world.contributors.values())
+
+    drifted = False
+    for owner, slug, number, mine in targets:
+        try:
+            document = service.api_request(
+                "GET", f"/api/v1/loadouts/{owner}/{slug}/revisions/{number}",
+                token=creds["token"], base_url=base, raw=True)
+        except service.ServiceError as err:
+            _echo_service_error(err)
+            raise typer.Exit(1)
+        entries = json.loads(document).get("entries", [])
+        typer.echo(f"\n{owner}/{slug} (revision {number})")
+        changed_here = False
+        for st in loadout_drift.classify_entries(entries, contributors):
+            line = _STATUS_LINES[st.state]
+            if remote and st.entry.get("kind") == "skill" and st.entry.get("source_type") == "github":
+                line = _remote_status_line(st.entry) or line
+            note = f"  ({st.note})" if st.note else ""
+            typer.echo(f"  {st.entry['name']:<24} {line}{note}")
+            if line in ("changed locally since publish", "upstream has changed"):
+                changed_here = True
+        if changed_here and mine:
+            typer.echo(f"  Run drskill loadout update {owner}/{slug} to republish.")
+        drifted = drifted or changed_here
+    raise typer.Exit(1 if drifted else 0)
+
+
+def _status_targets(ref, creds, base):
+    """(owner, slug, revision number, mine) rows plus skipped revisionless refs."""
+    if ref is None:
+        data = service.api_request("GET", "/api/v1/loadouts",
+                                   token=creds["token"], base_url=base)
+        targets, skipped = [], []
+        for loadout in data.get("loadouts", []):
+            current = loadout.get("current_revision")
+            if current:
+                targets.append((loadout["owner"], loadout["slug"], current["number"], True))
+            else:
+                skipped.append((loadout["owner"], loadout["slug"]))
+        return targets, skipped
+    owner, slug = _parse_ref(ref)
+    data = service.api_request("GET", f"/api/v1/loadouts/{owner}/{slug}",
+                               token=creds["token"], base_url=base)
+    current = data["loadout"].get("current_revision")
+    if not current:
+        return [], [(owner, slug)]
+    identity = service.api_request("GET", "/api/v1/identity",
+                                   token=creds["token"], base_url=base)
+    mine = identity["user"]["handle"] == owner
+    return [(owner, slug, current["number"], mine)], []
+
+
+def _remote_status_line(entry: dict) -> str | None:
+    """"upstream has changed", an error message, or None when upstream
+    matches (defer to the local line)."""
+    from drskill import gh_source
+
+    coords = gh_source.coordinates(entry)
+    if coords is None:
+        return "upstream not fetchable"
+    try:
+        tar_bytes = gh_source.fetch_tarball(*coords)
+        files = gh_source.extract_skill(tar_bytes, entry)
+    except gh_source.FetchError as error:
+        return f"upstream check failed: {error}"
+    return None if gh_source.verify(files, entry) != "mismatch" else "upstream has changed"
+
 @loadout_app.command()
 def install(
     ref: str = typer.Argument(..., help="owner/slug"),
