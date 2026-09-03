@@ -1365,6 +1365,103 @@ def _remote_status_line(entry: dict) -> str | None:
         return f"upstream check failed: {error}"
     return None if gh_source.verify(files, entry) != "mismatch" else "upstream has changed"
 
+
+@loadout_app.command()
+def update(
+    ref: str = typer.Argument(..., help="owner/slug"),
+    yes: bool = typer.Option(False, "--yes", help="skip the confirmation"),
+) -> None:
+    """Republish a loadout's entries from their local copies."""
+    import copy
+
+    from drskill import content, loadout_drift
+
+    creds, base = _service_credentials()
+    owner, slug = _parse_ref(ref)
+    home = _home()
+    try:
+        identity = service.api_request("GET", "/api/v1/identity",
+                                       token=creds["token"], base_url=base)
+        if identity["user"]["handle"] != owner:
+            typer.echo("You can only update your own loadouts; fork it first.")
+            raise typer.Exit(1)
+        data = service.api_request("GET", f"/api/v1/loadouts/{owner}/{slug}",
+                                   token=creds["token"], base_url=base)
+        current = data["loadout"].get("current_revision")
+        if not current:
+            typer.echo(f"{owner}/{slug} has no published revision.")
+            raise typer.Exit(1)
+        document = service.api_request(
+            "GET", f"/api/v1/loadouts/{owner}/{slug}/revisions/{current['number']}",
+            token=creds["token"], base_url=base, raw=True)
+    except service.ServiceError as err:
+        _echo_service_error(err)
+        raise typer.Exit(1)
+
+    manifest = copy.deepcopy(json.loads(document))
+    world, _ = _scan_with_status(lambda p: run_scan(Path.cwd(), home, progress=p))
+    statuses = loadout_drift.classify_entries(
+        manifest.get("entries", []), list(world.contributors.values()))
+    for st in statuses:
+        if st.state in ("missing", "unreadable"):
+            typer.echo(f"  {st.entry['name']}: {st.state} locally; left as published")
+    changed = [st for st in statuses if st.state == "changed"]
+    if not changed:
+        typer.echo("Already up to date.")
+        return
+
+    try:
+        for st in changed:
+            files = content.collect_files(st.contributor)
+            if not _review_fetched(files, home, manifest=manifest,
+                                   selector=st.entry.get("selector"),
+                                   name=st.entry["name"]):
+                typer.echo("Update aborted.")
+                raise typer.Exit(1)
+            entry = next(e for e in manifest["entries"]
+                         if e.get("selector") == st.entry.get("selector"))
+            _refresh_entry(entry, files, st.contributor, creds, base)
+    except service.ServiceError as err:
+        _echo_service_error(err)
+        raise typer.Exit(1)
+    except OSError as err:
+        typer.echo(f"Could not read a changed skill: {err}")
+        raise typer.Exit(1)
+
+    names = ", ".join(st.entry["name"] for st in changed)
+    typer.echo(f"Changed: {names}")
+    if not yes and not typer.confirm(
+            f"Publish a new revision of {owner}/{slug} with "
+            f"{len(changed)} updated skill{'s' if len(changed) != 1 else ''}?",
+            default=False):
+        raise typer.Exit(0)
+    _, runtime_hash = service.canonical_manifest(manifest)
+    try:
+        data = service.api_request(
+            "POST", f"/api/v1/loadouts/{owner}/{slug}/revisions",
+            token=creds["token"], base_url=base,
+            json_body={"manifest": manifest, "runtime_hash": runtime_hash})
+    except service.ServiceError as err:
+        _echo_service_error(err)
+        raise typer.Exit(1)
+    revision = data["revision"]
+    typer.echo(f"Published revision {revision['number']} ({revision['runtime_hash']}).")
+
+
+def _refresh_entry(entry: dict, files: list[dict], contributor, creds: dict, base: str) -> None:
+    from drskill import content
+
+    source_type = entry.get("source_type")
+    if source_type == "drskill":
+        result = content.upload(files, creds["token"], base)
+        entry["content_hash"] = result["content_hash"]
+    elif source_type == "github":
+        metadata = entry.setdefault("metadata", {})
+        metadata["directory_hash"] = content.manifest_hash(files)
+        metadata["files"] = sorted(f["path"] for f in files)
+    else:
+        entry["content_hash"] = contributor.content_hash
+
 @loadout_app.command()
 def install(
     ref: str = typer.Argument(..., help="owner/slug"),
@@ -1614,6 +1711,9 @@ def _review_fetched(files: list[dict], home: Path, manifest: dict | None = None,
             typer.echo("Review: no findings.")
             return True
         report.print_findings(world, active, console)
+        if interactive.can_interact() is not None:
+            # Findings display always; the ack loop needs a terminal.
+            return True
         machine_ledger = home / ".drskill.toml"
         for finding in active:
             console.print("[bold]a[/bold] ack · [bold]s[/bold] skip · [bold]q[/bold] quit review")
