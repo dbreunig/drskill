@@ -1164,6 +1164,119 @@ def _publish_gate(files, name, home) -> bool:
             return False
         return True
 
+
+@skill_app.command("list")
+def skill_list() -> None:
+    """List your skills on the registry."""
+    creds, base = _service_credentials()
+    try:
+        data = service.api_request("GET", "/api/v1/skills", token=creds["token"], base_url=base)
+    except service.ServiceError as err:
+        _echo_service_error(err)
+        raise typer.Exit(1)
+    skills = data.get("skills", [])
+    if not skills:
+        typer.echo("No skills yet. Publish one with: drskill skill publish <dir>")
+        return
+    for skill in skills:
+        current = skill.get("current_version") or {}
+        version = f"@{current['number']}" if current else "(no version)"
+        description = skill.get("description") or ""
+        typer.echo(f"{skill['owner']}/{skill['slug']} {version}  {skill['visibility']}  {description}".rstrip())
+
+
+@skill_app.command("log")
+def skill_log(ref: str = typer.Argument(..., help="owner/slug")) -> None:
+    """The version log, newest first."""
+    from drskill import skill_pub
+
+    creds, base = _service_credentials()
+    owner, slug, _ = _parse_skill_ref_or_exit(ref, skill_pub)
+    try:
+        data = service.api_request("GET", f"/api/v1/skills/{owner}/{slug}/versions",
+                                   token=creds["token"], base_url=base)
+    except service.ServiceError as err:
+        _echo_service_error(err)
+        raise typer.Exit(1)
+    for version in data.get("versions", []):
+        date = str(version.get("created_at") or "")[:10]
+        note = version.get("note") or ""
+        typer.echo(f"@{version['number']}  {date}  {note}".rstrip())
+
+
+@skill_app.command("show")
+def skill_show(
+    ref: str = typer.Argument(..., help="owner/slug[@N]"),
+    files: bool = typer.Option(False, "--files", help="list the version's files"),
+    file: str | None = typer.Option(None, "--file", help="print this file instead of SKILL.md"),
+) -> None:
+    """Print a skill's SKILL.md, a file, or its file listing."""
+    from drskill import skill_pub
+
+    creds, base = _service_credentials()
+    owner, slug, number = _parse_skill_ref_or_exit(ref, skill_pub)
+    prefix = f"/api/v1/skills/{owner}/{slug}" + (f"/versions/{number}" if number else "")
+    try:
+        if files:
+            data = service.api_request("GET", f"{prefix}/files", token=creds["token"], base_url=base)
+            for entry in data.get("files", []):
+                marker = "" if entry.get("text") else "  (binary)"
+                typer.echo(f"{entry['path']}  {entry['size']} B{marker}")
+            return
+        path = file or "SKILL.md"
+        body = service.api_request("GET", f"{prefix}/files/{path}",
+                                   token=creds["token"], base_url=base, raw=True)
+        typer.echo(body)
+    except service.ServiceError as err:
+        _echo_service_error(err)
+        raise typer.Exit(1)
+
+
+@skill_app.command("diff")
+def skill_diff(
+    ref: str = typer.Argument(..., help="owner/slug"),
+    new: str = typer.Argument(..., help="@N, the newer version"),
+    base_ref: str = typer.Argument(..., help="@M, the base version"),
+) -> None:
+    """Path-level changes between two versions."""
+    from drskill import skill_pub
+
+    creds, base = _service_credentials()
+    owner, slug, _ = _parse_skill_ref_or_exit(ref, skill_pub)
+    new_number = _version_arg_or_exit(new)
+    base_number = _version_arg_or_exit(base_ref)
+    try:
+        data = service.api_request(
+            "GET",
+            f"/api/v1/skills/{owner}/{slug}/versions/{new_number}/diff?against={base_number}",
+            token=creds["token"], base_url=base)
+    except service.ServiceError as err:
+        _echo_service_error(err)
+        raise typer.Exit(1)
+    for path in data.get("added", []):
+        typer.echo(f"+ {path}")
+    for path in data.get("removed", []):
+        typer.echo(f"- {path}")
+    for path in data.get("changed", []):
+        typer.echo(f"~ {path}")
+    typer.echo(f"{data.get('unchanged_count', 0)} unchanged")
+
+
+def _parse_skill_ref_or_exit(ref: str, skill_pub):
+    try:
+        return skill_pub.parse_skill_ref(ref)
+    except ValueError as err:
+        typer.echo(str(err))
+        raise typer.Exit(1)
+
+
+def _version_arg_or_exit(arg: str) -> int:
+    value = arg.lstrip("@")
+    if not value.isdigit() or int(value) < 1:
+        typer.echo(f"expected @N, got {arg!r}")
+        raise typer.Exit(1)
+    return int(value)
+
 @loadout_app.command("list")
 def loadout_list(
     as_json: bool = typer.Option(False, "--json", help="emit the raw API response"),

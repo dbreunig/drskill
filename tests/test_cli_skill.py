@@ -115,3 +115,94 @@ def test_missing_skill_md_errors(env, tmp_path):
     result = runner.invoke(app, ["skill", "publish", str(d)])
     assert result.exit_code == 1
     assert "SKILL.md" in result.output
+
+
+# -- read commands --------------------------------------------------------------
+
+
+@pytest.fixture
+def read_env(tmp_path, monkeypatch):
+    home = tmp_path / "home"
+    home.mkdir()
+    monkeypatch.setenv("DRSKILL_HOME", str(home))
+    monkeypatch.delenv("DRSKILL_SERVICE_URL", raising=False)
+    service.save_credentials("http://svc.test", "drsk_x")
+
+    calls = []
+
+    def fake_api_request(method, path, token=None, json_body=None, base_url=None,
+                         raw=False, raw_body=None, content_type=None, binary=False):
+        calls.append(path)
+        if path == "/api/v1/skills":
+            return {"skills": [{"owner": "drew", "slug": "citation-style",
+                                "description": "Cites.", "visibility": "private",
+                                "current_version": {"number": 3, "content_hash": "sha256:" + "ab" * 32}}]}
+        if path == "/api/v1/skills/drew/citation-style/versions":
+            return {"versions": [
+                {"number": 2, "note": "tweak", "content_hash": "sha256:" + "cd" * 32,
+                 "created_at": "2026-09-03T00:00:00Z", "byte_size": 10, "file_count": 1},
+                {"number": 1, "note": "first", "content_hash": "sha256:" + "ab" * 32,
+                 "created_at": "2026-09-02T00:00:00Z", "byte_size": 10, "file_count": 1}]}
+        if path == "/api/v1/skills/drew/citation-style/files/SKILL.md":
+            return "# Current body"
+        if path == "/api/v1/skills/drew/citation-style/versions/1/files/SKILL.md":
+            return "# Old body"
+        if path == "/api/v1/skills/drew/citation-style/files/reference/tips.md":
+            return "tips"
+        if path == "/api/v1/skills/drew/citation-style/files":
+            return {"version": 2, "files": [
+                {"path": "SKILL.md", "size": 14, "executable": False, "text": True},
+                {"path": "reference/tips.md", "size": 4, "executable": False, "text": True}]}
+        if path == "/api/v1/skills/drew/citation-style/versions/2/diff?against=1":
+            return {"added": ["new.md"], "removed": ["gone.md"], "changed": ["SKILL.md"],
+                    "unchanged_count": 1}
+        raise service.ServiceError("not_found", "Not found.")
+
+    monkeypatch.setattr(service, "api_request", fake_api_request)
+    return calls
+
+
+def test_skill_list_renders_mine(read_env):
+    result = runner.invoke(app, ["skill", "list"])
+    assert result.exit_code == 0, result.output
+    assert "drew/citation-style" in result.output
+    assert "@3" in result.output
+
+
+def test_skill_log_renders_versions_and_notes(read_env):
+    result = runner.invoke(app, ["skill", "log", "drew/citation-style"])
+    assert result.exit_code == 0, result.output
+    assert "@2" in result.output and "tweak" in result.output
+    assert "@1" in result.output and "first" in result.output
+
+
+def test_skill_show_prints_the_current_skill_md(read_env):
+    result = runner.invoke(app, ["skill", "show", "drew/citation-style"])
+    assert result.exit_code == 0, result.output
+    assert "# Current body" in result.output
+
+
+def test_skill_show_pinned_and_flags(read_env, tmp_path):
+    result = runner.invoke(app, ["skill", "show", "drew/citation-style@1"])
+    assert "# Old body" in result.output
+
+    result = runner.invoke(app, ["skill", "show", "drew/citation-style", "--files"])
+    assert "reference/tips.md" in result.output
+
+    result = runner.invoke(app, ["skill", "show", "drew/citation-style",
+                                 "--file", "reference/tips.md"])
+    assert "tips" in result.output
+
+
+def test_skill_diff_renders_path_changes(read_env):
+    result = runner.invoke(app, ["skill", "diff", "drew/citation-style", "@2", "@1"])
+    assert result.exit_code == 0, result.output
+    assert "+ new.md" in result.output
+    assert "- gone.md" in result.output or "− gone.md" in result.output
+    assert "~ SKILL.md" in result.output
+
+
+def test_skill_show_bad_ref_errors(read_env):
+    result = runner.invoke(app, ["skill", "show", "junk"])
+    assert result.exit_code == 1
+    assert "owner/slug" in result.output
