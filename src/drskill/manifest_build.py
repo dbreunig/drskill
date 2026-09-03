@@ -81,8 +81,9 @@ def contributors_to_manifest(
     contributors: list[Contributor],
     hosted: dict[str, str] | None = None,
 ) -> tuple[dict, list[str]]:
-    """hosted maps contributor id -> content hash for skills whose content
-    was uploaded to the service; those become installable drskill entries."""
+    """hosted maps contributor id -> {"content_hash", "source_reference"}
+    for skills published to the registry; those become installable drskill
+    entries carrying their registry reference."""
     hosted = hosted or {}
     entries: list[dict] = []
     notes: list[str] = []
@@ -105,9 +106,10 @@ def contributors_to_manifest(
         used_selectors.add(selector)
 
         if contributor.id in hosted:
+            published = hosted[contributor.id]
             source_type = "drskill"
-            source_reference = "drskill"
-            content_hash = hosted[contributor.id]
+            source_reference = published["source_reference"]
+            content_hash = published["content_hash"]
             local_only = False
         else:
             mapped = _SOURCE_TYPES.get(contributor.source.kind)

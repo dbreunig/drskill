@@ -103,10 +103,11 @@ def test_hosted_contributors_become_drskill_entries():
     local = contributor("mine", prov_kind="unmanaged", source=None)
     hosted_hash = "sha256:" + "cd" * 32
     manifest, notes = manifest_build.contributors_to_manifest(
-        [local], hosted={local.id: hosted_hash})
+        [local], hosted={local.id: {"content_hash": hosted_hash,
+                                    "source_reference": "drew/mine@1"}})
     entry = manifest["entries"][0]
     assert entry["source_type"] == "drskill"
-    assert entry["source_reference"] == "drskill"
+    assert entry["source_reference"] == "drew/mine@1"
     assert entry["content_hash"] == hosted_hash
     assert entry["local_only"] is False
 
@@ -114,7 +115,8 @@ def test_hosted_contributors_become_drskill_entries():
 def test_hosted_map_does_not_touch_other_contributors():
     tracked = contributor("theirs")
     manifest, _ = manifest_build.contributors_to_manifest(
-        [tracked], hosted={"/tmp/other": "sha256:" + "cd" * 32})
+        [tracked], hosted={"/tmp/other": {"content_hash": "sha256:" + "cd" * 32,
+                                          "source_reference": "drew/other@1"}})
     assert manifest["entries"][0]["source_type"] == "github"
 
 
@@ -170,7 +172,8 @@ def test_local_and_hosted_entries_get_no_fetch_metadata(monkeypatch):
     local = contributor("mine", prov_kind="unmanaged", source=None)
     hosted = contributor("uploaded", prov_kind="unmanaged", source=None)
     manifest, _ = manifest_build.contributors_to_manifest(
-        [local, hosted], hosted={hosted.id: "sha256:" + "cd" * 32})
+        [local, hosted], hosted={hosted.id: {"content_hash": "sha256:" + "cd" * 32,
+                                             "source_reference": "drew/uploaded@1"}})
     assert manifest["entries"][0]["metadata"] == {}
     assert manifest["entries"][1]["metadata"] == {}
 

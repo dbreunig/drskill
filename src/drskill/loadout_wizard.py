@@ -100,7 +100,7 @@ def run(
         typer.echo("Nothing selected.")
         raise typer.Exit(1)
 
-    hosted = _offer_hosting(selected, creds, base_url)
+    hosted = _offer_registry(selected, creds, base_url, home)
     manifest, notes = manifest_build.contributors_to_manifest(selected, hosted=hosted)
     _print_summary(manifest, notes)
 
@@ -247,9 +247,11 @@ def _human_size(size: int) -> str:
     return f"{size:.0f} MB"
 
 
-def _offer_hosting(selected: list[Contributor], creds: dict, base_url: str) -> dict[str, str]:
-    """Offer to upload untracked skills so the loadout can install them
-    anywhere. Returns contributor id -> content hash for the uploads."""
+def _offer_registry(selected: list[Contributor], creds: dict, base_url: str,
+                    home: Path) -> dict[str, dict]:
+    """Offer to publish untracked skills to the user's registry so the
+    loadout can install them anywhere. Returns contributor id ->
+    {"content_hash", "source_reference"} for the published skills."""
     local = [c for c in selected if manifest_build.is_local(c)]
     if not local:
         return {}
@@ -266,25 +268,31 @@ def _offer_hosting(selected: list[Contributor], creds: dict, base_url: str) -> d
         console.print(f"  {escape(contributor.name)}  ({count} file{plural}, {_human_size(size)})")
 
     if not typer.confirm(
-        "Upload them to drskill so this loadout can install them anywhere?",
+        "Publish them to your registry so this loadout can install them anywhere?",
         default=False,
     ):
         return {}
 
-    hosted: dict[str, str] = {}
+    from drskill import cli as cli_mod
+
+    hosted: dict[str, dict] = {}
     for contributor in local:
         try:
             files = content.collect_files(contributor)
-            result = content.upload(files, creds["token"], base_url)
         except OSError as err:
             typer.echo(f"Could not read {contributor.name}: {err}")
             raise typer.Exit(1)
-        except service.ServiceError as err:
-            typer.echo(f"Upload of {contributor.name} failed: {err.message}")
+        name = manifest_build.normalize_name(contributor.name)
+        description = contributor.frontmatter.get("description")
+        description = description if isinstance(description, str) else None
+        result = cli_mod._skill_publish_flow(
+            files, name, description, None, creds, base_url, home)
+        if result is None:
+            typer.echo(f"Publishing {contributor.name} was blocked; "
+                       "fix or ack its findings and retry.")
             raise typer.Exit(1)
-        verb = "uploaded" if result["uploaded"] else "already on drskill"
-        typer.echo(f"  {contributor.name}: {verb} ({result['content_hash']})")
-        hosted[contributor.id] = result["content_hash"]
+        hosted[contributor.id] = {"content_hash": result["content_hash"],
+                                  "source_reference": result["reference"]}
     return hosted
 
 def _print_summary(manifest: dict, notes: list[str]) -> None:
