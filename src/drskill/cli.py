@@ -1191,11 +1191,22 @@ def skill_list() -> None:
     if not skills:
         typer.echo("No skills yet. Publish one with: drskill skill publish <dir>")
         return
+    from rich.table import Table
+
+    table = Table(title="Your skills")
+    table.add_column("ref")
+    table.add_column("version")
+    table.add_column("visibility")
+    table.add_column("description")
     for skill in skills:
         current = skill.get("current_version") or {}
-        version = f"@{current['number']}" if current else "(no version)"
-        description = skill.get("description") or ""
-        typer.echo(f"{skill['owner']}/{skill['slug']} {version}  {skill['visibility']}  {description}".rstrip())
+        table.add_row(
+            f"{skill['owner']}/{skill['slug']}",
+            f"@{current['number']}" if current else "—",
+            skill.get("visibility") or "",
+            skill.get("description") or "",
+        )
+    console.print(table)
 
 
 @skill_app.command("log")
