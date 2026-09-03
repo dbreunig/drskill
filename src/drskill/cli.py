@@ -1277,6 +1277,69 @@ def _version_arg_or_exit(arg: str) -> int:
         raise typer.Exit(1)
     return int(value)
 
+
+@skill_app.command("install")
+def skill_install(
+    ref: str = typer.Argument(..., help="owner/slug[@N]"),
+    harness: str | None = typer.Option(None, "--harness",
+        help="install into this harness's own skills directory instead of the shared .agents/skills store"),
+    project: bool = typer.Option(False, "--project", help="install into the project store"),
+    user: bool = typer.Option(False, "--user", help="install into the user store"),
+    yes: bool = typer.Option(False, "--yes", help="skip the confirmation"),
+    force: bool = typer.Option(False, "--force", help="replace an installed copy whose content differs"),
+) -> None:
+    """Install a registry skill into a skills directory."""
+    from drskill import content, skill_pub
+
+    creds, base = _service_credentials()
+    owner, slug, number = _parse_skill_ref_or_exit(ref, skill_pub)
+    if project and user:
+        typer.echo("Pass at most one of --project and --user.")
+        raise typer.Exit(1)
+
+    try:
+        if number is None:
+            data = service.api_request("GET", f"/api/v1/skills/{owner}/{slug}",
+                                       token=creds["token"], base_url=base)
+            current = data["skill"].get("current_version")
+            if not current:
+                typer.echo(f"{owner}/{slug} has no published version.")
+                raise typer.Exit(1)
+            number = current["number"]
+            content_hash = current["content_hash"]
+        else:
+            data = service.api_request("GET", f"/api/v1/skills/{owner}/{slug}/versions",
+                                       token=creds["token"], base_url=base)
+            version = next((v for v in data.get("versions", []) if v["number"] == number), None)
+            if version is None:
+                typer.echo(f"{owner}/{slug} has no version {number}.")
+                raise typer.Exit(1)
+            content_hash = version["content_hash"]
+    except service.ServiceError as err:
+        _echo_service_error(err)
+        raise typer.Exit(1)
+
+    root = Path.cwd()
+    home = _home()
+    target, scope = _install_target(harness, project, user, root, home)
+    dest = target / slug
+    typer.echo(f"Install {owner}/{slug}@{number} into {target} ({scope} store)")
+    if not yes and not typer.confirm("Proceed?", default=False):
+        raise typer.Exit(0)
+
+    try:
+        files = content.download(content_hash, creds["token"], base)
+    except service.ServiceError as err:
+        _echo_service_error(err)
+        raise typer.Exit(1)
+    status = _existing_dir_status(content.manifest_hash(files), dest, slug, force)
+    if status == "held":
+        raise typer.Exit(1)
+    if status is None:
+        replaced = dest.exists()
+        content.write_skill(files, dest)
+        typer.echo(f"  {slug}: {'replaced' if replaced else 'installed'}")
+
 @loadout_app.command("list")
 def loadout_list(
     as_json: bool = typer.Option(False, "--json", help="emit the raw API response"),

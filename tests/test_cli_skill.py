@@ -206,3 +206,89 @@ def test_skill_show_bad_ref_errors(read_env):
     result = runner.invoke(app, ["skill", "show", "junk"])
     assert result.exit_code == 1
     assert "owner/slug" in result.output
+
+
+# -- skill install ----------------------------------------------------------------
+
+SKILL_FILES = [
+    {"path": "SKILL.md", "data": b"# Current\n", "executable": False},
+    {"path": "reference/tips.md", "data": b"tips\n", "executable": False},
+]
+OLD_SKILL_FILES = [{"path": "SKILL.md", "data": b"# Old\n", "executable": False}]
+SKILL_HASH = content.manifest_hash(SKILL_FILES)
+OLD_SKILL_HASH = content.manifest_hash(OLD_SKILL_FILES)
+
+
+@pytest.fixture
+def install_env(tmp_path, monkeypatch):
+    home = tmp_path / "home"
+    project = tmp_path / "project"
+    home.mkdir()
+    project.mkdir()
+    monkeypatch.setenv("DRSKILL_HOME", str(home))
+    monkeypatch.delenv("DRSKILL_SERVICE_URL", raising=False)
+    monkeypatch.chdir(project)
+    service.save_credentials("http://svc.test", "drsk_x")
+
+    def fake_api_request(method, path, token=None, json_body=None, base_url=None,
+                         raw=False, raw_body=None, content_type=None, binary=False):
+        if path == "/api/v1/skills/drew/citation-style":
+            return {"skill": {"owner": "drew", "slug": "citation-style",
+                              "visibility": "unlisted", "description": None,
+                              "current_version": {"number": 2, "content_hash": SKILL_HASH},
+                              "recent_versions": []}}
+        if path == "/api/v1/skills/drew/citation-style/versions":
+            return {"versions": [
+                {"number": 2, "content_hash": SKILL_HASH, "note": None},
+                {"number": 1, "content_hash": OLD_SKILL_HASH, "note": None}]}
+        if path == f"/api/v1/content/{SKILL_HASH}":
+            return content.pack(SKILL_FILES)
+        if path == f"/api/v1/content/{OLD_SKILL_HASH}":
+            return content.pack(OLD_SKILL_FILES)
+        raise service.ServiceError("not_found", "Not found.")
+
+    monkeypatch.setattr(service, "api_request", fake_api_request)
+    return home, project
+
+
+def installed(home):
+    return home / ".agents" / "skills" / "citation-style"
+
+
+def test_skill_install_current_into_the_shared_store(install_env):
+    home, _ = install_env
+    result = runner.invoke(app, ["skill", "install", "drew/citation-style"], input="y\n")
+    assert result.exit_code == 0, result.output
+    assert (installed(home) / "reference" / "tips.md").read_bytes() == b"tips\n"
+    assert "@2" in result.output
+
+
+def test_skill_install_pinned_version(install_env):
+    home, _ = install_env
+    result = runner.invoke(app, ["skill", "install", "drew/citation-style@1", "--yes"])
+    assert result.exit_code == 0, result.output
+    assert (installed(home) / "SKILL.md").read_bytes() == b"# Old\n"
+
+
+def test_skill_install_reinstall_and_force(install_env):
+    home, _ = install_env
+    runner.invoke(app, ["skill", "install", "drew/citation-style", "--yes"])
+    again = runner.invoke(app, ["skill", "install", "drew/citation-style", "--yes"])
+    assert "already installed" in again.output
+
+    (installed(home) / "SKILL.md").write_bytes(b"edited")
+    held = runner.invoke(app, ["skill", "install", "drew/citation-style", "--yes"])
+    assert "--force" in held.output
+    forced = runner.invoke(app, ["skill", "install", "drew/citation-style", "--yes", "--force"])
+    assert forced.exit_code == 0, forced.output
+    assert (installed(home) / "SKILL.md").read_bytes() == b"# Current\n"
+
+
+def test_skill_install_decline_and_missing(install_env):
+    home, _ = install_env
+    result = runner.invoke(app, ["skill", "install", "drew/citation-style"], input="n\n")
+    assert result.exit_code == 0
+    assert not installed(home).exists()
+
+    result = runner.invoke(app, ["skill", "install", "drew/missing", "--yes"])
+    assert result.exit_code == 1
