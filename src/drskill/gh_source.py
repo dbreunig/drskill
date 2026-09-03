@@ -10,6 +10,7 @@ from __future__ import annotations
 
 import io
 import os
+import re
 import tarfile
 import urllib.error
 import urllib.request
@@ -175,3 +176,54 @@ def _search(tar, members, entry: dict) -> list[dict]:
     if not matches:
         raise FetchError("no directory in the repository matches this entry's hash")
     raise FetchError("several directories in the repository match this entry's hash")
+
+
+_GH_URL = re.compile(
+    r"^https://github\.com/([A-Za-z0-9_.-]+/[A-Za-z0-9_.-]+?)(?:\.git)?"
+    r"(?:/(?:tree|blob)/([^/]+)(?:/(.*))?)?/?$")
+_SHORT = re.compile(r"^([A-Za-z0-9_.-]+/[A-Za-z0-9_.-]+)@([A-Za-z0-9_./-]+)$")
+
+
+def parse_github_target(target: str):
+    """(repo, ref, subpath) for a GitHub install target, or None when the
+    string reads as a registry ref (or nothing). Refs are assumed to be a
+    single path segment; blob URLs resolve to the file's directory. A
+    numeric @N stays a registry pin."""
+    target = target.strip()
+    match = _GH_URL.match(target)
+    if match:
+        repo, ref, subpath = match.groups()
+        subpath = (subpath or "").strip("/")
+        if "/blob/" in target and subpath:
+            subpath = subpath.rsplit("/", 1)[0] if "/" in subpath else ""
+        return repo, ref or "HEAD", subpath
+    match = _SHORT.match(target)
+    if match and not match.group(2).isdigit():
+        return match.group(1), match.group(2), ""
+    return None
+
+
+def find_skills(tar_bytes: bytes, subpath: str) -> list[tuple[str, list[dict]]]:
+    """Every SKILL.md directory at or under subpath, as (repo path, files)
+    pairs extracted through the safety gate. A directory whose extraction
+    fails is skipped."""
+    try:
+        with tarfile.open(fileobj=io.BytesIO(tar_bytes), mode="r:gz") as tar:
+            members = tar.getmembers()
+            prefix = f"{subpath}/" if subpath else ""
+            skill_dirs = sorted({
+                (path.rsplit("/", 1)[0] if "/" in path else "")
+                for path in ((_stripped(m.name) or "") for m in members)
+                if path.split("/")[-1] == "SKILL.md"
+            })
+            candidates = [d for d in skill_dirs
+                          if not subpath or d == subpath or d.startswith(prefix)]
+            found = []
+            for candidate in candidates:
+                try:
+                    found.append((candidate, _extract_dir(tar, members, candidate)))
+                except FetchError:
+                    continue
+            return found
+    except (tarfile.TarError, EOFError, OSError):
+        raise FetchError("the downloaded archive is not a valid tarball") from None

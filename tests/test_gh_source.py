@@ -242,3 +242,39 @@ def test_extract_fails_when_every_recorded_file_is_gone():
                         "files": ["SKILL.md"], "directory_hash": CITATION_HASH})
     with pytest.raises(gh_source.FetchError):
         gh_source.extract_skill(repo_tarball(files=repo), e)
+
+
+# -- github install targets ---------------------------------------------------
+
+
+def test_parse_github_target_url_forms():
+    f = gh_source.parse_github_target
+    assert f("https://github.com/humanlayer/skills") == ("humanlayer/skills", "HEAD", "")
+    assert f("https://github.com/humanlayer/skills.git") == ("humanlayer/skills", "HEAD", "")
+    assert f("https://github.com/humanlayer/skills/tree/main/plugins/show-me") == \
+        ("humanlayer/skills", "main", "plugins/show-me")
+    assert f("https://github.com/humanlayer/skills/tree/main") == ("humanlayer/skills", "main", "")
+    assert f("https://github.com/o/r/blob/v2/skills/x/SKILL.md") == ("o/r", "v2", "skills/x")
+    assert f("owner/repo@my-branch") == ("owner/repo", "my-branch", "")
+    assert f("owner/repo@3") is None          # numeric = registry pin
+    assert f("owner/repo") is None            # bare = registry unless --github
+    assert f("not a target") is None
+
+
+def test_find_skills_under_a_plugin_path():
+    files = {
+        "plugins/show-me/README.md": b"about\n",
+        "plugins/show-me/skills/render/SKILL.md": b"---\nname: render\ndescription: Renders.\n---\nB\n",
+        "plugins/show-me/skills/capture/SKILL.md": b"---\nname: capture\ndescription: Captures.\n---\nB\n",
+        "plugins/other/skills/x/SKILL.md": b"---\nname: x\ndescription: X.\n---\nB\n",
+        "SKILL.md": b"---\nname: root\ndescription: Root.\n---\nB\n",
+    }
+    found = gh_source.find_skills(repo_tarball(files=files), "plugins/show-me")
+    assert sorted(path for path, _ in found) == \
+        ["plugins/show-me/skills/capture", "plugins/show-me/skills/render"]
+
+    direct = gh_source.find_skills(repo_tarball(files=files), "plugins/show-me/skills/render")
+    assert [path for path, _ in direct] == ["plugins/show-me/skills/render"]
+
+    everything = gh_source.find_skills(repo_tarball(files=files), "")
+    assert len(everything) == 4

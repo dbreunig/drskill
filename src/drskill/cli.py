@@ -1178,6 +1178,95 @@ def _publish_gate(files, dir_name, home, config_root=None) -> bool:
         return True
 
 
+def _github_skill_install(target, *, harness, project, user, yes, force) -> None:
+    """Trust-on-first-fetch install from a GitHub repository: find the
+    SKILL.md directories under the target path (a plugin folder resolves to
+    the skills inside it), review each with the standard checks, confirm,
+    and install through the usual safe path."""
+    from drskill import content, gh_source, skill_pub
+
+    repo, ref_name, subpath = target
+    home = _home()
+    root = Path.cwd()
+    try:
+        tar_bytes = gh_source.fetch_tarball(repo, ref_name)
+        found = gh_source.find_skills(tar_bytes, subpath)
+    except gh_source.FetchError as error:
+        typer.echo(str(error))
+        raise typer.Exit(1)
+    if not found:
+        typer.echo(f"No SKILL.md found under {subpath or 'the repository root'!s} "
+                   f"in {repo}@{ref_name}.")
+        raise typer.Exit(1)
+
+    described = []
+    for path, files in found:
+        fallback = path.rsplit("/", 1)[-1] or repo.split("/")[-1]
+        name, description = skill_pub.frontmatter_meta(files, fallback=fallback)
+        described.append((path, files, name, description))
+
+    target_dir, scope = _install_target(harness, project, user, root, home)
+    typer.echo(f"Found {len(described)} skill{'s' if len(described) != 1 else ''} "
+               f"in {repo}@{ref_name}; installing into {target_dir} ({scope} store).")
+    for index, (path, _files, name, description) in enumerate(described, start=1):
+        location = path or "repository root"
+        typer.echo(f"  {index}. {name}  ({location})  {description or ''}".rstrip())
+
+    if len(described) > 1:
+        if interactive.can_interact() is not None:
+            typer.echo("Several skills found; rerun with the exact path "
+                       "(…/tree/<ref>/<skill directory>) or interactively.")
+            raise typer.Exit(1)
+        choice = typer.prompt("Install which? (numbers, a=all, q=quit)").strip().lower()
+        if choice in ("q", ""):
+            raise typer.Exit(0)
+        if choice == "a":
+            selected = described
+        else:
+            try:
+                picks = sorted({int(part) for part in choice.replace(",", " ").split()})
+            except ValueError:
+                typer.echo(f"Could not read {choice!r}.")
+                raise typer.Exit(1)
+            if any(pick < 1 or pick > len(described) for pick in picks):
+                typer.echo("Pick numbers from the list.")
+                raise typer.Exit(1)
+            selected = [described[pick - 1] for pick in picks]
+    else:
+        selected = described
+
+    typer.echo("No publisher hash to verify: this is a trust-on-first-fetch install, "
+               "reviewed by the standard checks.")
+    for path, files, name, description in selected:
+        typer.echo(f"\nReviewing {name}:")
+        if not _review_fetched(files, home, name=name, offer_acks=not yes):
+            typer.echo(f"  {name}: skipped")
+            continue
+        if not yes:
+            if interactive.can_interact() is not None:
+                typer.echo("Rerun with --yes to install non-interactively.")
+                raise typer.Exit(1)
+            if not typer.confirm(f"Install {name}?", default=False):
+                typer.echo(f"  {name}: skipped")
+                continue
+        dest = target_dir / name
+        status = _existing_dir_status(content.manifest_hash(files), dest, name, force)
+        if status is None:
+            replaced = dest.exists()
+            content.write_skill(files, dest)
+            typer.echo(f"  {name}: {'replaced' if replaced else 'installed'}")
+        if not yes and interactive.can_interact() is None:
+            if typer.confirm(f"Publish {name} to your registry to pin it?", default=False):
+                creds_data = service.load_credentials()
+                if not creds_data:
+                    typer.echo("Not signed in; run drskill login, then drskill skill publish.")
+                else:
+                    base_url = creds_data.get("service_url") or service.service_url()
+                    _skill_publish_flow(files, name, description, None,
+                                        creds_data, base_url, home,
+                                        dir_name=path.rsplit("/", 1)[-1] or name)
+
+
 @skill_app.command("list")
 def skill_list() -> None:
     """List your skills on the registry."""
@@ -1313,7 +1402,9 @@ def _version_arg_or_exit(arg: str) -> int:
 
 @skill_app.command("install")
 def skill_install(
-    ref: str = typer.Argument(..., help="owner/slug[@N]"),
+    ref: str = typer.Argument(..., help="owner/slug[@N], or a GitHub URL (repo, tree, or blob)"),
+    github: bool = typer.Option(False, "--github",
+        help="treat a bare owner/repo as a GitHub repository instead of a registry ref"),
     harness: str | None = typer.Option(None, "--harness",
         help="install into this harness's own skills directory instead of the shared .agents/skills store"),
     project: bool = typer.Option(False, "--project", help="install into the project store"),
@@ -1321,14 +1412,28 @@ def skill_install(
     yes: bool = typer.Option(False, "--yes", help="skip the confirmation"),
     force: bool = typer.Option(False, "--force", help="replace an installed copy whose content differs"),
 ) -> None:
-    """Install a registry skill into a skills directory."""
-    from drskill import content, skill_pub
+    """Install a registry skill, or skills from a GitHub repository."""
+    from drskill import content, gh_source, skill_pub
 
-    creds, base = _service_credentials()
-    owner, slug, number = _parse_skill_ref_or_exit(ref, skill_pub)
     if project and user:
         typer.echo("Pass at most one of --project and --user.")
         raise typer.Exit(1)
+    gh_target = gh_source.parse_github_target(ref)
+    if gh_target is None and github:
+        from drskill.manifest_build import parse_repo
+
+        repo = parse_repo(ref)
+        if repo is None:
+            typer.echo(f"{ref!r} does not look like a GitHub repository.")
+            raise typer.Exit(1)
+        gh_target = (repo, "HEAD", "")
+    if gh_target is not None:
+        _github_skill_install(gh_target, harness=harness, project=project,
+                              user=user, yes=yes, force=force)
+        return
+
+    creds, base = _service_credentials()
+    owner, slug, number = _parse_skill_ref_or_exit(ref, skill_pub)
 
     try:
         if number is None:
@@ -1993,7 +2098,8 @@ def _fork_loadout(owner: str, slug: str, creds: dict, base: str) -> tuple[str, s
 
 
 def _review_fetched(files: list[dict], home: Path, manifest: dict | None = None,
-                    selector: str | None = None, name: str = "skill") -> bool:
+                    selector: str | None = None, name: str = "skill",
+                    offer_acks: bool = True) -> bool:
     """Write the fetched skill to a temp directory, run the standard checks,
     and offer acks. False when the user quits the review. When a manifest
     with a health_report is given, that entry's findings are refreshed in
@@ -2016,7 +2122,7 @@ def _review_fetched(files: list[dict], home: Path, manifest: dict | None = None,
             typer.echo("Review: no findings.")
             return True
         report.print_findings(world, active, console)
-        if interactive.can_interact() is not None:
+        if not offer_acks or interactive.can_interact() is not None:
             # Findings display always; the ack loop needs a terminal.
             return True
         machine_ledger = home / ".drskill.toml"

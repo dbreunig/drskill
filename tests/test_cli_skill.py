@@ -379,3 +379,139 @@ def test_show_file_is_binary_safe_and_url_encodes(read_env, monkeypatch):
                                  "--file", "data file.bin"])
     assert result.exit_code == 0
     assert b"\xff\xfebytes" in result.stdout_bytes
+
+
+# -- github install ---------------------------------------------------------------
+
+import io as _io
+import tarfile as _tarfile
+import threading as _threading
+from http.server import BaseHTTPRequestHandler as _Handler, HTTPServer as _Server
+
+PLUGIN_REPO = {
+    "plugins/show-me/README.md": b"about\n",
+    "plugins/show-me/skills/render/SKILL.md":
+        b"---\nname: render\ndescription: Use when rendering pages in the show-me plugin.\n---\nB\n",
+    "plugins/show-me/skills/capture/SKILL.md":
+        b"---\nname: capture\ndescription: Use when capturing output in the show-me plugin.\n---\nB\n",
+}
+
+
+def gh_tarball(files):
+    buf = _io.BytesIO()
+    with _tarfile.open(fileobj=buf, mode="w:gz") as tar:
+        for path, data in files.items():
+            info = _tarfile.TarInfo(f"top/{path}")
+            info.size = len(data)
+            tar.addfile(info, _io.BytesIO(data))
+    return buf.getvalue()
+
+
+class _GhStub(_Handler):
+    files = PLUGIN_REPO
+
+    def do_GET(self):
+        self.send_response(200)
+        self.end_headers()
+        self.wfile.write(gh_tarball(type(self).files))
+
+    def log_message(self, *args):
+        pass
+
+
+@pytest.fixture
+def gh_env(tmp_path, monkeypatch):
+    home = tmp_path / "home"
+    project = tmp_path / "project"
+    home.mkdir()
+    project.mkdir()
+    monkeypatch.setenv("DRSKILL_HOME", str(home))
+    monkeypatch.delenv("DRSKILL_SERVICE_URL", raising=False)
+    monkeypatch.chdir(project)
+    service.save_credentials("http://svc.test", "drsk_x")
+    monkeypatch.setattr(cli_mod.interactive, "can_interact", lambda *a, **k: None)
+
+    server = _Server(("127.0.0.1", 0), _GhStub)
+    thread = _threading.Thread(target=server.serve_forever, daemon=True)
+    thread.start()
+    monkeypatch.setenv("DRSKILL_CODELOAD_URL",
+                       f"http://127.0.0.1:{server.server_address[1]}")
+
+    def fake_api_request(method, path, token=None, json_body=None, base_url=None,
+                         raw=False, raw_body=None, content_type=None, binary=False):
+        raise service.ServiceError("not_found", "Not found.")
+
+    monkeypatch.setattr(service, "api_request", fake_api_request)
+    yield home
+    server.shutdown()
+    thread.join(timeout=5)
+    server.server_close()
+
+
+def test_plugin_url_installs_the_skills_within(gh_env):
+    home = gh_env
+    url = "https://github.com/humanlayer/skills/tree/main/plugins/show-me"
+    result = runner.invoke(app, ["skill", "install", url], input="a\ny\nn\ny\nn\n")
+    assert result.exit_code == 0, result.output
+    assert "render" in result.output and "capture" in result.output
+    assert (home / ".agents" / "skills" / "render" / "SKILL.md").exists()
+    assert (home / ".agents" / "skills" / "capture" / "SKILL.md").exists()
+
+
+def test_picker_installs_only_the_chosen_skill(gh_env):
+    home = gh_env
+    url = "https://github.com/humanlayer/skills/tree/main/plugins/show-me"
+    result = runner.invoke(app, ["skill", "install", url], input="2\ny\nn\n")
+    assert result.exit_code == 0, result.output
+    installed = sorted(p.name for p in (home / ".agents" / "skills").iterdir())
+    assert installed == ["render"]
+
+
+def test_direct_skill_path_skips_the_picker(gh_env):
+    home = gh_env
+    url = "https://github.com/humanlayer/skills/tree/main/plugins/show-me/skills/capture"
+    result = runner.invoke(app, ["skill", "install", url], input="y\nn\n")
+    assert result.exit_code == 0, result.output
+    assert (home / ".agents" / "skills" / "capture" / "SKILL.md").exists()
+
+
+def test_non_interactive_multi_match_lists_and_exits(gh_env, monkeypatch):
+    home = gh_env
+    monkeypatch.setattr(cli_mod.interactive, "can_interact", lambda *a, **k: "no tty")
+    url = "https://github.com/humanlayer/skills/tree/main/plugins/show-me"
+    result = runner.invoke(app, ["skill", "install", url, "--yes"])
+    assert result.exit_code == 1
+    assert "render" in result.output and "capture" in result.output
+
+
+def test_yes_installs_but_still_prints_findings(gh_env, monkeypatch):
+    home = gh_env
+    vague = {"vague/SKILL.md": b"---\nname: vague\ndescription: Helps with various tasks.\n---\nB\n"}
+    _GhStub.files = vague
+    try:
+        result = runner.invoke(app, ["skill", "install",
+                                     "https://github.com/o/r/tree/main/vague", "--yes"])
+        assert result.exit_code == 0, result.output
+        assert "distinguishing" in result.output or "generic-description" in result.output
+        assert (home / ".agents" / "skills" / "vague" / "SKILL.md").exists()
+    finally:
+        _GhStub.files = PLUGIN_REPO
+
+
+def test_bare_ref_stays_registry(gh_env):
+    result = runner.invoke(app, ["skill", "install", "humanlayer/skills", "--yes"])
+    assert result.exit_code == 1
+    assert "Not found" in result.output
+
+
+def test_github_flag_forces_bare_repo(gh_env):
+    home = gh_env
+    _GhStub.files = {"skills/solo/SKILL.md":
+        b"---\nname: solo\ndescription: Use when demonstrating a bare repo install.\n---\nB\n"}
+    try:
+        result = runner.invoke(app, ["skill", "install", "humanlayer/skills", "--github"],
+                               input="y\nn\n")
+        assert result.exit_code == 0, result.output
+        assert (home / ".agents" / "skills" / "solo" / "SKILL.md").exists()
+    finally:
+        _GhStub.files = PLUGIN_REPO
