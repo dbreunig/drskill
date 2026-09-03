@@ -515,3 +515,20 @@ def test_github_flag_forces_bare_repo(gh_env):
         assert (home / ".agents" / "skills" / "solo" / "SKILL.md").exists()
     finally:
         _GhStub.files = PLUGIN_REPO
+
+
+def test_registry_install_warns_about_blind_harnesses(install_env, monkeypatch):
+    home, _ = install_env
+    (home / ".claude").mkdir()  # claude-code detect marker
+    result = runner.invoke(app, ["skill", "install", "drew/citation-style", "--yes"])
+    assert result.exit_code == 0, result.output
+    assert "does not read the shared store" in result.output
+
+
+def test_github_install_warns_about_blind_harnesses(gh_env):
+    home = gh_env
+    (home / ".claude").mkdir()
+    url = "https://github.com/humanlayer/skills/tree/main/plugins/show-me/skills/capture"
+    result = runner.invoke(app, ["skill", "install", url, "--yes"])
+    assert result.exit_code == 0, result.output
+    assert "does not read the shared store" in result.output

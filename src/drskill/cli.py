@@ -1208,6 +1208,7 @@ def _github_skill_install(target, *, harness, project, user, yes, force) -> None
     target_dir, scope = _install_target(harness, project, user, root, home)
     typer.echo(f"Found {len(described)} skill{'s' if len(described) != 1 else ''} "
                f"in {repo}@{ref_name}; installing into {target_dir} ({scope} store).")
+    _warn_blind_harnesses(harness, root, home)
     for index, (path, _files, name, description) in enumerate(described, start=1):
         location = path or "repository root"
         typer.echo(f"  {index}. {name}  ({location})  {description or ''}".rstrip())
@@ -1462,6 +1463,7 @@ def skill_install(
     target, scope = _install_target(harness, project, user, root, home)
     dest = target / slug
     typer.echo(f"Install {owner}/{slug}@{number} into {target} ({scope} store)")
+    _warn_blind_harnesses(harness, root, home)
     if not yes and not typer.confirm("Proceed?", default=False):
         raise typer.Exit(0)
 
@@ -1937,13 +1939,7 @@ def install(
     if other:
         typer.echo(f"{other} entr{'ies' if other != 1 else 'y'} with other source types "
                    "will not be installed.")
-    if harness is None:
-        blind = [h.display_name for h in detect_harnesses(root, home)
-                 if ".agents/skills" not in h.project_paths
-                 and "~/.agents/skills" not in h.global_paths]
-        if blind:
-            typer.echo(f"Note: {', '.join(blind)} does not read the shared store; "
-                       "pass --harness to target it directly.")
+    _warn_blind_harnesses(harness, root, home)
     if not yes and not typer.confirm("Proceed?", default=False):
         raise typer.Exit(0)
 
@@ -2194,6 +2190,21 @@ def _publish_updated_entry(entry: dict, files: list[dict], ref: str,
     revision = data["revision"]
     typer.echo(f"Published revision {revision['number']} ({revision['runtime_hash']}).")
     return True
+
+
+def _warn_blind_harnesses(harness_flag, root: Path, home: Path) -> None:
+    """When installing into the shared store, name detected harnesses that
+    do not read it."""
+    if harness_flag is not None:
+        return
+    from drskill.harnesses import detect_harnesses
+
+    blind = [h.display_name for h in detect_harnesses(root, home)
+             if ".agents/skills" not in h.project_paths
+             and "~/.agents/skills" not in h.global_paths]
+    if blind:
+        typer.echo(f"Note: {', '.join(blind)} does not read the shared store; "
+                   "pass --harness to target it directly.")
 
 
 def _install_target(harness_id: str | None, project: bool, user: bool,
