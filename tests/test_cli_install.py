@@ -229,12 +229,15 @@ def test_harness_flag_targets_that_harness_directory(env):
     assert not skills_dir(home).exists()
 
 
-def test_shared_default_warns_about_harnesses_that_cannot_see_it(env):
+def test_loadout_install_bridges_blind_harnesses(env, monkeypatch):
     home, _, _ = env
     (home / ".claude").mkdir()
-    result = runner.invoke(app, ["loadout", "install", "drew/pack"], input="n\n")
+    monkeypatch.setattr(cli_mod.interactive, "can_interact", lambda *a, **k: None)
+    result = runner.invoke(app, ["loadout", "install", "drew/pack"], input="y\ny\n")
+    assert result.exit_code == 0, result.output
     assert "Claude Code" in result.output
-    assert "--harness" in result.output
+    assert (home / ".claude" / "skills" / "vector").is_symlink()
+    assert (home / ".claude" / "skills" / "citation").is_symlink()
 
 
 def test_loadout_without_a_revision_errors(env):

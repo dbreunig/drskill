@@ -517,18 +517,57 @@ def test_github_flag_forces_bare_repo(gh_env):
         _GhStub.files = PLUGIN_REPO
 
 
-def test_registry_install_warns_about_blind_harnesses(install_env, monkeypatch):
+def test_registry_install_bridges_blind_harnesses_with_yes(install_env, monkeypatch):
     home, _ = install_env
     (home / ".claude").mkdir()  # claude-code detect marker
     result = runner.invoke(app, ["skill", "install", "drew/citation-style", "--yes"])
     assert result.exit_code == 0, result.output
-    assert "does not read the shared store" in result.output
+    link = home / ".claude" / "skills" / "citation-style"
+    assert link.is_symlink()
+    assert (link / "SKILL.md").exists()
+    assert "linked" in result.output
 
 
-def test_github_install_warns_about_blind_harnesses(gh_env):
+def test_github_install_bridges_discovered_stores(gh_env):
+    home = gh_env
+    (home / ".claude").mkdir()
+    (home / ".hermes" / "skills").mkdir(parents=True)
+    url = "https://github.com/humanlayer/skills/tree/main/plugins/show-me/skills/capture"
+    result = runner.invoke(app, ["skill", "install", url], input="y\nn\ny\ny\n")
+    # install confirm, publish offer no, then one bridge confirm per store
+    assert result.exit_code == 0, result.output
+    assert (home / ".claude" / "skills" / "capture").is_symlink()
+    assert (home / ".hermes" / "skills" / "capture").is_symlink()
+
+
+def test_no_link_suppresses_bridges(gh_env):
     home = gh_env
     (home / ".claude").mkdir()
     url = "https://github.com/humanlayer/skills/tree/main/plugins/show-me/skills/capture"
+    result = runner.invoke(app, ["skill", "install", url, "--yes", "--no-link"])
+    assert result.exit_code == 0, result.output
+    assert not (home / ".claude" / "skills" / "capture").exists()
+
+
+def test_standing_inside_a_harness_store_retargets(gh_env, monkeypatch):
+    home = gh_env
+    project = home.parent / "hermesproj"
+    store = project / ".hermes" / "skills"
+    store.mkdir(parents=True)
+    monkeypatch.chdir(store)
+    url = "https://github.com/humanlayer/skills/tree/main/plugins/show-me/skills/capture"
     result = runner.invoke(app, ["skill", "install", url, "--yes"])
     assert result.exit_code == 0, result.output
-    assert "does not read the shared store" in result.output
+    canonical = project / ".agents" / "skills" / "capture"
+    assert (canonical / "SKILL.md").exists()
+    assert (store / "capture").is_symlink()
+    assert (store / "capture" / "SKILL.md").exists()
+
+
+def test_into_always_links_the_given_directory(gh_env, tmp_path):
+    home = gh_env
+    target = tmp_path / "custom-store"
+    url = "https://github.com/humanlayer/skills/tree/main/plugins/show-me/skills/capture"
+    result = runner.invoke(app, ["skill", "install", url, "--yes", "--into", str(target)])
+    assert result.exit_code == 0, result.output
+    assert (target / "capture").is_symlink()
