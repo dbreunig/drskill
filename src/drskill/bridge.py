@@ -15,11 +15,12 @@ from pathlib import Path
 SHARED = ".agents"
 
 
-def discover_bridge_dirs(scope_root: Path) -> list[tuple[str, Path]]:
+def discover_bridge_dirs(scope_root: Path, scope: str = "project") -> list[tuple[str, Path]]:
     """(label, skills dir) bridge candidates under scope_root: existing
     `.<name>/skills` directories by convention, plus known harnesses that
-    cannot read the shared store when their marker directory exists (their
-    skills directory is created at link time)."""
+    cannot read the shared store when one of their real detect markers
+    exists (their skills directory is created at link time). scope picks
+    project_paths or global_paths for known harnesses."""
     from drskill.harnesses import load_harnesses
 
     found: dict[Path, str] = {}
@@ -34,11 +35,13 @@ def discover_bridge_dirs(scope_root: Path) -> list[tuple[str, Path]]:
                            for spec in harness.project_paths + harness.global_paths)
         if reads_shared:
             continue
-        for spec in harness.project_paths:
-            marker = scope_root / Path(spec).parts[0]
-            if marker.is_dir():
-                found[scope_root / spec] = harness.display_name
-                break
+        present = any((scope_root / marker.removeprefix("~/")).exists()
+                      for marker in harness.detect)
+        if not present:
+            continue
+        specs = harness.project_paths if scope == "project" else harness.global_paths
+        if specs:
+            found[scope_root / specs[0].removeprefix("~/")] = harness.display_name
     return [(label, path) for path, label in sorted(found.items())]
 
 

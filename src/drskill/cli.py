@@ -1208,7 +1208,8 @@ def _github_skill_install(target, *, harness, project, user, yes, force,
 
     target_dir, scope = _install_target(harness, project, user, root, home)
     typer.echo(f"Found {len(described)} skill{'s' if len(described) != 1 else ''} "
-               f"in {repo}@{ref_name}; installing into {target_dir} ({scope} store).")
+               f"in {repo}@{ref_name}; installing into {_display_path(target_dir)} "
+               f"({scope} store).")
     for index, (path, _files, name, description) in enumerate(described, start=1):
         location = path or "repository root"
         typer.echo(f"  {index}. {name}  ({location})  {description or ''}".rstrip())
@@ -1269,7 +1270,7 @@ def _github_skill_install(target, *, harness, project, user, yes, force,
                     _skill_publish_flow(files, name, description, None,
                                         creds_data, base_url, home,
                                         dir_name=path.rsplit("/", 1)[-1] or name)
-    _offer_bridges(bridged, harness, target_dir.parent.parent,
+    _offer_bridges(bridged, harness, target_dir.parent.parent, scope=scope,
                    yes=yes, no_link=no_link, into=into)
 
 
@@ -1472,7 +1473,7 @@ def skill_install(
     home = _home()
     target, scope = _install_target(harness, project, user, root, home)
     dest = target / slug
-    typer.echo(f"Install {owner}/{slug}@{number} into {target} ({scope} store)")
+    typer.echo(f"Install {owner}/{slug}@{number} into {_display_path(target)} ({scope} store)")
     if not yes and not typer.confirm("Proceed?", default=False):
         raise typer.Exit(0)
 
@@ -1488,7 +1489,7 @@ def skill_install(
         replaced = dest.exists()
         content.write_skill(files, dest)
         typer.echo(f"  {slug}: {'replaced' if replaced else 'installed'}")
-    _offer_bridges([(slug, dest)], harness, target.parent.parent,
+    _offer_bridges([(slug, dest)], harness, target.parent.parent, scope=scope,
                    yes=yes, no_link=no_link, into=into)
 
 @loadout_app.command("list")
@@ -1938,7 +1939,7 @@ def install(
     target, scope = _install_target(harness, project, user, root, home)
 
     typer.echo(f"Install {installable} skill{'s' if installable != 1 else ''} "
-               f"into {target} ({scope} store):")
+               f"into {_display_path(target)} ({scope} store):")
     for entry in hosted:
         typer.echo(f"  {entry['name']}  ({entry['content_hash'][:19]}…)")
     for entry in github:
@@ -1978,7 +1979,7 @@ def install(
         if status in ("installed", "unchanged"):
             bridged.append((entry["name"], target / entry["name"]))
         counts[status] += 1
-    _offer_bridges(bridged, harness, target.parent.parent, yes=yes)
+    _offer_bridges(bridged, harness, target.parent.parent, scope=scope, yes=yes)
     parts = [f"{counts['installed']} installed"]
     if counts["unchanged"]:
         parts.append(f"{counts['unchanged']} already installed")
@@ -2208,7 +2209,21 @@ def _publish_updated_entry(entry: dict, files: list[dict], ref: str,
     return True
 
 
-def _offer_bridges(installed, harness_flag, scope_root: Path, *,
+def _display_path(path: Path) -> str:
+    """Short display form: relative inside the current directory,
+    ~-contracted under home, absolute otherwise."""
+    path = Path(path)
+    try:
+        return str(path.relative_to(Path.cwd()))
+    except ValueError:
+        pass
+    try:
+        return "~/" + str(path.relative_to(Path.home()))
+    except ValueError:
+        return str(path)
+
+
+def _offer_bridges(installed, harness_flag, scope_root: Path, *, scope: str = "project",
                    yes: bool, no_link: bool = False, into: Path | None = None) -> None:
     """After installs into the shared store, bridge harness stores that
     cannot read it: known blind harnesses plus any discovered .<name>/skills
@@ -2217,7 +2232,7 @@ def _offer_bridges(installed, harness_flag, scope_root: Path, *,
 
     if harness_flag is not None or no_link or not installed:
         return
-    candidates = bridge.discover_bridge_dirs(scope_root)
+    candidates = bridge.discover_bridge_dirs(scope_root, scope=scope)
     if into is not None:
         candidates = [(str(into), Path(into))] + [
             (label, path) for label, path in candidates if path != Path(into)]
@@ -2230,12 +2245,13 @@ def _offer_bridges(installed, harness_flag, scope_root: Path, *,
                            "pass --harness to target it directly.")
                 continue
             if not yes and not typer.confirm(
-                    f"{label} does not read the shared store. Link {names} into {store}?",
+                    f"{label} does not read the shared store. "
+                    f"Link {names} into {_display_path(store)}?",
                     default=True):
                 continue
         for name, canonical in installed:
             status = bridge.create_link(store, name, canonical)
-            typer.echo(f"  {status}: {store / name}")
+            typer.echo(f"  {status}: {_display_path(store / name)}")
 
 
 def _install_target(harness_id: str | None, project: bool, user: bool,

@@ -28,6 +28,23 @@ def test_discover_skips_the_shared_store_and_absent_stores(tmp_path):
     assert bridge.discover_bridge_dirs(root) == []
 
 
+def test_discover_ignores_generic_dirs_that_are_not_markers(tmp_path):
+    # A project with a data/ directory is not AstrBot; only the harness's
+    # real detect marker (data/skills itself) signals presence.
+    root = make_project(tmp_path, [".git", "data/models"])
+    assert bridge.discover_bridge_dirs(root) == []
+
+    root2 = make_project(tmp_path / "b", ["data/skills"])
+    found = bridge.discover_bridge_dirs(root2)
+    assert [(label, str(p.relative_to(root2))) for label, p in found] ==         [("AstrBot", "data/skills")]
+
+
+def test_discover_user_scope_uses_global_paths(tmp_path):
+    home = make_project(tmp_path, [".claude"])
+    found = bridge.discover_bridge_dirs(home, scope="user")
+    assert [(label, str(p.relative_to(home))) for label, p in found] ==         [("Claude Code", ".claude/skills")]
+
+
 def test_discover_claude_needs_only_its_marker(tmp_path):
     root = make_project(tmp_path, [".claude"])  # no skills subdir yet
     found = bridge.discover_bridge_dirs(root)
