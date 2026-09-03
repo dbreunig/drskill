@@ -35,6 +35,8 @@ generic_min_distinct_tokens = 2  # fewer distinctive words than this is too vagu
 app = typer.Typer(add_completion=False, no_args_is_help=True, help="brew doctor for your agent's skill loadout")
 loadout_app = typer.Typer(add_completion=False, no_args_is_help=True, help="Manage loadouts on the drskill service")
 app.add_typer(loadout_app, name="loadout")
+skill_app = typer.Typer(add_completion=False, no_args_is_help=True, help="Publish and read skills on the drskill registry")
+app.add_typer(skill_app, name="skill")
 console = Console()
 
 
@@ -1067,6 +1069,100 @@ def sync() -> None:
         parts.append("Pulled " + ", ".join(pulled))
     typer.echo(" · ".join(parts) if parts else "Already up to date.")
 
+
+
+@skill_app.command("publish")
+def skill_publish(
+    path: Path = typer.Argument(Path("."), help="skill directory containing SKILL.md"),
+    message: str | None = typer.Option(None, "-m", "--message", help="version note"),
+) -> None:
+    """Check a skill and publish it as a new registry version."""
+    from drskill import skill_pub
+
+    creds, base = _service_credentials()
+    home = _home()
+    try:
+        files = skill_pub.collect_dir(path)
+    except (ValueError, OSError) as err:
+        typer.echo(str(err))
+        raise typer.Exit(1)
+    name, description = skill_pub.frontmatter_meta(files, fallback=path.resolve().name)
+    result = _skill_publish_flow(files, name, description, message, creds, base, home)
+    raise typer.Exit(0 if result else 1)
+
+
+def _skill_publish_flow(files, name, description, note, creds, base, home):
+    """Gate, upload, and publish one skill. The wizard reuses this. Returns
+    {"reference", "content_hash"} or None when blocked or failed."""
+    from drskill import content
+
+    if not _publish_gate(files, name, home):
+        return None
+    try:
+        uploaded = content.upload(files, creds["token"], base)
+        data = service.api_request(
+            "POST", "/api/v1/skills", token=creds["token"], base_url=base,
+            json_body={"skill": {"slug": name, "name": name, "description": description,
+                                 "note": note, "content_hash": uploaded["content_hash"]}})
+    except service.ServiceError as err:
+        _echo_service_error(err)
+        return None
+    skill, version = data["skill"], data["version"]
+    ref = f"{skill['owner']}/{skill['slug']}@{version['number']}"
+    if data.get("existed"):
+        typer.echo(f"{ref} already carries this content.")
+    else:
+        typer.echo(f"Published {ref}")
+    return {"reference": ref, "content_hash": version["content_hash"]}
+
+
+def _publish_gate(files, name, home) -> bool:
+    """Run the standard checks over the files about to publish. Active
+    errors and warnings block; interactive acks (the sanctioned override)
+    unblock; notes never block. Nothing uploads before this passes."""
+    import tempfile
+
+    from drskill import content, lint as lint_mod, skill_pub
+
+    with tempfile.TemporaryDirectory(prefix="drskill-publish-") as tmp:
+        skill_dir = Path(tmp) / name
+        content.write_skill(files, skill_dir)
+        target = lint_mod.classify(skill_dir, "skill")
+        config = _load_effective_config_or_exit(Path(tmp), home, False)
+        world, findings = lint_mod.run_lint(target, config, Path(tmp), home)
+        active, _ = ledger.filter_findings(findings, config)
+        blocking = skill_pub.blocking_findings(active)
+        if not blocking:
+            return True
+
+        report.print_findings(world, blocking, console)
+        if interactive.can_interact() is not None:
+            typer.echo("Fix or ack these findings before publishing.")
+            return False
+        machine_ledger = home / ".drskill.toml"
+        for finding in blocking:
+            console.print("[bold]a[/bold] ack · [bold]s[/bold] skip · [bold]q[/bold] quit")
+            while True:
+                key = key_source()
+                if key == "a":
+                    ledger.append_ack(machine_ledger, ledger.Ack(
+                        check=finding.check_id, skills=finding.contributor_names,
+                        fingerprint=finding.fingerprint, date=dt.date.today()))
+                    typer.echo(f"  acked {finding.check_id}")
+                    break
+                if key == "s":
+                    break
+                if key == "q":
+                    return False
+
+        config = _load_effective_config_or_exit(Path(tmp), home, False)
+        active, _ = ledger.filter_findings(findings, config)
+        remaining = skill_pub.blocking_findings(active)
+        if remaining:
+            typer.echo(f"{len(remaining)} blocking finding{'s' if len(remaining) != 1 else ''} "
+                       "remain; not publishing.")
+            return False
+        return True
 
 @loadout_app.command("list")
 def loadout_list(
