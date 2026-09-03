@@ -347,6 +347,7 @@ def test_review_fetched_runs_lint_and_records_acks(tmp_path, monkeypatch):
     files = [{"path": "SKILL.md",
               "data": b"---\nname: vague\ndescription: Helps with various tasks.\n---\nbody\n",
               "executable": False}]
+    monkeypatch.setattr(cli_mod.interactive, "can_interact", lambda *a, **k: None)
     monkeypatch.setattr(cli_mod, "key_source", keys("a", "s", "s"))
     assert cli_mod._review_fetched(files, home, name="vague") is True
     ledger_text = (home / ".drskill.toml").read_text()
