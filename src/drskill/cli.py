@@ -1179,7 +1179,7 @@ def _publish_gate(files, dir_name, home, config_root=None) -> bool:
 
 
 def _github_skill_install(target, *, harness, project, user, yes, force,
-                          no_link=False, into=None) -> None:
+                          no_link=False, into=None, vendor=False) -> None:
     """Trust-on-first-fetch install from a GitHub repository: find the
     SKILL.md directories under the target path (a plugin folder resolves to
     the skills inside it), review each with the standard checks, confirm,
@@ -1261,17 +1261,71 @@ def _github_skill_install(target, *, harness, project, user, yes, force,
         if status in (None, "unchanged"):
             bridged.append((name, dest))
         if not yes and interactive.can_interact() is None:
-            if typer.confirm(f"Publish {name} to your registry to pin it?", default=False):
+            prompt = (f"Publish a hosted copy of {name} to your registry?" if vendor else
+                      f"Add {name} to your registry as a reference to {repo}?")
+            if typer.confirm(prompt, default=False):
                 creds_data = service.load_credentials()
                 if not creds_data:
                     typer.echo("Not signed in; run drskill login, then drskill skill publish.")
-                else:
+                elif vendor:
                     base_url = creds_data.get("service_url") or service.service_url()
                     _skill_publish_flow(files, name, description, None,
                                         creds_data, base_url, home,
                                         dir_name=path.rsplit("/", 1)[-1] or name)
+                else:
+                    base_url = creds_data.get("service_url") or service.service_url()
+                    _skill_reference_flow(files, name, description, repo, ref_name,
+                                          path, creds_data, base_url)
     _offer_bridges(bridged, harness, target_dir.parent.parent, scope=scope,
                    yes=yes, no_link=no_link, into=into)
+
+
+def _skill_reference_flow(files, name, description, repo, ref_name, skill_path,
+                          creds, base):
+    """Record a third-party skill as a reference: origin coordinates and
+    the directory hash, no content upload."""
+    from drskill import content, skill_pub
+
+    try:
+        data = service.api_request(
+            "POST", "/api/v1/skills", token=creds["token"], base_url=base,
+            json_body={"skill": {
+                "slug": skill_pub.skill_slug(name), "name": name,
+                "description": description,
+                "content_hash": content.manifest_hash(files),
+                "origin": {"repo": repo, "ref": ref_name, "skill_path": skill_path,
+                           "files": sorted(f["path"] for f in files)}}})
+    except service.ServiceError as err:
+        _echo_service_error(err)
+        return None
+    skill, version = data["skill"], data["version"]
+    ref = f"{skill['owner']}/{skill['slug']}@{version['number']}"
+    typer.echo(f"Added {ref} as a reference to {repo}.")
+    return {"reference": ref, "content_hash": version["content_hash"]}
+
+
+def _resolve_reference_files(origin: dict, content_hash: str):
+    """Fetch a reference version's files from its origin and verify them
+    against the recorded hash. Exits with the drift message on mismatch."""
+    from drskill import content, gh_source
+
+    entry = {"name": origin.get("skill_path") or "skill",
+             "source_type": "github", "content_hash": content_hash,
+             "metadata": {"repo": origin["repo"], "ref": origin.get("ref"),
+                          "skill_path": origin.get("skill_path", ""),
+                          "files": origin.get("files"),
+                          "directory_hash": content_hash}}
+    try:
+        tar_bytes = gh_source.fetch_tarball(origin["repo"], origin.get("ref") or "HEAD")
+        files = gh_source.extract_skill(tar_bytes, entry)
+    except gh_source.FetchError as error:
+        typer.echo(str(error))
+        raise typer.Exit(1)
+    if gh_source.verify(files, entry) != "ok":
+        typer.echo("The remote skill has changed since this reference was recorded. "
+                   "Re-review and re-add the reference to accept the new version.")
+        raise typer.Exit(1)
+    return files
 
 
 @skill_app.command("list")
@@ -1338,6 +1392,22 @@ def skill_show(
 
     creds, base = _service_credentials()
     owner, slug, number = _parse_skill_ref_or_exit(ref, skill_pub)
+    origin_version = _reference_version_or_none(owner, slug, number, creds, base)
+    if origin_version:
+        fetched = _resolve_reference_files(origin_version["origin"],
+                                           origin_version["content_hash"])
+        if files:
+            for entry in fetched:
+                typer.echo(f"{entry['path']}  {len(entry['data'])} B")
+            return
+        wanted = file or "SKILL.md"
+        match = next((f for f in fetched if f["path"] == wanted), None)
+        if match is None:
+            typer.echo(f"{wanted!r} is not in this version.")
+            raise typer.Exit(1)
+        sys.stdout.buffer.write(match["data"])
+        sys.stdout.buffer.flush()
+        return
     prefix = f"/api/v1/skills/{owner}/{slug}" + (f"/versions/{number}" if number else "")
     try:
         if files:
@@ -1391,6 +1461,23 @@ def skill_diff(
     typer.echo(f"{data.get('unchanged_count', 0)} unchanged")
 
 
+def _reference_version_or_none(owner, slug, number, creds, base):
+    """The version dict when it is a reference (has an origin), else None.
+    Service errors fall through to the normal read path's handling."""
+    try:
+        if number is None:
+            data = service.api_request("GET", f"/api/v1/skills/{owner}/{slug}",
+                                       token=creds["token"], base_url=base)
+            version = data["skill"].get("current_version")
+        else:
+            data = service.api_request("GET", f"/api/v1/skills/{owner}/{slug}/versions",
+                                       token=creds["token"], base_url=base)
+            version = next((v for v in data.get("versions", []) if v["number"] == number), None)
+    except service.ServiceError:
+        return None
+    return version if version and version.get("origin") else None
+
+
 def _parse_skill_ref_or_exit(ref: str, skill_pub):
     try:
         return skill_pub.parse_skill_ref(ref)
@@ -1414,6 +1501,8 @@ def skill_install(
         help="treat a bare owner/repo as a GitHub repository instead of a registry ref"),
     no_link: bool = typer.Option(False, "--no-link",
         help="never create bridge symlinks in harness stores"),
+    vendor: bool = typer.Option(False, "--vendor",
+        help="publish a hosted copy to your registry instead of a reference"),
     into: Path | None = typer.Option(None, "--into",
         help="also link the skill into this directory"),
     harness: str | None = typer.Option(None, "--harness",
@@ -1441,7 +1530,7 @@ def skill_install(
     if gh_target is not None:
         _github_skill_install(gh_target, harness=harness, project=project,
                               user=user, yes=yes, force=force,
-                              no_link=no_link, into=into)
+                              no_link=no_link, into=into, vendor=vendor)
         return
 
     creds, base = _service_credentials()
@@ -1451,12 +1540,11 @@ def skill_install(
         if number is None:
             data = service.api_request("GET", f"/api/v1/skills/{owner}/{slug}",
                                        token=creds["token"], base_url=base)
-            current = data["skill"].get("current_version")
-            if not current:
+            version = data["skill"].get("current_version")
+            if not version:
                 typer.echo(f"{owner}/{slug} has no published version.")
                 raise typer.Exit(1)
-            number = current["number"]
-            content_hash = current["content_hash"]
+            number = version["number"]
         else:
             data = service.api_request("GET", f"/api/v1/skills/{owner}/{slug}/versions",
                                        token=creds["token"], base_url=base)
@@ -1464,7 +1552,8 @@ def skill_install(
             if version is None:
                 typer.echo(f"{owner}/{slug} has no version {number}.")
                 raise typer.Exit(1)
-            content_hash = version["content_hash"]
+        content_hash = version["content_hash"]
+        origin = version.get("origin")
     except service.ServiceError as err:
         _echo_service_error(err)
         raise typer.Exit(1)
@@ -1477,11 +1566,14 @@ def skill_install(
     if not yes and not typer.confirm("Proceed?", default=False):
         raise typer.Exit(0)
 
-    try:
-        files = content.download(content_hash, creds["token"], base)
-    except service.ServiceError as err:
-        _echo_service_error(err)
-        raise typer.Exit(1)
+    if origin:
+        files = _resolve_reference_files(origin, content_hash)
+    else:
+        try:
+            files = content.download(content_hash, creds["token"], base)
+        except service.ServiceError as err:
+            _echo_service_error(err)
+            raise typer.Exit(1)
     status = _existing_dir_status(content.manifest_hash(files), dest, slug, force)
     if status == "held":
         raise typer.Exit(1)

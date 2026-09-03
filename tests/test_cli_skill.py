@@ -370,6 +370,13 @@ def test_show_file_is_binary_safe_and_url_encodes(read_env, monkeypatch):
 
     def fake_binary(method, path, token=None, json_body=None, base_url=None,
                     raw=False, raw_body=None, content_type=None, binary=False):
+        if path == "/api/v1/skills/drew/citation-style":
+            return {"skill": {"owner": "drew", "slug": "citation-style",
+                              "visibility": "private", "description": None,
+                              "current_version": {"number": 3,
+                                                  "content_hash": "sha256:" + "ab" * 32,
+                                                  "origin": None},
+                              "recent_versions": []}}
         assert binary
         assert path == "/api/v1/skills/drew/citation-style/files/data%20file.bin"
         return b"\xff\xfebytes"
@@ -571,3 +578,100 @@ def test_into_always_links_the_given_directory(gh_env, tmp_path):
     result = runner.invoke(app, ["skill", "install", url, "--yes", "--into", str(target)])
     assert result.exit_code == 0, result.output
     assert (target / "capture").is_symlink()
+
+
+# -- reference versions -----------------------------------------------------------
+
+REF_FILES = [
+    {"path": "SKILL.md",
+     "data": b"---\nname: show-me\ndescription: Use when demonstrating references.\n---\nB\n",
+     "executable": False},
+]
+REF_HASH = content.manifest_hash(REF_FILES)
+
+
+@pytest.fixture
+def ref_env(gh_env, monkeypatch):
+    home = gh_env
+    state = {"publishes": [], "uploads": []}
+    _GhStub.files = {"skills/show-me/SKILL.md": REF_FILES[0]["data"]}
+
+    def fake_upload(files, token, base_url):
+        state["uploads"].append(files)
+        return {"content_hash": content.manifest_hash(files), "uploaded": True}
+
+    monkeypatch.setattr(content, "upload", fake_upload)
+
+    def fake_api_request(method, path, token=None, json_body=None, base_url=None,
+                         raw=False, raw_body=None, content_type=None, binary=False):
+        if method == "POST" and path == "/api/v1/skills":
+            state["publishes"].append(json_body)
+            body = json_body["skill"]
+            return {"skill": {"owner": "drew", "slug": body["slug"], "visibility": "private",
+                              "description": None,
+                              "current_version": {"number": 1, "content_hash": body["content_hash"],
+                                                  "origin": body.get("origin")}},
+                    "version": {"number": 1, "content_hash": body["content_hash"],
+                                "origin": body.get("origin"), "note": None},
+                    "existed": False}
+        if path == "/api/v1/skills/drew/show-me":
+            return {"skill": {"owner": "drew", "slug": "show-me", "visibility": "private",
+                              "description": None,
+                              "current_version": {"number": 1, "content_hash": REF_HASH,
+                                                  "origin": {"repo": "friend/pack", "ref": "main",
+                                                             "skill_path": "skills/show-me",
+                                                             "files": ["SKILL.md"]}},
+                              "recent_versions": []}}
+        raise service.ServiceError("not_found", "Not found.")
+
+    monkeypatch.setattr(service, "api_request", fake_api_request)
+    yield home, state
+    _GhStub.files = PLUGIN_REPO
+
+
+def test_pin_offer_publishes_a_reference_not_a_copy(ref_env):
+    home, state = ref_env
+    url = "https://github.com/friend/pack/tree/main/skills/show-me"
+    result = runner.invoke(app, ["skill", "install", url], input="y\ny\n")
+    assert result.exit_code == 0, result.output
+    assert state["uploads"] == []                     # no content upload
+    body = state["publishes"][0]["skill"]
+    assert body["origin"]["repo"] == "friend/pack"
+    assert body["origin"]["ref"] == "main"
+    assert body["origin"]["skill_path"] == "skills/show-me"
+    assert body["origin"]["files"] == ["SKILL.md"]
+    assert body["content_hash"] == REF_HASH
+    assert "reference" in result.output
+
+
+def test_vendor_flag_publishes_a_hosted_copy(ref_env):
+    home, state = ref_env
+    url = "https://github.com/friend/pack/tree/main/skills/show-me"
+    result = runner.invoke(app, ["skill", "install", url, "--vendor"], input="y\ny\n")
+    assert result.exit_code == 0, result.output
+    assert len(state["uploads"]) == 1
+    assert "origin" not in state["publishes"][0]["skill"] or \
+        state["publishes"][0]["skill"]["origin"] is None
+
+
+def test_installing_a_reference_skill_fetches_and_verifies(ref_env):
+    home, state = ref_env
+    result = runner.invoke(app, ["skill", "install", "drew/show-me", "--yes"])
+    assert result.exit_code == 0, result.output
+    assert (home / ".agents" / "skills" / "show-me" / "SKILL.md").exists()
+
+
+def test_reference_install_reports_upstream_drift(ref_env):
+    home, state = ref_env
+    _GhStub.files = {"skills/show-me/SKILL.md": b"changed upstream\n"}
+    result = runner.invoke(app, ["skill", "install", "drew/show-me", "--yes"])
+    assert result.exit_code == 1
+    assert "changed" in result.output.lower()
+    assert not (home / ".agents" / "skills" / "show-me").exists()
+
+
+def test_showing_a_reference_skill_fetches_client_side(ref_env):
+    home, state = ref_env
+    result = runner.invoke(app, ["skill", "show", "drew/show-me"])
+    assert result.exit_code == 0, result.output
+    assert "Use when demonstrating references." in result.output
