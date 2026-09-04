@@ -37,7 +37,7 @@ def test_load_credentials_absent_and_delete_idempotent(home):
 
 def test_service_url_env_override_and_default(monkeypatch):
     monkeypatch.delenv("DRSKILL_SERVICE_URL", raising=False)
-    assert service.service_url() == "http://localhost:3000"
+    assert service.service_url() == "https://loadout.fun"
     monkeypatch.setenv("DRSKILL_SERVICE_URL", "http://127.0.0.1:4000/")
     assert service.service_url() == "http://127.0.0.1:4000"
 

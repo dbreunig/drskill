@@ -22,7 +22,7 @@ from pathlib import Path
 
 import tomli_w
 
-DEFAULT_SERVICE_URL = "http://localhost:3000"
+DEFAULT_SERVICE_URL = "https://loadout.fun"
 LOGIN_TIMEOUT_SECONDS = 120.0
 
 
