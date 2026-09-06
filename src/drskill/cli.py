@@ -2042,8 +2042,12 @@ def install(
     home = _home()
     target, scope = _install_target(harness, project, user, root, home)
 
-    typer.echo(f"Install {installable} skill{'s' if installable != 1 else ''} "
-               f"into {_display_path(target)} ({scope} store):")
+    n_skills = len(hosted) + len(github)
+    if n_skills:
+        typer.echo(f"Install {n_skills} skill{'s' if n_skills != 1 else ''} "
+                   f"into {_display_path(target)} ({scope} store):")
+    else:
+        typer.echo(f"Install {len(mcp)} MCP server{'s' if len(mcp) != 1 else ''}:")
     for entry in hosted:
         typer.echo(f"  {entry['name']}  ({entry['content_hash'][:19]}…)")
     for entry in github:
@@ -2053,7 +2057,10 @@ def install(
         else:
             typer.echo(f"  {entry['name']}  (source {entry.get('source_reference')!r} is not fetchable)")
     for entry in mcp:
-        metadata = entry.get("metadata") or {}
+        metadata = entry.get("metadata")
+        if not isinstance(metadata, dict):
+            typer.echo(f"  {entry['name']}  (MCP server, invalid metadata)")
+            continue
         transport = metadata.get("transport", "?")
         detail = _mcp_install_detail(metadata)
         suffix = f": {detail}" if detail else ""
@@ -2092,13 +2099,19 @@ def install(
             bridged.append((entry["name"], target / entry["name"]))
         counts[status] += 1
     if mcp:
+        from drskill import mcp_write
+
         target_or_reason = _mcp_config_target(harness, project, user, root, home)
         mcp_statuses = []
         for entry in mcp:
             if isinstance(target_or_reason, str):
-                metadata = entry.get("metadata") or {}
+                metadata = entry.get("metadata")
+                problem = mcp_write.validate_metadata(metadata or {})
+                if problem:
+                    typer.echo(f"  {entry['name']}: invalid entry ({problem})")
+                    mcp_statuses.append("failed")
+                    continue
                 name = metadata.get("server_name") or entry["name"]
-                from drskill import mcp_write
                 _echo_manual_mcp(entry, name, mcp_write.server_block(metadata), target_or_reason)
                 mcp_statuses.append("manual")
                 continue
@@ -2208,10 +2221,14 @@ def _mcp_install_detail(metadata: dict) -> str:
 def _install_one_mcp(entry: dict, cfg_path: Path, fmt: str, *, force: bool) -> str:
     from drskill import mcp_write
 
-    metadata = entry.get("metadata") or {}
+    metadata = entry.get("metadata")
+    problem = mcp_write.validate_metadata(metadata or {})
+    if problem:
+        typer.echo(f"  {entry['name']}: invalid entry ({problem})")
+        return "failed"
     name = metadata.get("server_name") or entry["name"]
     block = mcp_write.server_block(metadata)
-    if fmt != "mcp-json":
+    if fmt not in ("mcp-json", "codex-toml"):
         _echo_manual_mcp(entry, name, block, f"{cfg_path} is {fmt} and not writable")
         return "manual"
     existing = {s.name: s for s in mcp_write.read_servers(cfg_path, fmt)}
@@ -2224,7 +2241,7 @@ def _install_one_mcp(entry: dict, cfg_path: Path, fmt: str, *, force: bool) -> s
             typer.echo(f"  {entry['name']}: local config differs; rerun with --force to replace it")
             return "held"
     try:
-        mcp_write.write_server(cfg_path, name, block, replace=current is not None)
+        mcp_write.write_server(cfg_path, name, block, fmt, replace=current is not None)
     except mcp_write.WriteUnsupportedError as err:
         _echo_manual_mcp(entry, name, block, err.message)
         return "manual"

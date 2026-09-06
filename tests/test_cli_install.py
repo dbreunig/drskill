@@ -477,16 +477,6 @@ def test_mcp_user_scope_prints_a_manual_block(env):
     assert not (project / ".mcp.json").exists()
 
 
-def test_mcp_codex_harness_prints_a_manual_block(env):
-    _, project, state = env
-    state["manifest"] = manifest([mcp_entry()])
-    (project / ".codex").mkdir()
-    result = runner.invoke(
-        app, ["loadout", "install", "drew/pack", "--harness", "codex"], input="y\n")
-    assert result.exit_code == 0, result.output
-    assert "1 manual" in result.output
-
-
 def test_mixed_manifest_installs_both_kinds(env):
     home, project, state = env
     state["manifest"] = manifest([hosted_entry(), mcp_entry()])
@@ -495,3 +485,58 @@ def test_mixed_manifest_installs_both_kinds(env):
     assert (project / ".agents" / "skills" / "vector" / "SKILL.md").exists()
     assert json.loads((project / ".mcp.json").read_text())["mcpServers"]["Notion"]
     assert "2 installed" in result.output
+
+
+def test_mcp_only_manifest_gets_a_server_header(env):
+    _, project, state = env
+    state["manifest"] = manifest([mcp_entry()])
+    result = runner.invoke(app, ["loadout", "install", "drew/pack", "--project"], input="y\n")
+    assert result.exit_code == 0, result.output
+    assert "Install 1 MCP server:" in result.output
+    assert "skills into" not in result.output
+
+
+def test_mixed_manifest_header_counts_only_skills(env):
+    _, project, state = env
+    state["manifest"] = manifest([hosted_entry(), mcp_entry()])
+    result = runner.invoke(app, ["loadout", "install", "drew/pack", "--project"], input="y\n")
+    assert result.exit_code == 0, result.output
+    assert "Install 1 skill into" in result.output
+
+
+def test_malformed_mcp_metadata_fails_that_entry_only(env):
+    _, project, state = env
+    bad = mcp_entry()
+    bad["metadata"] = "surprise"
+    state["manifest"] = manifest([hosted_entry(), bad])
+    result = runner.invoke(app, ["loadout", "install", "drew/pack", "--project"], input="y\n")
+    assert result.exit_code == 0, result.output
+    assert "invalid" in result.output
+    assert "1 installed" in result.output
+    assert "1 failed" in result.output
+    assert not (project / ".mcp.json").exists()
+
+
+def test_codex_harness_appends_to_config_toml(env):
+    home, project, state = env
+    state["manifest"] = manifest([mcp_entry()])
+    (project / ".codex").mkdir()
+    result = runner.invoke(
+        app, ["loadout", "install", "drew/pack", "--harness", "codex"], input="y\n")
+    assert result.exit_code == 0, result.output
+    text = (home / ".codex" / "config.toml").read_text()
+    assert "[mcp_servers.Notion]" in text
+    assert "1 installed" in result.output
+
+
+def test_codex_http_entry_prints_a_manual_block(env):
+    home, project, state = env
+    entry = mcp_entry(transport="http", command=None, args=[],
+                      url="https://mcp.example.com/sse", env_names=[])
+    state["manifest"] = manifest([entry])
+    (project / ".codex").mkdir()
+    result = runner.invoke(
+        app, ["loadout", "install", "drew/pack", "--harness", "codex"], input="y\n")
+    assert result.exit_code == 0, result.output
+    assert "1 manual" in result.output
+    assert not (home / ".codex" / "config.toml").exists()
