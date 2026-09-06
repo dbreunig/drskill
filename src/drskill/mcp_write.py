@@ -28,6 +28,29 @@ def read_servers(path: Path, fmt: str) -> list[MCPServer]:
     return servers
 
 
+def validate_metadata(metadata) -> str | None:
+    """One plain error string for a malformed entry, None when usable.
+    Manifests are remote input; a bad shape must fail one entry with a
+    message, never crash the whole command."""
+    if not isinstance(metadata, dict):
+        return "metadata is not an object"
+    if metadata.get("transport") not in ("stdio", "http"):
+        return f"unknown transport {metadata.get('transport')!r}"
+    if metadata.get("command") is not None and not isinstance(metadata.get("command"), str):
+        return "command is not a string"
+    if metadata.get("url") is not None and not isinstance(metadata.get("url"), str):
+        return "url is not a string"
+    if metadata.get("server_name") is not None and not isinstance(metadata.get("server_name"), str):
+        return "server_name is not a string"
+    args = metadata.get("args") or []
+    if not isinstance(args, list) or not all(isinstance(a, str) for a in args):
+        return "args is not a list of strings"
+    env_names = metadata.get("env_names") or []
+    if not isinstance(env_names, list) or not all(isinstance(n, str) for n in env_names):
+        return "env_names is not a list of strings"
+    return None
+
+
 def server_block(metadata: dict) -> dict:
     env_names = metadata.get("env_names") or []
     if metadata.get("transport") == "http":
@@ -41,7 +64,8 @@ def server_block(metadata: dict) -> dict:
     return block
 
 
-def write_server(path: Path, name: str, block: dict, fmt: str = "mcp-json") -> None:
+def write_server(path: Path, name: str, block: dict, fmt: str = "mcp-json",
+                 replace: bool = False) -> None:
     if fmt != "mcp-json":
         raise WriteUnsupportedError(f"{fmt} config files are not writable; add the server by hand")
     data: dict = {}
@@ -55,6 +79,13 @@ def write_server(path: Path, name: str, block: dict, fmt: str = "mcp-json") -> N
     servers = data.setdefault("mcpServers", {})
     if not isinstance(servers, dict):
         raise WriteUnsupportedError(f"{path} has a non-object mcpServers key")
+    if name in servers and not replace:
+        # A same-named entry the parser skipped (a non-dict value) is
+        # invisible to the caller's drift check; refuse rather than
+        # silently overwrite it.
+        raise WriteUnsupportedError(
+            f"{path} already has an entry named {name!r} that drskill "
+            "cannot parse; edit it by hand")
     servers[name] = block
     path.parent.mkdir(parents=True, exist_ok=True)
     path.write_text(json.dumps(data, indent=2) + "\n", encoding="utf-8")

@@ -2224,7 +2224,7 @@ def _install_one_mcp(entry: dict, cfg_path: Path, fmt: str, *, force: bool) -> s
             typer.echo(f"  {entry['name']}: local config differs; rerun with --force to replace it")
             return "held"
     try:
-        mcp_write.write_server(cfg_path, name, block)
+        mcp_write.write_server(cfg_path, name, block, replace=current is not None)
     except mcp_write.WriteUnsupportedError as err:
         _echo_manual_mcp(entry, name, block, err.message)
         return "manual"

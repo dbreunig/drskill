@@ -76,3 +76,35 @@ def test_write_server_rejects_a_corrupt_config(tmp_path):
     path.write_text("not json")
     with pytest.raises(mcp_write.WriteUnsupportedError):
         mcp_write.write_server(path, "Notion", {"command": "x"})
+
+
+def test_validate_metadata_accepts_the_real_shapes():
+    assert mcp_write.validate_metadata(STDIO_METADATA) is None
+    assert mcp_write.validate_metadata(HTTP_METADATA) is None
+
+
+def test_validate_metadata_rejects_malformed_input():
+    assert mcp_write.validate_metadata("not a dict") == "metadata is not an object"
+    assert "transport" in mcp_write.validate_metadata({"transport": "carrier-pigeon"})
+    assert "args" in mcp_write.validate_metadata(
+        {"transport": "stdio", "command": "npx", "args": "not-a-list"})
+    assert "env_names" in mcp_write.validate_metadata(
+        {"transport": "stdio", "command": "npx", "args": [], "env_names": [1, 2]})
+    assert "command" in mcp_write.validate_metadata(
+        {"transport": "stdio", "command": ["npx"], "args": []})
+
+
+def test_write_server_refuses_an_unparsed_same_name(tmp_path):
+    path = tmp_path / ".mcp.json"
+    path.write_text(json.dumps({"mcpServers": {"Notion": "just-a-string"}}))
+    with pytest.raises(mcp_write.WriteUnsupportedError):
+        mcp_write.write_server(path, "Notion", mcp_write.server_block(STDIO_METADATA))
+
+
+def test_write_server_replace_overwrites_a_parsed_name(tmp_path):
+    path = tmp_path / ".mcp.json"
+    path.write_text(json.dumps({"mcpServers": {"Notion": {"command": "old"}}}))
+    mcp_write.write_server(path, "Notion", mcp_write.server_block(STDIO_METADATA),
+                           replace=True)
+    data = json.loads(path.read_text())
+    assert data["mcpServers"]["Notion"]["command"] == "npx"
