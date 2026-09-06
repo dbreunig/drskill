@@ -411,6 +411,31 @@ def test_mcp_reinstall_is_a_no_op(env):
     assert "1 already installed" in result.output
 
 
+def real_http_mcp_entry():
+    # Same real pipeline as real_mcp_entry(), but an http server carrying
+    # env names, so the written config's re-parsed hash can be checked
+    # against the entry's content_hash.
+    from pathlib import Path
+
+    from drskill import manifest_build
+    from drskill.mcp import _entry_to_server
+
+    server = _entry_to_server(
+        "Linear",
+        {"url": "https://mcp.linear.app/sse", "env": {"LINEAR_TOKEN": "x"}},
+        harness="claude-code", scope="project", source=Path("/tmp/.mcp.json"))
+    return manifest_build.server_to_entry(server, [])
+
+
+def test_mcp_http_reinstall_with_env_names_is_a_no_op(env):
+    _, project, state = env
+    state["manifest"] = manifest([real_http_mcp_entry()])
+    runner.invoke(app, ["loadout", "install", "drew/pack", "--project"], input="y\n")
+    result = runner.invoke(app, ["loadout", "install", "drew/pack", "--project"], input="y\n")
+    assert result.exit_code == 0, result.output
+    assert "already installed" in result.output
+
+
 def test_mcp_drifted_server_needs_force(env):
     _, project, state = env
     state["manifest"] = manifest([real_mcp_entry()])

@@ -28,6 +28,13 @@ def test_server_block_http():
     assert mcp_write.server_block(HTTP_METADATA) == {"url": "https://mcp.linear.app/sse"}
 
 
+def test_server_block_http_with_env_names():
+    metadata = dict(HTTP_METADATA, env_names=["LINEAR_TOKEN"])
+    assert mcp_write.server_block(metadata) == {
+        "url": "https://mcp.linear.app/sse", "env": {"LINEAR_TOKEN": ""},
+    }
+
+
 def test_write_server_creates_the_file(tmp_path):
     path = tmp_path / ".mcp.json"
     mcp_write.write_server(path, "Notion", mcp_write.server_block(STDIO_METADATA))

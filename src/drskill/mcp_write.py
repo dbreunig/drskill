@@ -29,10 +29,13 @@ def read_servers(path: Path, fmt: str) -> list[MCPServer]:
 
 
 def server_block(metadata: dict) -> dict:
-    if metadata.get("transport") == "http":
-        return {"url": metadata.get("url")}
-    block: dict = {"command": metadata.get("command"), "args": list(metadata.get("args") or [])}
     env_names = metadata.get("env_names") or []
+    if metadata.get("transport") == "http":
+        block: dict = {"url": metadata.get("url")}
+        if env_names:
+            block["env"] = {name: "" for name in env_names}
+        return block
+    block = {"command": metadata.get("command"), "args": list(metadata.get("args") or [])}
     if env_names:
         block["env"] = {name: "" for name in env_names}
     return block
