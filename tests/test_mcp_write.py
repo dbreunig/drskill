@@ -68,7 +68,7 @@ def test_read_servers_missing_file_is_empty(tmp_path):
 def test_write_server_rejects_other_formats(tmp_path):
     with pytest.raises(mcp_write.WriteUnsupportedError):
         mcp_write.write_server(tmp_path / "config.toml", "x", {"command": "x"},
-                               fmt="codex-toml")
+                               fmt="claude-user-json")
 
 
 def test_write_server_rejects_a_corrupt_config(tmp_path):
@@ -108,3 +108,56 @@ def test_write_server_replace_overwrites_a_parsed_name(tmp_path):
                            replace=True)
     data = json.loads(path.read_text())
     assert data["mcpServers"]["Notion"]["command"] == "npx"
+
+
+def test_codex_write_appends_a_stdio_server(tmp_path):
+    path = tmp_path / "config.toml"
+    path.write_text('model = "gpt-5.6-luna"\n')
+    mcp_write.write_server(path, "Notion", mcp_write.server_block(STDIO_METADATA),
+                           fmt="codex-toml")
+    text = path.read_text()
+    assert text.startswith('model = "gpt-5.6-luna"\n')
+    servers = mcp_write.read_servers(path, "codex-toml")
+    assert len(servers) == 1
+    assert servers[0].name == "Notion"
+    assert servers[0].command == "npx"
+    assert servers[0].args == ["-y", "notion-mcp"]
+    assert servers[0].env_names == ["NOTION_TOKEN"]
+
+
+def test_codex_write_creates_the_file(tmp_path):
+    path = tmp_path / "config.toml"
+    mcp_write.write_server(path, "papers", {"command": "uvx", "args": ["papers-mcp"]},
+                           fmt="codex-toml")
+    servers = mcp_write.read_servers(path, "codex-toml")
+    assert [s.name for s in servers] == ["papers"]
+
+
+def test_codex_write_quotes_awkward_names_and_values(tmp_path):
+    path = tmp_path / "config.toml"
+    mcp_write.write_server(path, "my server", {"command": 'echo "hi"', "args": []},
+                           fmt="codex-toml")
+    servers = mcp_write.read_servers(path, "codex-toml")
+    assert servers[0].name == "my server"
+    assert servers[0].command == 'echo "hi"'
+
+
+def test_codex_write_refuses_an_existing_name(tmp_path):
+    path = tmp_path / "config.toml"
+    path.write_text('[mcp_servers.Notion]\ncommand = "old"\n')
+    with pytest.raises(mcp_write.WriteUnsupportedError):
+        mcp_write.write_server(path, "Notion", {"command": "npx", "args": []},
+                               fmt="codex-toml", replace=True)
+
+
+def test_codex_write_refuses_http_blocks(tmp_path):
+    with pytest.raises(mcp_write.WriteUnsupportedError):
+        mcp_write.write_server(tmp_path / "config.toml", "Linear",
+                               mcp_write.server_block(HTTP_METADATA), fmt="codex-toml")
+
+
+def test_codex_write_refuses_a_corrupt_file(tmp_path):
+    path = tmp_path / "config.toml"
+    path.write_text("not = valid = toml")
+    with pytest.raises(mcp_write.WriteUnsupportedError):
+        mcp_write.write_server(path, "x", {"command": "x", "args": []}, fmt="codex-toml")

@@ -1,14 +1,16 @@
 """Write MCP server entries into harness config files.
 
-Only the shared mcp-json format is writable. claude-user-json is Claude
-Code's whole user state file and codex-toml has no stdlib writer, so
-callers print a paste-ready block for those formats instead of editing
-them. Env variables are written with empty values; the manifest never
-carries values, only names."""
+mcp-json is read-write. codex-toml is append-only for stdio servers; the
+append-only design preserves comments and formatting when adding servers.
+claude-user-json is Claude Code's whole user state file and stays manual
+because it holds Claude Code's complete user state. Env variables are
+written with empty values; the manifest never carries values, only names."""
 
 from __future__ import annotations
 
 import json
+import re
+import tomllib
 from pathlib import Path
 
 from drskill.mcp import MCPServer, parse_config
@@ -66,6 +68,9 @@ def server_block(metadata: dict) -> dict:
 
 def write_server(path: Path, name: str, block: dict, fmt: str = "mcp-json",
                  replace: bool = False) -> None:
+    if fmt == "codex-toml":
+        _write_codex_server(path, name, block)
+        return
     if fmt != "mcp-json":
         raise WriteUnsupportedError(f"{fmt} config files are not writable; add the server by hand")
     data: dict = {}
@@ -89,3 +94,40 @@ def write_server(path: Path, name: str, block: dict, fmt: str = "mcp-json",
     servers[name] = block
     path.parent.mkdir(parents=True, exist_ok=True)
     path.write_text(json.dumps(data, indent=2) + "\n", encoding="utf-8")
+
+
+def _toml_str(value: str) -> str:
+    # JSON string escaping is a valid TOML basic string, so json.dumps
+    # doubles as the TOML serializer for scalars.
+    return json.dumps(value)
+
+
+def _write_codex_server(path: Path, name: str, block: dict) -> None:
+    """Append one [mcp_servers.<name>] table. Append-only: replacing a
+    table in place would mean rewriting the user's TOML around comments,
+    so a same-named server always refuses, --force included."""
+    if "url" in block:
+        raise WriteUnsupportedError(
+            "codex-toml supports stdio servers only; add http servers by hand")
+    text = ""
+    if path.is_file():
+        try:
+            text = path.read_text(encoding="utf-8")
+            existing = tomllib.loads(text).get("mcp_servers") or {}
+        except (OSError, tomllib.TOMLDecodeError) as e:
+            raise WriteUnsupportedError(f"could not read {path}: {e}")
+        if name in existing:
+            raise WriteUnsupportedError(
+                f"{path} already has [mcp_servers.{name}]; edit it by hand")
+    key = name if re.fullmatch(r"[A-Za-z0-9_-]+", name) else _toml_str(name)
+    lines = [f"[mcp_servers.{key}]",
+             f"command = {_toml_str(block.get('command') or '')}",
+             "args = [" + ", ".join(_toml_str(a) for a in block.get("args") or []) + "]"]
+    env = block.get("env") or {}
+    if env:
+        lines.append("env = {" + ", ".join(f'{_toml_str(k)} = ""' for k in env) + "}")
+    prefix = text if not text or text.endswith("\n") else text + "\n"
+    if prefix:
+        prefix += "\n"
+    path.parent.mkdir(parents=True, exist_ok=True)
+    path.write_text(prefix + "\n".join(lines) + "\n", encoding="utf-8")
