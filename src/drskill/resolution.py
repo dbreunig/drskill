@@ -164,7 +164,7 @@ def _skill_name(fm: dict | None, skill_file: Path) -> str:
 
 
 def make_contributor(
-    skill_file: Path, scope: str = "project"
+    skill_file: Path, scope: str = "project", kind: str = "skill"
 ) -> tuple[Contributor | None, list[str]]:
     """Build a Contributor from one skill file, outside any harness.
     Returns (None, []) when the file cannot be read; the second element
@@ -194,6 +194,7 @@ def make_contributor(
         id=str(real),
         name=name,
         scope=scope,
+        kind=kind,
         source=provenance,
         bundled_files=bundled,
         routing_text=description,
@@ -220,7 +221,7 @@ def build_world(
         cid = str(inst.skill_file.resolve())
         c = world.contributors.get(cid)
         if c is None:
-            c, unreadable_files = make_contributor(inst.skill_file, inst.scope)
+            c, unreadable_files = make_contributor(inst.skill_file, inst.scope, inst.kind)
             if c is None:
                 world.unreadable.append((inst.harness, cid))
                 continue
@@ -253,6 +254,10 @@ def _mark_shadows(world: World) -> None:
             continue  # this harness keeps every same-name copy visible
         first_by_name: dict[str, Contributor] = {}
         for c, d in world.harness_loads(hid):
+            if c.kind != "skill":
+                # Commands are invoked by explicit name+namespace; they do
+                # not shadow or get shadowed by routed skills.
+                continue
             # Claude Code namespaces plugin skills ("plugin:skill"), so a
             # plugin/native name collision is not a real load conflict
             # there: plugin instances neither shadow nor get shadowed.

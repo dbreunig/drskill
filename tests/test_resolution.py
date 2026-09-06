@@ -421,3 +421,16 @@ def test_gemini_native_shadows_extension_skill(tmp_path):
     ext_c = next(c for c in world.contributors.values()
                  if c.source.kind == "plugin")
     assert any(d.shadowed_by for d in ext_c.deployments)
+
+
+def test_command_contributor_kind_and_name(tmp_path):
+    from drskill.resolution import make_contributor
+
+    f = tmp_path / ".claude" / "commands" / "ns" / "release.md"
+    f.parent.mkdir(parents=True)
+    f.write_text("release it with !`make release`\n")
+    c, unreadable = make_contributor(f, "project", kind="command")
+    assert unreadable == []
+    assert c.kind == "command"
+    assert c.name == "release"
+    assert c.bundled_files == []

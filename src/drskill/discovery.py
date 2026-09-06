@@ -30,6 +30,13 @@ def _find_skill_files(base: Path, recursive: bool) -> list[Path]:
     return sorted(out)
 
 
+def _find_command_files(base: Path) -> list[Path]:
+    out = []
+    for dirpath, _dirnames, filenames in _walk_dirs(base):
+        out += [dirpath / n for n in filenames if n.endswith(".md")]
+    return sorted(out)
+
+
 def _find_broken_symlinks(base: Path, recursive: bool = True) -> list[Path]:
     out = []
     if not recursive:
@@ -93,6 +100,26 @@ def discover(
                 )
             )
         broken += [BrokenSymlink(harness=h.id, path=p) for p in _find_broken_symlinks(base, h.recursive)]
+    # Command files load by explicit invocation, not routing, so they never
+    # compete with skills for load order; the 1000 band keeps sorts stable
+    # without colliding with native or plugin path indexes.
+    command_specs = [(project_root / s, "project", s) for s in h.command_project_paths]
+    command_specs += [(home / s.removeprefix("~/"), "user", s) for s in h.command_global_paths]
+    if global_only:
+        command_specs = [t for t in command_specs if t[1] == "user"]
+    for order, (base, scope, _spec) in enumerate(command_specs, start=1000):
+        if not base.is_dir():
+            continue
+        for f in _find_command_files(base):
+            if not f.exists():
+                continue
+            instances.append(
+                RawInstance(harness=h.id, scope=scope, skill_file=f,
+                            via_symlink=_via_symlink(f, base), order=order,
+                            kind="command")
+            )
+        broken += [BrokenSymlink(harness=h.id, path=p)
+                   for p in _find_broken_symlinks(base, recursive=True)]
     # Store-delivered skills: enabled plugins' roots rank BELOW every
     # native path (proven on gemini and copilot; codex keeps its
     # no-shadowing semantics via search_order "none").

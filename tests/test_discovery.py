@@ -199,3 +199,37 @@ def test_discover_gemini_plugin_roots_nonrecursive(tmp_path):
     instances, _b, _u = discover(h, proj, home)
     names = {i.skill_file.parent.name for i in instances}
     assert "top-skill" in names and "deep-skill" not in names
+
+
+def test_command_paths_discover_md_files_recursively(tmp_path):
+    from drskill.harnesses import HarnessDef
+
+    h = HarnessDef(id="t", display_name="T", project_paths=[".claude/skills"],
+                   command_project_paths=[".claude/commands"],
+                   command_global_paths=["~/.claude/commands"])
+    root, home = tmp_path / "proj", tmp_path / "home"
+    (root / ".claude" / "commands" / "ns").mkdir(parents=True)
+    (root / ".claude" / "commands" / "deploy.md").write_text("run !`make deploy`\n")
+    (root / ".claude" / "commands" / "ns" / "release.md").write_text("release\n")
+    (root / ".claude" / "commands" / "notes.txt").write_text("not a command\n")
+    (home / ".claude" / "commands").mkdir(parents=True)
+    (home / ".claude" / "commands" / "tidy.md").write_text("tidy\n")
+
+    instances, _broken, _unreadable = discover(h, root, home)
+    commands = [i for i in instances if i.kind == "command"]
+    names = sorted(i.skill_file.name for i in commands)
+    assert names == ["deploy.md", "release.md", "tidy.md"]
+    scopes = {i.skill_file.name: i.scope for i in commands}
+    assert scopes["deploy.md"] == "project"
+    assert scopes["tidy.md"] == "user"
+
+
+def test_skills_are_not_marked_as_commands(tmp_path):
+    from drskill.harnesses import HarnessDef
+
+    h = HarnessDef(id="t", display_name="T", project_paths=[".claude/skills"])
+    root, home = tmp_path / "proj", tmp_path / "home"
+    (root / ".claude" / "skills" / "s").mkdir(parents=True)
+    (root / ".claude" / "skills" / "s" / "SKILL.md").write_text("---\nname: s\n---\nbody\n")
+    instances, _broken, _unreadable = discover(h, root, home)
+    assert [i.kind for i in instances] == ["skill"]
