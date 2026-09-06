@@ -186,3 +186,56 @@ def test_github_metadata_records_the_file_list(monkeypatch):
     manifest, _ = manifest_build.contributors_to_manifest([contributor("citation")])
     md = manifest["entries"][0]["metadata"]
     assert md["files"] == ["a.md", "b.md"]
+
+
+def make_server(**overrides):
+    from drskill.mcp import MCPServer
+
+    fields = dict(
+        name="Notion", harness="claude-code", scope="project",
+        source="/tmp/.mcp.json", transport="stdio",
+        command="npx", args=["-y", "notion-mcp"],
+        env_names=["NOTION_TOKEN"], config_hash="cc" * 32,
+    )
+    fields.update(overrides)
+    return MCPServer(**fields)
+
+
+def test_server_to_entry_stdio():
+    entry = manifest_build.server_to_entry(make_server(), ["search", "create-page"])
+    assert entry["kind"] == "mcp"
+    assert entry["selector"] == "mcp:notion"
+    assert entry["name"] == "notion"
+    assert entry["source_type"] == "mcp"
+    assert entry["source_reference"] == "npx -y notion-mcp"
+    assert entry["content_hash"] == "sha256:" + "cc" * 32
+    assert entry["local_only"] is False
+    md = entry["metadata"]
+    assert md["server_name"] == "Notion"
+    assert md["transport"] == "stdio"
+    assert md["command"] == "npx"
+    assert md["args"] == ["-y", "notion-mcp"]
+    assert md["url"] is None
+    assert md["env_names"] == ["NOTION_TOKEN"]
+    assert md["tools"] == ["create-page", "search"]
+
+
+def test_server_to_entry_http():
+    server = make_server(transport="http", command=None, args=[],
+                         url="https://mcp.example.com/sse", env_names=[])
+    entry = manifest_build.server_to_entry(server, [])
+    assert entry["source_reference"] == "https://mcp.example.com/sse"
+    assert entry["metadata"]["transport"] == "http"
+    assert entry["metadata"]["url"] == "https://mcp.example.com/sse"
+
+
+def test_portability_notes_flag_machine_local_paths():
+    notes = manifest_build.server_portability_notes(
+        make_server(command="/Users/drew/bin/server", args=["--db", "~/data.db"]))
+    assert len(notes) == 2
+    assert "/Users/drew/bin/server" in notes[0]
+    assert "~/data.db" in notes[1]
+
+
+def test_portability_notes_accept_resolvable_commands():
+    assert manifest_build.server_portability_notes(make_server()) == []

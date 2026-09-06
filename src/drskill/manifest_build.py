@@ -141,3 +141,39 @@ def contributors_to_manifest(
         },
         notes,
     )
+
+
+def server_to_entry(server, tool_names: list[str]) -> dict:
+    name = normalize_name(server.name)
+    if server.transport == "http":
+        source_reference = server.url or server.name
+    else:
+        source_reference = " ".join([server.command or "", *server.args]).strip() or server.name
+    return {
+        "kind": "mcp",
+        "selector": f"mcp:{name}",
+        "name": name,
+        "source_type": "mcp",
+        "source_reference": source_reference,
+        "content_hash": f"sha256:{server.config_hash}",
+        "local_only": False,
+        "metadata": {
+            "server_name": server.name,
+            "transport": server.transport,
+            "command": server.command,
+            "args": server.args,
+            "url": server.url,
+            "env_names": server.env_names,
+            "tools": sorted(tool_names),
+        },
+    }
+
+
+def server_portability_notes(server) -> list[str]:
+    notes = []
+    values = ([server.command] if server.command else []) + list(server.args)
+    for value in values:
+        if value.startswith(("/", "~", "./", "../")):
+            notes.append(f"{server.name}: {value!r} is a machine-local path and "
+                         "may not start on another machine")
+    return notes
