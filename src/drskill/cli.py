@@ -1788,7 +1788,7 @@ _STATUS_LINES = {
     "changed": "changed locally since publish",
     "missing": "not found on this machine",
     "unreadable": "unreadable",
-    "unchecked": "not checked (mcp)",
+    "unchecked": "not checked",
 }
 
 
@@ -1828,7 +1828,8 @@ def status(
         entries = json.loads(document).get("entries", [])
         typer.echo(f"\n{owner}/{slug} (revision {number})")
         changed_here = False
-        for st in loadout_drift.classify_entries(entries, contributors):
+        for st in loadout_drift.classify_entries(entries, contributors,
+                                                 servers=world.mcp_servers):
             line = _STATUS_LINES[st.state]
             if remote and st.entry.get("kind") == "skill" and st.entry.get("source_type") == "github":
                 line = _remote_status_line(st.entry) or line

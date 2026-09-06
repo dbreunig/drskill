@@ -22,7 +22,8 @@ class EntryStatus:
     note: str | None = None
 
 
-def classify_entries(entries: list[dict], contributors: list[Contributor]) -> list[EntryStatus]:
+def classify_entries(entries: list[dict], contributors: list[Contributor],
+                     servers: list | None = None) -> list[EntryStatus]:
     skills = [c for c in contributors if c.kind == "skill"]
     by_name: dict[str, list[Contributor]] = {}
     for c in skills:
@@ -31,7 +32,10 @@ def classify_entries(entries: list[dict], contributors: list[Contributor]) -> li
     out: list[EntryStatus] = []
     for entry in entries:
         if entry.get("kind") != "skill":
-            out.append(EntryStatus(entry, None, "unchecked"))
+            if entry.get("source_type") == "mcp" and servers is not None:
+                out.append(EntryStatus(entry, None, _mcp_state(entry, servers)))
+            else:
+                out.append(EntryStatus(entry, None, "unchecked"))
             continue
         candidates = by_name.get(entry.get("name"), [])
         if not candidates:
@@ -61,3 +65,15 @@ def _compare(entry: dict, contributor: Contributor) -> str:
     except OSError:
         return "unreadable"
     return "matches" if local == expected else "changed"
+
+
+def _mcp_state(entry: dict, servers: list) -> str:
+    expected = entry.get("content_hash")
+    if any(f"sha256:{s.config_hash}" == expected for s in servers):
+        return "matches"
+    metadata = entry.get("metadata") or {}
+    wanted = metadata.get("server_name")
+    for s in servers:
+        if s.name == wanted or normalize_name(s.name) == entry.get("name"):
+            return "changed"
+    return "missing"

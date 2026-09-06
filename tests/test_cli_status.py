@@ -128,7 +128,7 @@ def test_line_states_render(env):
     ]
     result = runner.invoke(app, ["loadout", "status"])
     assert "not found on this machine" in result.output
-    assert "not checked (mcp)" in result.output
+    assert "not checked" in result.output
 
 
 def test_explicit_ref_on_anothers_loadout_has_no_update_hint(env):

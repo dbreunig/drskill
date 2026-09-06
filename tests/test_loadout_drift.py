@@ -103,3 +103,52 @@ def test_duplicate_names_without_a_match_note_ambiguity(monkeypatch):
     assert st.state == "changed"
     assert st.contributor.id == "/tmp/a"
     assert st.note and "share this name" in st.note
+
+
+def drift_server(name="Notion", config_hash="cc" * 32):
+    from drskill.mcp import MCPServer
+
+    return MCPServer(name=name, harness="claude-code", scope="project",
+                     source="/tmp/.mcp.json", transport="stdio",
+                     command="npx", args=["-y", "notion-mcp"],
+                     env_names=[], config_hash=config_hash)
+
+
+def drift_mcp_entry(content_hash="sha256:" + "cc" * 32, server_name="Notion"):
+    return {"kind": "mcp", "selector": "mcp:notion", "name": "notion",
+            "source_type": "mcp", "source_reference": "npx -y notion-mcp",
+            "content_hash": content_hash, "local_only": False,
+            "metadata": {"server_name": server_name, "transport": "stdio",
+                         "command": "npx", "args": ["-y", "notion-mcp"],
+                         "url": None, "env_names": [], "tools": []}}
+
+
+def test_mcp_entry_matches_a_configured_server():
+    statuses = loadout_drift.classify_entries(
+        [drift_mcp_entry()], [], servers=[drift_server()])
+    assert statuses[0].state == "matches"
+
+
+def test_mcp_entry_with_a_drifted_config_is_changed():
+    statuses = loadout_drift.classify_entries(
+        [drift_mcp_entry()], [], servers=[drift_server(config_hash="dd" * 32)])
+    assert statuses[0].state == "changed"
+
+
+def test_mcp_entry_with_no_server_is_missing():
+    statuses = loadout_drift.classify_entries([drift_mcp_entry()], [], servers=[])
+    assert statuses[0].state == "missing"
+
+
+def test_mcp_entry_without_servers_stays_unchecked():
+    statuses = loadout_drift.classify_entries([drift_mcp_entry()], [])
+    assert statuses[0].state == "unchecked"
+
+
+def test_legacy_per_tool_entry_stays_unchecked():
+    entry = {"kind": "mcp", "selector": "mcp:search", "name": "search",
+             "source_type": "local", "source_reference": "x",
+             "content_hash": "sha256:" + "ab" * 32, "local_only": True,
+             "metadata": {}}
+    statuses = loadout_drift.classify_entries([entry], [], servers=[drift_server()])
+    assert statuses[0].state == "unchecked"
