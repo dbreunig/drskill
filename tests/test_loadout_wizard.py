@@ -773,3 +773,83 @@ def test_blocked_publish_aborts_before_anything_is_created(wizard_env, fake_cont
     assert result.exit_code == 1
     assert "blocked" in result.output
     assert calls == []
+
+
+def mcp_tool_contributor(tool_name, config_hash):
+    return Contributor(
+        id=f"{config_hash}:{tool_name}",
+        kind="mcp_tool",
+        name=tool_name,
+        scope="project",
+        deployments=[Deployment(harness="claude-code", path=Path("/tmp/.mcp.json"),
+                                scope="project", via_symlink=False, order=0)],
+        token_cost=TokenCost(catalog_tokens=1, body_tokens=0),
+        content_hash="sha256:" + "cd" * 32,
+    )
+
+
+def make_mcp_world(*skill_contributors):
+    from drskill.mcp import MCPServer
+    from drskill.mcp_connect import ServerSnapshot, ToolInfo
+
+    cfg = "cc" * 32
+    server = MCPServer(
+        name="Notion", harness="claude-code", scope="project",
+        source="/tmp/.mcp.json", transport="stdio",
+        command="npx", args=["-y", "notion-mcp"],
+        env_names=["NOTION_TOKEN"], config_hash=cfg,
+    )
+    tools = [mcp_tool_contributor("search", cfg), mcp_tool_contributor("create-page", cfg)]
+    world = World(
+        contributors={c.id: c for c in [*skill_contributors, *tools]},
+        mcp_servers=[server],
+        mcp_snapshots={cfg: ServerSnapshot(server="Notion", config_hash=cfg, date="2026-09-05",
+                                           tools=[ToolInfo(name="search", description="d", schema_tokens=1),
+                                                  ToolInfo(name="create-page", description="d", schema_tokens=1)])},
+    )
+    return world
+
+
+def test_selected_mcp_tools_publish_one_server_entry(wizard_env, monkeypatch):
+    calls = wizard_env
+    set_world(monkeypatch, make_mcp_world(contributor("alpha")))
+    monkeypatch.setattr(loadout_wizard, "_choose_skills", _accept_all)
+
+    result = runner.invoke(app, ["loadout", "create", "pack"], input="y\n")
+    assert result.exit_code == 0, result.output
+    entries = calls[1]["json_body"]["manifest"]["entries"]
+    mcp_entries = [e for e in entries if e["kind"] == "mcp"]
+    assert len(mcp_entries) == 1
+    entry = mcp_entries[0]
+    assert entry["source_type"] == "mcp"
+    assert entry["local_only"] is False
+    assert entry["metadata"]["server_name"] == "Notion"
+    assert entry["metadata"]["tools"] == ["create-page", "search"]
+    assert {e["name"] for e in entries} == {"alpha", "notion"}
+
+
+def test_mcp_tools_are_not_offered_to_the_registry(wizard_env, monkeypatch):
+    set_world(monkeypatch, make_mcp_world())
+    monkeypatch.setattr(loadout_wizard, "_choose_skills", _accept_all)
+    seen = {}
+
+    original = loadout_wizard._offer_registry
+
+    def spy(selected, creds, base_url, home):
+        seen["selected"] = selected
+        return original(selected, creds, base_url, home)
+
+    monkeypatch.setattr(loadout_wizard, "_offer_registry", spy)
+    runner.invoke(app, ["loadout", "create", "pack"], input="y\n")
+    assert seen["selected"] == []
+
+
+def test_stale_mcp_tool_is_skipped_with_a_note(wizard_env, monkeypatch):
+    world = make_mcp_world(contributor("alpha"))
+    world.mcp_servers = []
+    set_world(monkeypatch, world)
+    monkeypatch.setattr(loadout_wizard, "_choose_skills", _accept_all)
+
+    result = runner.invoke(app, ["loadout", "create", "pack"], input="y\n")
+    assert result.exit_code == 0, result.output
+    assert "no longer configured" in result.output

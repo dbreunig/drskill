@@ -100,8 +100,13 @@ def run(
         typer.echo("Nothing selected.")
         raise typer.Exit(1)
 
-    hosted = _offer_registry(selected, creds, base_url, home)
-    manifest, notes = manifest_build.contributors_to_manifest(selected, hosted=hosted)
+    skills = [c for c in selected if c.kind != "mcp_tool"]
+    mcp_tools = [c for c in selected if c.kind == "mcp_tool"]
+    hosted = _offer_registry(skills, creds, base_url, home)
+    manifest, notes = manifest_build.contributors_to_manifest(skills, hosted=hosted)
+    server_entries, server_notes = _mcp_server_entries(mcp_tools, world)
+    manifest["entries"] += server_entries
+    notes += server_notes
     _print_summary(manifest, notes)
 
     if not typer.confirm(
@@ -295,6 +300,35 @@ def _offer_registry(selected: list[Contributor], creds: dict, base_url: str,
         hosted[contributor.id] = {"content_hash": result["content_hash"],
                                   "source_reference": result["reference"]}
     return hosted
+
+def _mcp_server_entries(mcp_tools, world) -> tuple[list[dict], list[str]]:
+    """One entry per distinct server behind the selected MCP tools. A tool
+    contributor's id is "<config_hash>:<tool name>". Selecting any tool
+    publishes its whole server; a server installs as a unit."""
+    by_hash = {s.config_hash: s for s in world.mcp_servers}
+    picked: dict[str, object] = {}
+    notes: list[str] = []
+    for c in mcp_tools:
+        cfg = c.id.split(":", 1)[0]
+        server = by_hash.get(cfg)
+        if server is None:
+            notes.append(f"skipped MCP tool {c.name!r}: its server is no longer configured")
+            continue
+        picked.setdefault(cfg, server)
+
+    entries: list[dict] = []
+    used: set[str] = set()
+    for cfg, server in picked.items():
+        snap = world.mcp_snapshots.get(cfg)
+        tool_names = [t.name for t in snap.tools] if snap else []
+        entry = manifest_build.server_to_entry(server, tool_names)
+        if entry["selector"] in used:
+            notes.append(f"skipped a second server also named {server.name!r}")
+            continue
+        used.add(entry["selector"])
+        entries.append(entry)
+        notes += manifest_build.server_portability_notes(server)
+    return entries, notes
 
 def _print_summary(manifest: dict, notes: list[str]) -> None:
     entries = manifest["entries"]
