@@ -161,3 +161,45 @@ def test_codex_write_refuses_a_corrupt_file(tmp_path):
     path.write_text("not = valid = toml")
     with pytest.raises(mcp_write.WriteUnsupportedError):
         mcp_write.write_server(path, "x", {"command": "x", "args": []}, fmt="codex-toml")
+
+
+def test_codex_write_rejects_a_surrogate_and_leaves_the_file_unchanged(tmp_path):
+    path = tmp_path / "config.toml"
+    path.write_text('model = "gpt-5.6-luna"\n')
+    with pytest.raises(mcp_write.WriteUnsupportedError):
+        mcp_write.write_server(path, "x", {"command": "\ud800", "args": []},
+                               fmt="codex-toml")
+    assert path.read_text() == 'model = "gpt-5.6-luna"\n'
+
+
+def test_codex_write_rejects_a_non_table_mcp_servers(tmp_path):
+    path = tmp_path / "config.toml"
+    path.write_text("mcp_servers = 5\n")
+    with pytest.raises(mcp_write.WriteUnsupportedError):
+        mcp_write.write_server(path, "x", {"command": "x", "args": []}, fmt="codex-toml")
+
+
+def test_codex_write_rejects_an_inline_table_mcp_servers(tmp_path):
+    path = tmp_path / "config.toml"
+    path.write_text("mcp_servers = {}\n")
+    with pytest.raises(mcp_write.WriteUnsupportedError):
+        mcp_write.write_server(path, "x", {"command": "x", "args": []}, fmt="codex-toml")
+
+
+def test_codex_write_collapses_trailing_blank_lines_to_one(tmp_path):
+    path = tmp_path / "config.toml"
+    path.write_text('model = "gpt-5.6-luna"\n\n\n')
+    mcp_write.write_server(path, "papers", {"command": "uvx", "args": ["papers-mcp"]},
+                           fmt="codex-toml")
+    text = path.read_text()
+    assert text == 'model = "gpt-5.6-luna"\n\n[mcp_servers.papers]\ncommand = "uvx"\nargs = ["papers-mcp"]\n'
+
+
+def test_validate_metadata_rejects_stdio_without_a_command():
+    assert mcp_write.validate_metadata(
+        {"transport": "stdio", "command": None, "args": []}) == "stdio entry has no command"
+
+
+def test_validate_metadata_rejects_http_without_a_url():
+    assert mcp_write.validate_metadata(
+        {"transport": "http", "url": None}) == "http entry has no url"

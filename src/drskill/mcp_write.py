@@ -2,9 +2,9 @@
 
 mcp-json is read-write. codex-toml is append-only for stdio servers; the
 append-only design preserves comments and formatting when adding servers.
-claude-user-json is Claude Code's whole user state file and stays manual
-because it holds Claude Code's complete user state. Env variables are
-written with empty values; the manifest never carries values, only names."""
+claude-user-json stays manual because it is a large state file drskill
+should not edit. Env variables are written with empty values; the
+manifest never carries values, only names."""
 
 from __future__ import annotations
 
@@ -50,6 +50,10 @@ def validate_metadata(metadata) -> str | None:
     env_names = metadata.get("env_names") or []
     if not isinstance(env_names, list) or not all(isinstance(n, str) for n in env_names):
         return "env_names is not a list of strings"
+    if metadata.get("transport") == "stdio" and not metadata.get("command"):
+        return "stdio entry has no command"
+    if metadata.get("transport") == "http" and not metadata.get("url"):
+        return "http entry has no url"
     return None
 
 
@@ -113,10 +117,13 @@ def _write_codex_server(path: Path, name: str, block: dict) -> None:
     if path.is_file():
         try:
             text = path.read_text(encoding="utf-8")
-            existing = tomllib.loads(text).get("mcp_servers") or {}
+            existing = tomllib.loads(text).get("mcp_servers")
         except (OSError, tomllib.TOMLDecodeError) as e:
             raise WriteUnsupportedError(f"could not read {path}: {e}")
-        if name in existing:
+        if existing is not None and not isinstance(existing, dict):
+            raise WriteUnsupportedError(
+                f"{path} has a non-table mcp_servers key; edit it by hand")
+        if existing and name in existing:
             raise WriteUnsupportedError(
                 f"{path} already has [mcp_servers.{name}]; edit it by hand")
     key = name if re.fullmatch(r"[A-Za-z0-9_-]+", name) else _toml_str(name)
@@ -126,8 +133,12 @@ def _write_codex_server(path: Path, name: str, block: dict) -> None:
     env = block.get("env") or {}
     if env:
         lines.append("env = {" + ", ".join(f'{_toml_str(k)} = ""' for k in env) + "}")
-    prefix = text if not text or text.endswith("\n") else text + "\n"
-    if prefix:
-        prefix += "\n"
+    prefix = text.rstrip("\n") + "\n\n" if text else ""
+    new_text = prefix + "\n".join(lines) + "\n"
+    try:
+        tomllib.loads(new_text)
+    except (tomllib.TOMLDecodeError, ValueError):
+        raise WriteUnsupportedError(
+            "the resulting config.toml would not parse; add the server by hand")
     path.parent.mkdir(parents=True, exist_ok=True)
-    path.write_text(prefix + "\n".join(lines) + "\n", encoding="utf-8")
+    path.write_text(new_text, encoding="utf-8")
