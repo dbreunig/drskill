@@ -121,3 +121,15 @@ def test_every_entry_has_at_least_one_path():
             assert not h.project_paths and not h.global_paths, h.id
         else:
             assert h.project_paths or h.global_paths, h.id
+
+
+def test_claude_code_declares_command_paths():
+    h = next(h for h in load_harnesses() if h.id == "claude-code")
+    assert h.command_project_paths == [".claude/commands"]
+    assert h.command_global_paths == ["~/.claude/commands"]
+
+
+def test_command_paths_default_empty():
+    h = next(h for h in load_harnesses() if h.id == "codex")
+    assert h.command_project_paths == []
+    assert h.command_global_paths == []

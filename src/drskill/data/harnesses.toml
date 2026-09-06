@@ -26,6 +26,10 @@ global_paths = ["~/.claude/skills"]
 search_order = "project-first"
 recursive = true
 root_md_paths = []
+# Command files: project .claude/commands and personal ~/.claude/commands,
+# per Claude Code's slash-command docs; subdirectories namespace commands.
+command_project_paths = [".claude/commands"]
+command_global_paths = ["~/.claude/commands"]
 mcp_project_configs = [".mcp.json"]
 mcp_global_configs = ["~/.claude.json"]
 mcp_format = "mcp-json"

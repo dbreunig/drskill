@@ -16,6 +16,9 @@ class RawInstance(BaseModel):
     skill_file: Path
     via_symlink: bool
     order: int  # index of the containing search path in the harness's list
+    # "command": a slash-command markdown file; rides discovery but gets
+    # its own contributor kind so skill-only consumers exclude it.
+    kind: Literal["skill", "command"] = "skill"
     plugin: "InstalledPlugin | None" = None  # set for store-delivered skills
 
 
@@ -63,7 +66,7 @@ class ShellBaseline(BaseModel):
 
 class Contributor(BaseModel):
     id: str  # str(realpath of the skill file)
-    kind: Literal["skill", "mcp_tool"] = "skill"
+    kind: Literal["skill", "mcp_tool", "command"] = "skill"
     name: str
     source: Provenance = Provenance()
     scope: Literal["project", "user"]

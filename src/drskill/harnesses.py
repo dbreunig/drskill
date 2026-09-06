@@ -23,6 +23,11 @@ class HarnessDef(BaseModel):
     search_order: Literal["project-first", "global-first", "none"] = "project-first"
     recursive: bool = True
     root_md_paths: list[str] = Field(default_factory=list)
+    # Slash-command file roots, scanned recursively for *.md; commands are
+    # explicitly invoked, so they join only the injection checks, never
+    # budget/routing accounting.
+    command_project_paths: list[str] = Field(default_factory=list)
+    command_global_paths: list[str] = Field(default_factory=list)
     mcp_project_configs: list[str] = Field(default_factory=list)
     mcp_global_configs: list[str] = Field(default_factory=list)
     mcp_format: str = "mcp-json"
