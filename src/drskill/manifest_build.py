@@ -23,6 +23,10 @@ _KINDS = {"skill": "skill", "mcp_tool": "mcp"}
 
 _REPO = re.compile(r"^[A-Za-z0-9_.-]+/[A-Za-z0-9_.-]+$")
 
+# C:\..., C:/..., and UNC \\host\share paths. Bare relative values like
+# "owner/repo" stay unflagged: they are routinely portable arguments.
+_WINDOWS_PATH = re.compile(r"^([A-Za-z]:[\\/]|\\\\)")
+
 
 def parse_repo(source: str | None) -> str | None:
     """owner/repo from an ecosystem source string, or None."""
@@ -178,7 +182,7 @@ def server_portability_notes(server) -> list[str]:
     notes = []
     values = ([server.command] if server.command else []) + list(server.args)
     for value in values:
-        if value.startswith(("/", "~", "./", "../")):
-            notes.append(f"{server.name}: {value!r} is a machine-local path and "
+        if value.startswith(("/", "~", "./", "../")) or _WINDOWS_PATH.match(value):
+            notes.append(f"{server.name}: {value} is a machine-local path and "
                          "may not start on another machine")
     return notes

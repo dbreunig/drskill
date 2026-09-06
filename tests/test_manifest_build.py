@@ -239,3 +239,15 @@ def test_portability_notes_flag_machine_local_paths():
 
 def test_portability_notes_accept_resolvable_commands():
     assert manifest_build.server_portability_notes(make_server()) == []
+
+
+def test_portability_notes_flag_windows_paths():
+    notes = manifest_build.server_portability_notes(
+        make_server(command="C:\\tools\\server.exe", args=["\\\\share\\data"]))
+    assert len(notes) == 2
+    assert "C:\\tools\\server.exe" in notes[0]
+
+
+def test_portability_notes_ignore_bare_relative_values():
+    assert manifest_build.server_portability_notes(
+        make_server(command="npx", args=["owner/repo", "bin/server"])) == []
