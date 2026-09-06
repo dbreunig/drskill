@@ -144,6 +144,10 @@ def contributors_to_manifest(
 
 
 def server_to_entry(server, tool_names: list[str]) -> dict:
+    """One installable manifest entry per MCP server. The metadata is the
+    sanitized config: env variable names only, never values. server_name
+    keeps the original casing because config_hash covers it; install must
+    write the server back under that exact name for hashes to match."""
     name = normalize_name(server.name)
     if server.transport == "http":
         source_reference = server.url or server.name
@@ -170,6 +174,7 @@ def server_to_entry(server, tool_names: list[str]) -> dict:
 
 
 def server_portability_notes(server) -> list[str]:
+    """Warnings for config values that only resolve on this machine."""
     notes = []
     values = ([server.command] if server.command else []) + list(server.args)
     for value in values:
