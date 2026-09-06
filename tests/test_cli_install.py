@@ -355,3 +355,105 @@ def test_review_fetched_runs_lint_and_records_acks(tmp_path, monkeypatch):
     assert cli_mod._review_fetched(files, home, name="vague") is True
     ledger_text = (home / ".drskill.toml").read_text()
     assert "[[ack]]" in ledger_text
+
+
+# -- MCP entries --------------------------------------------------------------
+
+MCP_HASH = "cc" * 32
+
+
+def mcp_entry(**metadata_overrides):
+    metadata = {"server_name": "Notion", "transport": "stdio",
+                "command": "npx", "args": ["-y", "notion-mcp"], "url": None,
+                "env_names": ["NOTION_TOKEN"], "tools": ["search"]}
+    metadata.update(metadata_overrides)
+    return {"kind": "mcp", "selector": "mcp:notion", "name": "notion",
+            "source_type": "mcp", "source_reference": "npx -y notion-mcp",
+            "content_hash": f"sha256:{MCP_HASH}", "local_only": False,
+            "metadata": metadata}
+
+
+def real_mcp_entry():
+    # Built through the real pipeline so content_hash matches what a
+    # re-parse of the written file computes.
+    from pathlib import Path
+
+    from drskill import manifest_build
+    from drskill.mcp import _entry_to_server
+
+    server = _entry_to_server(
+        "Notion",
+        {"command": "npx", "args": ["-y", "notion-mcp"], "env": {"NOTION_TOKEN": "x"}},
+        harness="claude-code", scope="project", source=Path("/tmp/.mcp.json"))
+    return manifest_build.server_to_entry(server, ["search"])
+
+
+def test_mcp_entry_installs_into_project_mcp_json(env):
+    _, project, state = env
+    state["manifest"] = manifest([mcp_entry()])
+    result = runner.invoke(app, ["loadout", "install", "drew/pack", "--project"], input="y\n")
+    assert result.exit_code == 0, result.output
+    data = json.loads((project / ".mcp.json").read_text())
+    assert data["mcpServers"]["Notion"] == {
+        "command": "npx", "args": ["-y", "notion-mcp"], "env": {"NOTION_TOKEN": ""}}
+    assert "fill in env values for: NOTION_TOKEN" in result.output
+    assert "scan --mcp-connect" in result.output
+    assert "live access" in result.output
+
+
+def test_mcp_reinstall_is_a_no_op(env):
+    _, project, state = env
+    state["manifest"] = manifest([real_mcp_entry()])
+    runner.invoke(app, ["loadout", "install", "drew/pack", "--project"], input="y\n")
+    result = runner.invoke(app, ["loadout", "install", "drew/pack", "--project"], input="y\n")
+    assert result.exit_code == 0, result.output
+    assert "already installed" in result.output
+    assert "1 already installed" in result.output
+
+
+def test_mcp_drifted_server_needs_force(env):
+    _, project, state = env
+    state["manifest"] = manifest([real_mcp_entry()])
+    (project / ".mcp.json").write_text(json.dumps(
+        {"mcpServers": {"Notion": {"command": "other-command"}}}))
+    result = runner.invoke(app, ["loadout", "install", "drew/pack", "--project"], input="y\n")
+    assert result.exit_code == 0, result.output
+    assert "differs" in result.output
+    data = json.loads((project / ".mcp.json").read_text())
+    assert data["mcpServers"]["Notion"]["command"] == "other-command"
+
+    result = runner.invoke(
+        app, ["loadout", "install", "drew/pack", "--project", "--force"], input="y\n")
+    assert result.exit_code == 0, result.output
+    data = json.loads((project / ".mcp.json").read_text())
+    assert data["mcpServers"]["Notion"]["command"] == "npx"
+
+
+def test_mcp_user_scope_prints_a_manual_block(env):
+    home, project, state = env
+    state["manifest"] = manifest([mcp_entry()])
+    result = runner.invoke(app, ["loadout", "install", "drew/pack", "--user"], input="y\n")
+    assert result.exit_code == 0, result.output
+    assert "1 manual" in result.output
+    assert '"command": "npx"' in result.output
+    assert not (project / ".mcp.json").exists()
+
+
+def test_mcp_codex_harness_prints_a_manual_block(env):
+    _, project, state = env
+    state["manifest"] = manifest([mcp_entry()])
+    (project / ".codex").mkdir()
+    result = runner.invoke(
+        app, ["loadout", "install", "drew/pack", "--harness", "codex"], input="y\n")
+    assert result.exit_code == 0, result.output
+    assert "1 manual" in result.output
+
+
+def test_mixed_manifest_installs_both_kinds(env):
+    home, project, state = env
+    state["manifest"] = manifest([hosted_entry(), mcp_entry()])
+    result = runner.invoke(app, ["loadout", "install", "drew/pack", "--project"], input="y\n")
+    assert result.exit_code == 0, result.output
+    assert (project / ".agents" / "skills" / "vector" / "SKILL.md").exists()
+    assert json.loads((project / ".mcp.json").read_text())["mcpServers"]["Notion"]
+    assert "2 installed" in result.output

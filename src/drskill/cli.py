@@ -4,6 +4,7 @@ import datetime as dt
 import json
 import os
 import sys
+import textwrap
 from collections import Counter
 from pathlib import Path
 
@@ -2020,8 +2021,9 @@ def install(
     entries = json.loads(document).get("entries", [])
     hosted = [e for e in entries if e.get("source_type") == "drskill"]
     github = [e for e in entries if e.get("source_type") == "github"]
-    other = len(entries) - len(hosted) - len(github)
-    installable = len(hosted) + len(github)
+    mcp = [e for e in entries if e.get("source_type") == "mcp"]
+    other = len(entries) - len(hosted) - len(github) - len(mcp)
+    installable = len(hosted) + len(github) + len(mcp)
     if not installable:
         typer.echo(f"Revision {revision} of {owner}/{slug} has no installable entries.")
         raise typer.Exit(0)
@@ -2040,13 +2042,18 @@ def install(
             typer.echo(f"  {entry['name']}  ({coords[0]} @ {coords[1]})")
         else:
             typer.echo(f"  {entry['name']}  (source {entry.get('source_reference')!r} is not fetchable)")
+    for entry in mcp:
+        transport = (entry.get("metadata") or {}).get("transport", "?")
+        typer.echo(f"  {entry['name']}  (MCP server, {transport})")
+    if mcp:
+        typer.echo("Installing an MCP server gives your agent live access to its tools.")
     if other:
         typer.echo(f"{other} entr{'ies' if other != 1 else 'y'} with other source types "
                    "will not be installed.")
     if not yes and not typer.confirm("Proceed?", default=False):
         raise typer.Exit(0)
 
-    counts = {"installed": 0, "unchanged": 0, "held": 0, "failed": 0}
+    counts = {"installed": 0, "unchanged": 0, "held": 0, "failed": 0, "manual": 0}
     bridged: list[tuple[str, Path]] = []
     for entry in hosted:
         dest = target / entry["name"]
@@ -2071,12 +2078,31 @@ def install(
         if status in ("installed", "unchanged"):
             bridged.append((entry["name"], target / entry["name"]))
         counts[status] += 1
+    if mcp:
+        target_or_reason = _mcp_config_target(harness, project, user, root, home)
+        mcp_statuses = []
+        for entry in mcp:
+            if isinstance(target_or_reason, str):
+                metadata = entry.get("metadata") or {}
+                name = metadata.get("server_name") or entry["name"]
+                from drskill import mcp_write
+                _echo_manual_mcp(entry, name, mcp_write.server_block(metadata), target_or_reason)
+                mcp_statuses.append("manual")
+                continue
+            cfg_path, fmt = target_or_reason
+            mcp_statuses.append(_install_one_mcp(entry, cfg_path, fmt, force=force))
+        for status in mcp_statuses:
+            counts[status] += 1
+        if "installed" in mcp_statuses:
+            typer.echo("Run drskill scan --mcp-connect to review the new server's tools.")
     _offer_bridges(bridged, harness, target.parent.parent, scope=scope, yes=yes)
     parts = [f"{counts['installed']} installed"]
     if counts["unchanged"]:
         parts.append(f"{counts['unchanged']} already installed")
     if counts["held"]:
         parts.append(f"{counts['held']} held (--force to replace)")
+    if counts["manual"]:
+        parts.append(f"{counts['manual']} manual")
     if counts["failed"]:
         parts.append(f"{counts['failed']} failed")
     typer.echo(" · ".join(parts))
@@ -2129,6 +2155,68 @@ def _install_one_github(entry: dict, target: Path, *, force: bool, yes: bool,
     content.write_skill(files, dest)
     typer.echo(f"  {entry['name']}: {'replaced' if replaced else 'installed'}")
     return "installed"
+
+
+def _mcp_config_target(harness_id: str | None, project: bool, user: bool,
+                       root: Path, home: Path) -> tuple[Path, str] | str:
+    """(config path, format) for MCP installs, or an explanation string
+    when no writable target exists. Formats other than mcp-json go to the
+    manual path in the caller."""
+    from drskill.harnesses import load_harnesses
+
+    in_project = project or (not user and ((root / ".git").exists() or (root / ".agents").exists()))
+    if harness_id is None:
+        if in_project:
+            return root / ".mcp.json", "mcp-json"
+        return ("there is no shared user-scope MCP config; pass --harness to "
+                "target a specific harness")
+    hd = next((h for h in load_harnesses() if h.id == harness_id), None)
+    if hd is None:
+        return f"unknown harness {harness_id!r}"
+    specs = hd.mcp_project_configs if in_project else hd.mcp_global_configs
+    if not specs:
+        scope = "project" if in_project else "user"
+        return f"{hd.display_name} has no {scope}-scope MCP config"
+    fmt = hd.mcp_format if in_project else (hd.mcp_format_global or hd.mcp_format)
+    spec = specs[0]
+    path = root / spec if in_project else home / spec.removeprefix("~/")
+    return path, fmt
+
+
+def _install_one_mcp(entry: dict, cfg_path: Path, fmt: str, *, force: bool) -> str:
+    from drskill import mcp_write
+
+    metadata = entry.get("metadata") or {}
+    name = metadata.get("server_name") or entry["name"]
+    block = mcp_write.server_block(metadata)
+    if fmt != "mcp-json":
+        _echo_manual_mcp(entry, name, block, f"{cfg_path} is {fmt} and not writable")
+        return "manual"
+    existing = {s.name: s for s in mcp_write.read_servers(cfg_path, fmt)}
+    current = existing.get(name)
+    if current is not None:
+        if f"sha256:{current.config_hash}" == entry.get("content_hash"):
+            typer.echo(f"  {entry['name']}: already installed")
+            return "unchanged"
+        if not force:
+            typer.echo(f"  {entry['name']}: local config differs; rerun with --force to replace it")
+            return "held"
+    try:
+        mcp_write.write_server(cfg_path, name, block)
+    except mcp_write.WriteUnsupportedError as err:
+        _echo_manual_mcp(entry, name, block, err.message)
+        return "manual"
+    typer.echo(f"  {entry['name']}: {'replaced' if current else 'installed'} "
+               f"in {_display_path(cfg_path)}")
+    env_names = metadata.get("env_names") or []
+    if env_names:
+        typer.echo(f"    fill in env values for: {', '.join(env_names)}")
+    return "installed"
+
+
+def _echo_manual_mcp(entry: dict, name: str, block: dict, reason: str) -> None:
+    typer.echo(f"  {entry['name']}: {reason}; add it by hand:")
+    typer.echo(textwrap.indent(json.dumps({name: block}, indent=2), "    "))
 
 
 def _remediate(entry: dict, files: list[dict], dest: Path, *, ref: str,
