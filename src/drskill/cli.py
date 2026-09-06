@@ -907,7 +907,7 @@ def cache(
         valid_keys = {
             skill_shell.baseline_key(c, root, home)
             for c in world.contributors.values()
-            if c.kind == "skill"
+            if c.kind in ("skill", "command")
         }
         loaded = skill_shell.load_baselines(bdir)
         b_removed = b_kept = 0

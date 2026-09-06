@@ -853,3 +853,18 @@ def test_stale_mcp_tool_is_skipped_with_a_note(wizard_env, monkeypatch):
     result = runner.invoke(app, ["loadout", "create", "pack"], input="y\n")
     assert result.exit_code == 0, result.output
     assert "no longer configured" in result.output
+
+
+def test_command_contributors_are_not_offered(wizard_env, monkeypatch):
+    command = contributor("deploy")
+    command = command.model_copy(update={"kind": "command", "id": "/tmp/deploy.md"})
+    set_world(monkeypatch, make_world(contributor("alpha"), command))
+    captured = {}
+
+    def fake_choose_skills(rows, chosen):
+        captured["rows"] = rows
+        return []
+
+    monkeypatch.setattr(loadout_wizard, "_choose_skills", fake_choose_skills)
+    runner.invoke(app, ["loadout", "create", "pack"])
+    assert [r.contributor.name for r in captured["rows"]] == ["alpha"]

@@ -155,6 +155,8 @@ def _build_rows(world) -> list[_Row]:
     for c in world.contributors.values():
         if c.system:
             continue
+        if c.kind == "command":
+            continue  # loadouts do not carry slash commands yet
         key = _group_key(c)
         if key not in groups:
             groups[key] = []

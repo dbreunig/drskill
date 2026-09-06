@@ -112,7 +112,7 @@ def run_scan(
         skill_shell.shell_dir(project_root, home, global_only)
     )
     for c in world.contributors.values():
-        if c.kind != "skill":
+        if c.kind not in ("skill", "command"):
             continue
         b = baselines.get(skill_shell.baseline_key(c, project_root, home))
         if b is not None:

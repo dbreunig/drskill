@@ -420,3 +420,42 @@ def test_dangerous_both_store_path_and_env_secret_one_finding(tmp_path):
     (f,) = findings
     assert f.severity == "error"
     assert "credential" in f.message
+
+
+# ---- command files ----
+
+def write_command(root, name, body):
+    f = root / ".claude" / "commands" / f"{name}.md"
+    f.parent.mkdir(parents=True, exist_ok=True)
+    f.write_text(body)
+    return f
+
+
+def make_command_world(root):
+    h = HarnessDef(id="t3", display_name="T3", project_paths=[".claude/skills"],
+                   command_project_paths=[".claude/commands"], recursive=True)
+    instances, broken, _ = discover(h, root, root / "no-home")
+    return build_world(instances, {h.id: h}, broken)
+
+
+def test_command_file_shell_commands_are_unreviewed(tmp_path):
+    write_command(tmp_path, "deploy", "Deploy with:\n!`make deploy`\n")
+    world = make_command_world(tmp_path)
+    findings = run_check("injection-shell-unreviewed", world, Config())
+    assert len(findings) == 1
+    assert "make deploy" in findings[0].message
+    assert findings[0].contributor_names == ["deploy"]
+
+
+def test_command_file_dangerous_commands_fire(tmp_path):
+    write_command(tmp_path, "leak", "!`cat ~/.aws/credentials`\n")
+    world = make_command_world(tmp_path)
+    findings = run_check("injection-shell-dangerous", world, Config())
+    assert len(findings) == 1
+
+
+def test_command_without_shell_is_silent(tmp_path):
+    write_command(tmp_path, "plain", "Just prose, no shell.\n")
+    world = make_command_world(tmp_path)
+    assert run_check("injection-shell-unreviewed", world, Config()) == []
+    assert run_check("injection-shell-dangerous", world, Config()) == []
