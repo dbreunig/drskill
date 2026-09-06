@@ -79,13 +79,17 @@ def env(tmp_path, monkeypatch):
             return json.dumps(state["manifest"])
         if method == "POST" and path == "/api/v1/loadouts/drew/pack/revisions":
             state["publish"].append(json_body)
+            state["published"] = json_body["manifest"]
             return {"revision": {"number": 3, "runtime_hash": "sha256:" + "ff" * 32}}
         raise service.ServiceError("not_found", "Not found.")
 
     monkeypatch.setattr(service, "api_request", fake_api_request)
     monkeypatch.setattr(cli_mod, "run_scan",
-        lambda *a, **k: (World(contributors={c.id: c for c in state["world"]}), []))
+        lambda *a, **k: (World(contributors={c.id: c for c in state["world"]},
+                               mcp_servers=state["mcp_servers"],
+                               mcp_snapshots=state.get("mcp_snapshots", {})), []))
     state["world"] = [contributor("alpha"), contributor("beta")]
+    state["mcp_servers"] = []
     return state
 
 
@@ -165,3 +169,46 @@ def test_review_fetched_skips_the_ack_loop_when_not_interactive(tmp_path, monkey
     monkeypatch.setattr(cli_mod.interactive, "can_interact", lambda *a, **k: "no tty")
     assert cli_mod._review_fetched(files, home, name="vague") is True
     assert not (home / ".drskill.toml").exists()
+
+
+def make_update_server(config_hash="dd" * 32, command="npx"):
+    from drskill.mcp import MCPServer
+
+    return MCPServer(name="Papers", harness="claude-code", scope="project",
+                     source="/tmp/.mcp.json", transport="stdio",
+                     command=command, args=["-y", "papers-mcp"],
+                     env_names=[], config_hash=config_hash)
+
+
+def update_mcp_entry():
+    return {"kind": "mcp", "selector": "mcp:papers", "name": "papers",
+            "source_type": "mcp", "source_reference": "npx -y old-papers",
+            "content_hash": "sha256:" + "cc" * 32, "local_only": False,
+            "metadata": {"server_name": "Papers", "transport": "stdio",
+                         "command": "npx", "args": ["-y", "old-papers"],
+                         "url": None, "env_names": [], "tools": ["search"]}}
+
+
+def test_changed_mcp_entry_republishes_from_the_live_server(env):
+    state = env
+    state["manifest"]["entries"] = [update_mcp_entry()]
+    state["mcp_servers"] = [make_update_server()]
+    result = runner.invoke(app, ["loadout", "update", "drew/pack", "--yes"])
+    assert result.exit_code == 0, result.output
+    published = state["published"]["entries"][0]
+    assert published["content_hash"] == "sha256:" + "dd" * 32
+    assert published["metadata"]["args"] == ["-y", "papers-mcp"]
+    assert published["selector"] == "mcp:papers"
+    assert published["metadata"]["tools"] == ["search"]
+    assert "Published revision" in result.output
+
+
+def test_matching_mcp_entry_is_up_to_date(env):
+    state = env
+    entry = update_mcp_entry()
+    entry["content_hash"] = "sha256:" + "dd" * 32
+    state["manifest"]["entries"] = [entry]
+    state["mcp_servers"] = [make_update_server()]
+    result = runner.invoke(app, ["loadout", "update", "drew/pack", "--yes"])
+    assert result.exit_code == 0, result.output
+    assert "Already up to date." in result.output

@@ -1837,11 +1837,8 @@ def status(
             note = f"  ({st.note})" if st.note else ""
             typer.echo(f"  {st.entry['name']:<24} {line}{note}")
             if line in ("changed locally since publish", "upstream has changed"):
-                # update deliberately ignores mcp entries, so only skill
-                # drift should point the user at `loadout update`.
-                if st.entry.get("kind") == "skill":
-                    changed_here = True
-                else:
+                changed_here = True
+                if st.entry.get("kind") != "skill":
                     mcp_changed_here = True
         if changed_here and mine:
             typer.echo(f"  Run drskill loadout update {owner}/{slug} to republish.")
@@ -1928,7 +1925,8 @@ def update(
     manifest = copy.deepcopy(json.loads(document))
     world, _ = _scan_with_status(lambda p: run_scan(Path.cwd(), home, progress=p))
     statuses = loadout_drift.classify_entries(
-        manifest.get("entries", []), list(world.contributors.values()))
+        manifest.get("entries", []), list(world.contributors.values()),
+        servers=world.mcp_servers)
     for st in statuses:
         if st.state in ("missing", "unreadable"):
             typer.echo(f"  {st.entry['name']}: {st.state} locally; left as published")
@@ -1939,14 +1937,17 @@ def update(
 
     try:
         for st in changed:
+            entry = next(e for e in manifest["entries"]
+                         if e.get("selector") == st.entry.get("selector"))
+            if st.entry.get("kind") == "mcp":
+                _refresh_mcp_entry(entry, st.server, world)
+                continue
             files = content.collect_files(st.contributor)
             if not _review_fetched(files, home, manifest=manifest,
                                    selector=st.entry.get("selector"),
                                    name=st.entry["name"]):
                 typer.echo("Update aborted.")
                 raise typer.Exit(1)
-            entry = next(e for e in manifest["entries"]
-                         if e.get("selector") == st.entry.get("selector"))
             _refresh_entry(entry, files, st.contributor, creds, base)
     except service.ServiceError as err:
         _echo_service_error(err)
@@ -1959,7 +1960,7 @@ def update(
     typer.echo(f"Changed: {names}")
     if not yes and not typer.confirm(
             f"Publish a new revision of {owner}/{slug} with "
-            f"{len(changed)} updated skill{'s' if len(changed) != 1 else ''}?",
+            f"{len(changed)} updated entr{'ies' if len(changed) != 1 else 'y'}?",
             default=False):
         raise typer.Exit(0)
     _, runtime_hash = service.canonical_manifest(manifest)
@@ -1988,6 +1989,24 @@ def _refresh_entry(entry: dict, files: list[dict], contributor, creds: dict, bas
         metadata["files"] = sorted(f["path"] for f in files)
     else:
         entry["content_hash"] = contributor.content_hash
+
+
+def _refresh_mcp_entry(entry: dict, server, world) -> None:
+    """Rebuild a drifted mcp entry from the live server config. The
+    selector and name stay as published so the revision diff reads as an
+    update, not a remove-and-add."""
+    from drskill import manifest_build
+
+    snap = world.mcp_snapshots.get(server.config_hash)
+    tools = [t.name for t in snap.tools] if snap else \
+        (entry.get("metadata") or {}).get("tools") or []
+    fresh = manifest_build.server_to_entry(server, tools)
+    fresh["selector"] = entry["selector"]
+    fresh["name"] = entry["name"]
+    entry.clear()
+    entry.update(fresh)
+    typer.echo(f"  {entry['name']}: server config updated "
+               f"({_mcp_install_detail(fresh['metadata'])})")
 
 @loadout_app.command()
 def install(

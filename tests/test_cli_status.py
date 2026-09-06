@@ -123,7 +123,7 @@ def test_changed_entry_hints_update_and_exits_one(env):
     assert "drskill loadout update drew/pack" in result.output
 
 
-def test_changed_mcp_entry_hints_reinstall_not_update(env):
+def test_changed_mcp_entry_hints_update_and_reinstall(env):
     env["manifest"]["entries"] = [
         entry(name="papers", kind="mcp", source_type="mcp",
               content_hash="sha256:" + "11" * 32,
@@ -137,9 +137,9 @@ def test_changed_mcp_entry_hints_reinstall_not_update(env):
     result = runner.invoke(app, ["loadout", "status"])
     assert result.exit_code == 1, result.output
     assert "changed locally since publish" in result.output
+    assert "drskill loadout update drew/pack" in result.output
     assert ("Reinstall with drskill loadout install drew/pack --force to restore "
             "the published server config.") in result.output
-    assert "loadout update" not in result.output
 
 
 def test_line_states_render(env):
