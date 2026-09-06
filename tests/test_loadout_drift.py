@@ -152,3 +152,23 @@ def test_legacy_per_tool_entry_stays_unchecked():
              "metadata": {}}
     statuses = loadout_drift.classify_entries([entry], [], servers=[drift_server()])
     assert statuses[0].state == "unchecked"
+
+
+def test_changed_mcp_entry_carries_the_matched_server():
+    server = drift_server(config_hash="dd" * 32)
+    statuses = loadout_drift.classify_entries([drift_mcp_entry()], [], servers=[server])
+    assert statuses[0].state == "changed"
+    assert statuses[0].server is server
+
+
+def test_matched_mcp_entry_carries_the_server_too():
+    server = drift_server()
+    statuses = loadout_drift.classify_entries([drift_mcp_entry()], [], servers=[server])
+    assert statuses[0].state == "matches"
+    assert statuses[0].server is server
+
+
+def test_missing_mcp_entry_has_no_server():
+    statuses = loadout_drift.classify_entries([drift_mcp_entry()], [], servers=[])
+    assert statuses[0].state == "missing"
+    assert statuses[0].server is None

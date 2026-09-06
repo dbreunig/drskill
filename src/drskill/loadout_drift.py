@@ -20,6 +20,7 @@ class EntryStatus:
     contributor: Contributor | None
     state: str  # matches | changed | missing | unreadable | unchecked
     note: str | None = None
+    server: object | None = None  # matched MCPServer for mcp entries
 
 
 def classify_entries(entries: list[dict], contributors: list[Contributor],
@@ -33,7 +34,8 @@ def classify_entries(entries: list[dict], contributors: list[Contributor],
     for entry in entries:
         if entry.get("kind") != "skill":
             if entry.get("source_type") == "mcp" and servers is not None:
-                out.append(EntryStatus(entry, None, _mcp_state(entry, servers)))
+                state, server = _mcp_state(entry, servers)
+                out.append(EntryStatus(entry, None, state, server=server))
             else:
                 out.append(EntryStatus(entry, None, "unchecked"))
             continue
@@ -67,13 +69,14 @@ def _compare(entry: dict, contributor: Contributor) -> str:
     return "matches" if local == expected else "changed"
 
 
-def _mcp_state(entry: dict, servers: list) -> str:
+def _mcp_state(entry: dict, servers: list) -> tuple[str, object | None]:
     expected = entry.get("content_hash")
-    if any(f"sha256:{s.config_hash}" == expected for s in servers):
-        return "matches"
+    for s in servers:
+        if f"sha256:{s.config_hash}" == expected:
+            return "matches", s
     metadata = entry.get("metadata") or {}
     wanted = metadata.get("server_name")
     for s in servers:
         if s.name == wanted or normalize_name(s.name) == entry.get("name"):
-            return "changed"
-    return "missing"
+            return "changed", s
+    return "missing", None
