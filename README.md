@@ -450,6 +450,27 @@ Snapshots fingerprint schema text as well as descriptions, and that coverage has
 
 `mcp-tool-poisoning` reads the same committed snapshots and scans tool names, descriptions, and schema doc strings for injection surfaces: hidden instructions, credential paths, invisible Unicode, encoded blobs, remote-fetch directives, and text that steers the agent toward or away from other tools. Like the other MCP checks it is static and reads only what was captured at connect time, so the whole team gets findings the moment one person runs `--mcp-connect`, with no reconnect required. A server that legitimately manages credentials, e.g. an AWS or Kubernetes tool whose parameter docs name `~/.aws/credentials`, will trip the credential-path error on first connect. That is the check working as designed: read the quoted text, and if the mention is expected, `drskill ack mcp-tool-poisoning <server>` records your decision and the error stays silent until that tool's text changes.
 
+### MCP servers in loadouts
+
+`drskill loadout create` lists the MCP tools it finds next to your skills.
+Selecting a tool adds its whole server to the loadout as one entry. The
+entry records the server's transport, command, arguments, url, and the
+names of its env variables. Env values never leave your machine.
+
+`drskill loadout install` writes each MCP entry into the target MCP
+config. In a project it writes `.mcp.json`. Pass `--harness` to target a
+harness that reads a different file. A server that is already configured
+with the same settings is reported as already installed. A server with
+the same name but different settings is held unless you pass `--force`.
+Configs that drskill cannot write, such as Codex's `config.toml`, get a
+printed block you can paste in yourself.
+
+After installing a server, fill in its env values and run
+`drskill scan --mcp-connect` to review the tools it exposes.
+
+`drskill loadout status` compares each MCP entry against your configured
+servers and reports matches, changed, or missing.
+
 ## The ledger
 
 `drskill.toml` sits at the root of your repo and should be committed. It holds your budgets, your thresholds, and your decisions. When you run `drskill ack`, it appends an entry to the end of the file and touches nothing else, so your comments and formatting are preserved. An entry looks like this:
