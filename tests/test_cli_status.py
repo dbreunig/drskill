@@ -9,6 +9,7 @@ from typer.testing import CliRunner
 
 from drskill import cli as cli_mod, content, service
 from drskill.cli import app
+from drskill.mcp import MCPServer
 from drskill.models import Contributor, Provenance, TokenCost
 from drskill.resolution import World
 
@@ -96,8 +97,10 @@ def env(tmp_path, monkeypatch):
 
     monkeypatch.setattr(service, "api_request", fake_api_request)
     monkeypatch.setattr(cli_mod, "run_scan",
-        lambda *a, **k: (World(contributors={c.id: c for c in state["world"]}), []))
+        lambda *a, **k: (World(contributors={c.id: c for c in state["world"]},
+                               mcp_servers=state["mcp_servers"]), []))
     state["world"] = [contributor("vector")]
+    state["mcp_servers"] = []
     yield state
     server.shutdown()
     thread.join(timeout=5)
@@ -118,6 +121,25 @@ def test_changed_entry_hints_update_and_exits_one(env):
     assert result.exit_code == 1
     assert "changed locally since publish" in result.output
     assert "drskill loadout update drew/pack" in result.output
+
+
+def test_changed_mcp_entry_hints_reinstall_not_update(env):
+    env["manifest"]["entries"] = [
+        entry(name="papers", kind="mcp", source_type="mcp",
+              content_hash="sha256:" + "11" * 32,
+              metadata={"server_name": "Papers"}),
+    ]
+    env["mcp_servers"] = [MCPServer(
+        name="Papers", harness="claude-code", scope="project", in_project=True,
+        source="/tmp/.mcp.json", transport="stdio", command="other-command",
+        args=[], env_names=[], config_hash="22" * 32,
+    )]
+    result = runner.invoke(app, ["loadout", "status"])
+    assert result.exit_code == 1, result.output
+    assert "changed locally since publish" in result.output
+    assert ("Reinstall with drskill loadout install drew/pack --force to restore "
+            "the published server config.") in result.output
+    assert "loadout update" not in result.output
 
 
 def test_line_states_render(env):

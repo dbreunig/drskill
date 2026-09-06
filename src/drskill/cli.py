@@ -1828,6 +1828,7 @@ def status(
         entries = json.loads(document).get("entries", [])
         typer.echo(f"\n{owner}/{slug} (revision {number})")
         changed_here = False
+        mcp_changed_here = False
         for st in loadout_drift.classify_entries(entries, contributors,
                                                  servers=world.mcp_servers):
             line = _STATUS_LINES[st.state]
@@ -1836,10 +1837,18 @@ def status(
             note = f"  ({st.note})" if st.note else ""
             typer.echo(f"  {st.entry['name']:<24} {line}{note}")
             if line in ("changed locally since publish", "upstream has changed"):
-                changed_here = True
+                # update deliberately ignores mcp entries, so only skill
+                # drift should point the user at `loadout update`.
+                if st.entry.get("kind") == "skill":
+                    changed_here = True
+                else:
+                    mcp_changed_here = True
         if changed_here and mine:
             typer.echo(f"  Run drskill loadout update {owner}/{slug} to republish.")
-        drifted = drifted or changed_here
+        if mcp_changed_here:
+            typer.echo(f"  Reinstall with drskill loadout install {owner}/{slug} "
+                       "--force to restore the published server config.")
+        drifted = drifted or changed_here or mcp_changed_here
     raise typer.Exit(1 if drifted else 0)
 
 
