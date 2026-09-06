@@ -172,3 +172,18 @@ def test_missing_mcp_entry_has_no_server():
     statuses = loadout_drift.classify_entries([drift_mcp_entry()], [], servers=[])
     assert statuses[0].state == "missing"
     assert statuses[0].server is None
+
+
+def test_mcp_entry_with_non_dict_metadata_falls_back_to_name_match():
+    entry = drift_mcp_entry(content_hash="sha256:" + "00" * 32)
+    entry["metadata"] = "surprise"
+    statuses = loadout_drift.classify_entries(
+        [entry], [], servers=[drift_server(config_hash="dd" * 32)])
+    assert statuses[0].state == "changed"
+
+
+def test_mcp_entry_with_non_dict_metadata_and_no_server_is_missing():
+    entry = drift_mcp_entry(content_hash="sha256:" + "00" * 32)
+    entry["metadata"] = "surprise"
+    statuses = loadout_drift.classify_entries([entry], [], servers=[])
+    assert statuses[0].state == "missing"

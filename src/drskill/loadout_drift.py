@@ -74,7 +74,8 @@ def _mcp_state(entry: dict, servers: list) -> tuple[str, object | None]:
     for s in servers:
         if f"sha256:{s.config_hash}" == expected:
             return "matches", s
-    metadata = entry.get("metadata") or {}
+    metadata = entry.get("metadata")
+    metadata = metadata if isinstance(metadata, dict) else {}
     wanted = metadata.get("server_name")
     for s in servers:
         if s.name == wanted or normalize_name(s.name) == entry.get("name"):
