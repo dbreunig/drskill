@@ -2053,8 +2053,11 @@ def install(
         else:
             typer.echo(f"  {entry['name']}  (source {entry.get('source_reference')!r} is not fetchable)")
     for entry in mcp:
-        transport = (entry.get("metadata") or {}).get("transport", "?")
-        typer.echo(f"  {entry['name']}  (MCP server, {transport})")
+        metadata = entry.get("metadata") or {}
+        transport = metadata.get("transport", "?")
+        detail = _mcp_install_detail(metadata)
+        suffix = f": {detail}" if detail else ""
+        typer.echo(f"  {entry['name']}  (MCP server, {transport}{suffix})")
     if mcp:
         typer.echo("Installing an MCP server gives your agent live access to its tools.")
     if other:
@@ -2191,6 +2194,15 @@ def _mcp_config_target(harness_id: str | None, project: bool, user: bool,
     spec = specs[0]
     path = root / spec if in_project else home / spec.removeprefix("~/")
     return path, fmt
+
+
+def _mcp_install_detail(metadata: dict) -> str:
+    """What will actually be written for an MCP entry, so the confirmation
+    shows attacker-controllable command/args/url instead of hiding them
+    behind the display-only source_reference."""
+    if metadata.get("transport") == "http":
+        return metadata.get("url") or ""
+    return " ".join([metadata.get("command") or "", *(metadata.get("args") or [])]).strip()
 
 
 def _install_one_mcp(entry: dict, cfg_path: Path, fmt: str, *, force: bool) -> str:

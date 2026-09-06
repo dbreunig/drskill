@@ -399,6 +399,19 @@ def test_mcp_entry_installs_into_project_mcp_json(env):
     assert "fill in env values for: NOTION_TOKEN" in result.output
     assert "scan --mcp-connect" in result.output
     assert "live access" in result.output
+    listing, _, rest = result.output.partition("Proceed?")
+    assert "npx -y notion-mcp" in listing
+
+
+def test_mcp_listing_shows_the_http_url_before_confirmation(env):
+    _, project, state = env
+    state["manifest"] = manifest([mcp_entry(
+        server_name="Linear", transport="http", command=None, args=[],
+        url="https://mcp.linear.app/sse", env_names=[])])
+    result = runner.invoke(app, ["loadout", "install", "drew/pack", "--project"], input="y\n")
+    assert result.exit_code == 0, result.output
+    listing, _, rest = result.output.partition("Proceed?")
+    assert "https://mcp.linear.app/sse" in listing
 
 
 def test_mcp_reinstall_is_a_no_op(env):
