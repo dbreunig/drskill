@@ -868,3 +868,33 @@ def test_command_contributors_are_not_offered(wizard_env, monkeypatch):
     monkeypatch.setattr(loadout_wizard, "_choose_skills", fake_choose_skills)
     runner.invoke(app, ["loadout", "create", "pack"])
     assert [r.contributor.name for r in captured["rows"]] == ["alpha"]
+
+
+def edit_entry(selector, name=None, **overrides):
+    e = {"kind": selector.split(":")[0], "selector": selector,
+         "name": name or selector.split(":")[1], "source_type": "github",
+         "source_reference": "friend/x@v1", "content_hash": "sha256:" + "ab" * 32,
+         "local_only": False, "metadata": {}}
+    e.update(overrides)
+    return e
+
+
+def test_edit_items_pairs_rows_with_entries():
+    rows = loadout_wizard._build_rows(make_world(contributor("alpha"), contributor("beta")))
+    entries = [edit_entry("skill:alpha")]
+    items = loadout_wizard._edit_items(rows, entries, None)
+    by_name = {(i.row.contributor.name if i.row else i.entry["name"]): i for i in items}
+    assert by_name["alpha"].checked is True
+    assert by_name["alpha"].entry is entries[0]
+    assert by_name["beta"].checked is False
+    assert by_name["beta"].entry is None
+
+
+def test_edit_items_appends_phantoms_prechecked():
+    rows = loadout_wizard._build_rows(make_world(contributor("alpha")))
+    entries = [edit_entry("skill:alpha"), edit_entry("skill:ghost"), edit_entry("mcp:notion")]
+    items = loadout_wizard._edit_items(rows, entries, None)
+    phantoms = [i for i in items if i.row is None]
+    assert [p.entry["name"] for p in phantoms] == ["ghost", "notion"]
+    assert all(p.checked for p in phantoms)
+    assert all("not on this machine" in p.label for p in phantoms)

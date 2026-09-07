@@ -44,6 +44,45 @@ class _Row:
     selected: bool
 
 
+@dataclass
+class _EditItem:
+    label: str
+    checked: bool
+    row: _Row | None
+    entry: dict | None
+
+
+def _row_selector(row: _Row) -> str:
+    kind = manifest_build._KINDS[row.contributor.kind]
+    return f"{kind}:{manifest_build.normalize_name(row.contributor.name)}"
+
+
+def _edit_items(rows: list[_Row], entries: list[dict],
+                chosen_harness: str | None) -> list[_EditItem]:
+    """Pair local rows with published entries by selector. Rows with a
+    published match start checked; other rows are candidate additions.
+    Entries with no local counterpart become pre-checked phantoms so
+    unchecking one removes it from the loadout."""
+    by_selector: dict[str, dict] = {}
+    for e in entries:
+        by_selector.setdefault(e.get("selector") or "", e)
+    width = _label_width(rows)
+    items: list[_EditItem] = []
+    claimed: set[int] = set()
+    for row in rows:
+        entry = by_selector.get(_row_selector(row))
+        if entry is not None and id(entry) not in claimed:
+            claimed.add(id(entry))
+            items.append(_EditItem(_row_label(row, chosen_harness, width), True, row, entry))
+        else:
+            items.append(_EditItem(_row_label(row, chosen_harness, width), False, row, None))
+    for e in entries:
+        if id(e) not in claimed:
+            items.append(_EditItem(f"{e['name']}  (published; not on this machine)",
+                                   True, None, e))
+    return items
+
+
 def run(
     slug: str,
     name: str,
