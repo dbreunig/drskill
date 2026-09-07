@@ -270,6 +270,49 @@ Audit only reads trace files. It writes nothing to the ledger, creates no findin
 
 Parsing every trace on every run would be slow, so audit caches what it extracts from each trace file at `~/.drskill/cache/audit/`. This cache is machine state and is never committed, because it holds the full text of the user messages that preceded each invocation, plus 200-character reasoning excerpts. The same text already exists in the agent trace files it was read from. `drskill cache prune` clears entries for trace files that no longer exist.
 
+## Explain routing
+
+`drskill explain "<query>"` shows where a request would route across your harnesses. Pass the query as a string:
+
+```
+drskill explain "summarize this pdf document"
+```
+
+The output shows every harness, scores every effective skill against the query using drskill's own similarity model, and renders a verdict. The verdict is one of three:
+
+- "routes to <name>": The top skill scored clearly above the rest. Your agent should reach for it.
+- "contested": The top two skills scored too close together. The agent cannot tell them apart, so which one it picks is unpredictable.
+- "no skill matches": Nothing scored above the floor, so the agent has no routable skill for this query.
+
+This simulation uses text similarity, not the model that runs your agent. It catches cases where a router could not disambiguate, even if a human or a language model would know the right choice. The output says so.
+
+Add `--deep` to ask the configured model to judge the routing instead:
+
+```
+drskill explain "summarize this pdf document" --deep
+```
+
+The model reads the query and the top candidates, and returns a verdict. A model verdict overrides the similarity model. This makes one API call and costs one point from the `--max-calls` budget, the same as `scan --deep`. The output notes which is which: "drskill's own similarity model" versus "model's judgment."
+
+You can define routing expectations in `drskill.toml` under `[[queries]]`. Each entry holds a query and an optional skill name it should route to. Every `drskill scan` checks every query against every harness, using the same ranking logic as `explain`, and warns if a query routes to the wrong skill or is contested:
+
+```toml
+[[queries]]
+query = "summarize a pdf"
+expect = "pdf-summary"
+
+[[queries]]
+query = "list s3 buckets"
+```
+
+The first query expects to route to `pdf-summary`; the second just checks that it routes cleanly to something. Any mismatch is a `query-routing` warning, which fails `--ci` unless acknowledged.
+
+Scope the ranking to one harness with `--harness`, or print JSON instead of text with `--json`:
+
+```
+drskill explain "query" --harness claude-code --json
+```
+
 ## Exit codes
 
 `drskill scan`:
@@ -333,6 +376,7 @@ The two commands use exit 2 differently because they answer different questions.
 | `mcp-tool-collision` | warning | Two servers expose the same tool name into one harness's set. Which one the agent gets is client dependent. |
 | `mcp-tools-unreviewed` | note on first sight, warning on change | A server's enumerated tool set. On first sight it is a note asking you to record an approved baseline. If the server later changes a tool's description, it becomes a warning. |
 | `mcp-tool-poisoning` | error for hidden-Unicode and credential-path hits, warning otherwise | Scans tool names, descriptions, and schema doc strings for injection surfaces: hidden instructions, credential paths, invisible Unicode, encoded blobs, remote-fetch directives, and text that steers the agent toward or away from other tools. Runs from committed snapshots, so the whole team gets findings after one person runs `--mcp-connect`. |
+| `query-routing` | warning | A query configured in `[[queries]]` is contested between two skills or routes to the wrong skill, or matches nothing when it should match something. The finding names the unexpected routing and what was expected. |
 
 These checks run only under `drskill lint`, against a plugin's manifest and layout. The error findings are the violations the Agent Plugins spec calls fatal, meaning a client rejects the whole plugin; the warnings are the ones a client tolerates or ignores.
 
