@@ -4,6 +4,7 @@ from drskill.text import (
     content_tokens,
     cosine,
     has_activation,
+    routing_score,
     shared_phrases,
     shingle_vector,
     tokenize,
@@ -92,3 +93,25 @@ def test_vocab_contents():
 def test_tokenize_strips_quote_artifacts():
     assert tokenize("'Berlin', 'Boston'") == ["berlin", "boston"]
     assert tokenize("what's the box") == ["what's", "the", "box"]
+
+
+def test_routing_score_blends_unigram_and_shingle():
+    q = "summarize a pdf document"
+    exact = routing_score(q, "summarize a pdf document")
+    related = routing_score(q, "summarize pdf files and documents")
+    unrelated = routing_score(q, "deploy kubernetes clusters")
+    assert exact > 0.999
+    assert 0 < related < exact
+    assert unrelated == 0.0
+
+
+def test_routing_score_handles_empty_inputs():
+    assert routing_score("", "anything") == 0.0
+    assert routing_score("query", "") == 0.0
+
+
+def test_routing_score_orders_by_relevance():
+    q = "find hotels near the airport"
+    close = routing_score(q, "find hotels and lodging near airports")
+    far = routing_score(q, "find restaurants in the city center")
+    assert close > far

@@ -7,6 +7,7 @@ the corpus tuning script build on these primitives.
 from __future__ import annotations
 
 import re
+from collections import Counter
 
 # Tokens must end alphanumeric so quoted text ('Berlin',) does not leave a
 # trailing apostrophe on the token; internal apostrophes (what's) survive.
@@ -124,3 +125,20 @@ def has_activation(text: str) -> bool:
     if any(p in lowered for p in ACTIVATION_PATTERNS):
         return True
     return not _ACTIVATION_TOKENS.isdisjoint(tokenize(lowered))
+
+
+ROUTING_UNIGRAM_WEIGHT = 0.7
+ROUTING_SHINGLE_WEIGHT = 0.3
+
+
+def routing_score(query: str, description: str) -> float:
+    """Blend of unigram and 2-word-shingle cosine over content tokens.
+    A cheap stand-in for a harness router: word overlap carries most of
+    the weight, phrase overlap breaks ties between similar descriptions."""
+    q_tokens = content_tokens(query)
+    d_tokens = content_tokens(description)
+    if not q_tokens or not d_tokens:
+        return 0.0
+    uni = cosine(Counter(q_tokens), Counter(d_tokens))
+    shi = cosine(shingle_vector(query), shingle_vector(description))
+    return ROUTING_UNIGRAM_WEIGHT * uni + ROUTING_SHINGLE_WEIGHT * shi
