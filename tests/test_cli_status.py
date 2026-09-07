@@ -3,6 +3,7 @@ import json
 import tarfile
 import threading
 from http.server import BaseHTTPRequestHandler, HTTPServer
+from pathlib import Path
 
 import pytest
 from typer.testing import CliRunner
@@ -186,3 +187,44 @@ def test_remote_reports_upstream_drift(env):
     result = runner.invoke(app, ["loadout", "status", "--remote"])
     assert result.exit_code == 0, result.output
     assert "upstream has changed" not in result.output
+
+
+def test_status_prefers_the_pinned_contributor(env, tmp_path, monkeypatch):
+    # The published entry is named "vector". An unrelated project skill
+    # also called "vector" would win a name-only lookup, but the copy
+    # this loadout actually installed has since been renamed locally
+    # (its frontmatter name no longer matches). Its pin still keys on
+    # the SKILL.md path, so status must resolve it by pin rather than
+    # by falling back to the same-named decoy.
+    from drskill import pins as pins_mod
+
+    root = Path.cwd()  # the fixture chdir'd here
+    d = root / ".agents" / "skills" / "vector"
+    d.mkdir(parents=True)
+    (d / "SKILL.md").write_text("x")
+    pinned_id = str((d / "SKILL.md").resolve())
+    good = "sha256:" + "aa" * 32
+    bad = "sha256:" + "bb" * 32
+    env["world"] = [
+        Contributor(
+            id="/elsewhere/vector/SKILL.md", kind="skill", name="vector",
+            source=Provenance(kind="unmanaged", source=None), scope="project",
+            token_cost=TokenCost(catalog_tokens=1, body_tokens=1),
+            content_hash=bad,
+        ),
+        Contributor(
+            id=pinned_id, kind="skill", name="vector-renamed",
+            source=Provenance(kind="unmanaged", source=None), scope="project",
+            token_cost=TokenCost(catalog_tokens=1, body_tokens=1),
+            content_hash=good,
+        ),
+    ]
+    env["manifest"]["entries"] = [
+        entry(name="vector", source_type="local", content_hash=good)]
+    pins_mod.record_pin(root, d, pins_mod.Pin(
+        loadout="drew/pack", revision=2, selector="skill:vector",
+        source_type="local", content_hash=good))
+    result = runner.invoke(app, ["loadout", "status"])
+    assert result.exit_code == 0, result.output
+    assert "matches" in result.output
+    assert "share this name" not in result.output

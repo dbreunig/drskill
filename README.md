@@ -514,6 +514,14 @@ printed block you can paste in yourself.
 After installing a server, fill in its env values and run
 `drskill scan --mcp-connect` to review the tools it exposes.
 
+A skill install also records a pin: `.drskill/pins.json` for a project
+install, `~/.drskill/pins.json` for a user-scope one, binding the directory
+drskill wrote to the loadout, revision, and content hash it came from.
+`drskill loadout status` and `drskill loadout update` read these pins to
+match each entry to the exact installed copy instead of guessing by name, so
+two skills that happen to share a name don't get confused. The project file
+is meant to be committed, like the caches.
+
 `drskill loadout status` compares each MCP entry against your configured
 servers and reports matches, changed, or missing.
 

@@ -1953,6 +1953,7 @@ def status(
 ) -> None:
     """Report drift between local skills and published loadout revisions."""
     from drskill import loadout_drift
+    from drskill import pins as pins_mod
 
     creds, base = _service_credentials()
     home = _home()
@@ -1969,6 +1970,7 @@ def status(
 
     world, _ = _scan_with_status(lambda p: run_scan(Path.cwd(), home, progress=p))
     contributors = list(world.contributors.values())
+    resolved_pins = pins_mod.resolve_pins(Path.cwd(), home)
 
     drifted = False
     for owner, slug, number, mine in targets:
@@ -1984,7 +1986,9 @@ def status(
         changed_here = False
         mcp_changed_here = False
         for st in loadout_drift.classify_entries(entries, contributors,
-                                                 servers=world.mcp_servers):
+                                                 servers=world.mcp_servers,
+                                                 pins=resolved_pins,
+                                                 ref=f"{owner}/{slug}"):
             line = _STATUS_LINES[st.state]
             if remote and st.entry.get("kind") == "skill" and st.entry.get("source_type") == "github":
                 line = _remote_status_line(st.entry) or line
@@ -2053,6 +2057,7 @@ def update(
     import copy
 
     from drskill import content, loadout_drift
+    from drskill import pins as pins_mod
 
     creds, base = _service_credentials()
     owner, slug = _parse_ref(ref)
@@ -2078,9 +2083,10 @@ def update(
 
     manifest = copy.deepcopy(json.loads(document))
     world, _ = _scan_with_status(lambda p: run_scan(Path.cwd(), home, progress=p))
+    resolved_pins = pins_mod.resolve_pins(Path.cwd(), home)
     statuses = loadout_drift.classify_entries(
         manifest.get("entries", []), list(world.contributors.values()),
-        servers=world.mcp_servers)
+        servers=world.mcp_servers, pins=resolved_pins, ref=f"{owner}/{slug}")
     for st in statuses:
         if st.state in ("missing", "unreadable"):
             typer.echo(f"  {st.entry['name']}: {st.state} locally; left as published")
