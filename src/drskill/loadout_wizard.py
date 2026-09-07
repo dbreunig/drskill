@@ -83,6 +83,103 @@ def _edit_items(rows: list[_Row], entries: list[dict],
     return items
 
 
+def _choose_edit(items: list[_EditItem]) -> list[_EditItem]:
+    choices = [questionary.Choice(title=i.label, checked=i.checked, value=i)
+               for i in items]
+    answer = questionary.checkbox(
+        "Edit entries",
+        choices=choices,
+        instruction="(space to toggle, enter to accept, ctrl-c to abort)",
+    ).ask()
+    if answer is None:  # Ctrl-C
+        typer.echo("Aborted.")
+        raise typer.Exit(0)
+    return answer
+
+
+def run_edit(ref: str, harness: str | None, creds: dict, base_url: str, home: Path) -> None:
+    """Interactive membership edit: keep, drop, or add entries, then
+    publish a new revision. Kept entries republish exactly as fetched;
+    refreshing changed content stays `loadout update`'s job."""
+    from drskill.cli import _echo_service_error
+
+    if not _stdin_is_tty():
+        typer.echo("loadout edit needs a terminal.")
+        raise typer.Exit(1)
+    owner, slug = ref.split("/", 1)
+    try:
+        identity = service.api_request("GET", "/api/v1/identity",
+                                       token=creds["token"], base_url=base_url)
+        if identity["user"]["handle"] != owner:
+            typer.echo("You can only edit your own loadouts; fork it first.")
+            raise typer.Exit(1)
+        data = service.api_request("GET", f"/api/v1/loadouts/{owner}/{slug}",
+                                   token=creds["token"], base_url=base_url)
+        current = data["loadout"].get("current_revision")
+        if not current:
+            typer.echo(f"{ref} has no published revision; use loadout create/publish.")
+            raise typer.Exit(1)
+        document = service.api_request(
+            "GET", f"/api/v1/loadouts/{owner}/{slug}/revisions/{current['number']}",
+            token=creds["token"], base_url=base_url, raw=True)
+    except service.ServiceError as err:
+        _echo_service_error(err)
+        raise typer.Exit(1)
+    old = json.loads(document)
+    entries = old.get("entries", [])
+
+    with console.status("[bold]starting[/bold]", spinner="dots") as status:
+        world, _findings = pipeline.run_scan(
+            Path.cwd(), home, progress=lambda m: status.update(f"[bold]{escape(m)}[/bold]")
+        )
+    rows = _build_rows(world)
+    if harness is not None:
+        rows = [row for row in rows if harness in row.harnesses]
+
+    items = _edit_items(rows, entries, harness)
+    if not items:
+        typer.echo("Nothing to edit.")
+        raise typer.Exit(1)
+    selected = _choose_edit(items)
+
+    kept_ids = {id(i.entry) for i in selected if i.entry is not None}
+    kept = [e for e in entries if id(e) in kept_ids]
+    add_rows = [i.row for i in selected if i.entry is None and i.row is not None]
+    skills = [r.contributor for r in add_rows if r.contributor.kind != "mcp_tool"]
+    mcp_tools = [r.contributor for r in add_rows if r.contributor.kind == "mcp_tool"]
+
+    hosted = _offer_registry(skills, creds, base_url, home)
+    add_manifest, notes = manifest_build.contributors_to_manifest(skills, hosted=hosted)
+    server_entries, server_notes = _mcp_server_entries(mcp_tools, world)
+    notes += server_notes
+    used = {e.get("selector") for e in kept}
+    additions = []
+    for e in add_manifest["entries"] + server_entries:
+        if e["selector"] in used:
+            notes.append(f"skipped {e['name']!r}: the loadout already has {e['selector']}")
+            continue
+        used.add(e["selector"])
+        additions.append(e)
+
+    removed = len(entries) - len(kept)
+    if not additions and removed == 0:
+        typer.echo("No changes.")
+        return
+
+    manifest = {
+        "schema_version": 1,
+        "reproducible": False,
+        "entries": kept + additions,
+        "harness_mappings": old.get("harness_mappings", []),
+    }
+    _print_summary(manifest, notes)
+    typer.echo(f"+{len(additions)} added, -{removed} removed, {len(kept)} kept")
+    if not typer.confirm(f"Publish these {len(manifest['entries'])} entries "
+                         f"as a new revision of {ref}?", default=False):
+        raise typer.Exit(0)
+    _publish(ref, manifest, None, creds, base_url)
+
+
 def run(
     slug: str,
     name: str,

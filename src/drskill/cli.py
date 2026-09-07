@@ -1809,6 +1809,25 @@ def create(
     typer.echo("Each publish adds a numbered revision that never changes after upload.")
 
 
+@loadout_app.command()
+def edit(
+    ref: str = typer.Argument(..., help="owner/slug"),
+    harness: str | None = typer.Option(None, "--harness",
+        help="only list skills active in this harness"),
+) -> None:
+    """Edit a loadout's entries interactively and publish a new revision."""
+    from drskill import loadout_wizard
+
+    if not loadout_wizard._stdin_is_tty():
+        typer.echo("loadout edit needs a terminal (run without piping stdin).")
+        raise typer.Exit(1)
+    creds, base = _service_credentials()
+    owner, slug = _parse_ref(ref)
+    if harness is not None:
+        _validate_harness(harness)
+    loadout_wizard.run_edit(f"{owner}/{slug}", harness, creds, base, _home())
+
+
 @loadout_app.command("show")
 def loadout_show(
     ref: str = typer.Argument(..., help="owner/slug"),

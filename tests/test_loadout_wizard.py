@@ -72,6 +72,19 @@ def _pick_all_harnesses(harness_ids):
     return None
 
 
+class _Calls(list):
+    """A plain list of recorded requests, plus mutable state the edit-flow
+    handlers below read from (a list has no __dict__ of its own to hang
+    that state off, hence the subclass)."""
+
+    def __init__(self):
+        super().__init__()
+        self.state = {
+            "edit_manifest": {"schema_version": 1, "reproducible": False,
+                              "entries": [], "harness_mappings": []},
+        }
+
+
 @pytest.fixture
 def wizard_env(tmp_path, monkeypatch):
     monkeypatch.setenv("DRSKILL_HOME", str(tmp_path))
@@ -79,16 +92,26 @@ def wizard_env(tmp_path, monkeypatch):
     service.save_credentials("http://svc.test", "drsk_x")
     monkeypatch.setattr(loadout_wizard, "_stdin_is_tty", lambda: True)
 
-    calls = []
+    calls = _Calls()
 
     def fake_api_request(method, path, token=None, json_body=None, base_url=None, raw=False):
         calls.append({"method": method, "path": path, "json_body": json_body,
                       "base_url": base_url})
-        if path == "/api/v1/loadouts":
+        if path == "/api/v1/loadouts" and method == "POST":
             slug = json_body["loadout"]["slug"]
             return {"loadout": {"owner": "drew", "slug": slug, "name": json_body["loadout"]["name"],
                                 "visibility": "private", "description": None,
                                 "published_at": None, "current_revision": None}}
+        if path == "/api/v1/identity":
+            return {"user": {"handle": "drew"}}
+        if path == "/api/v1/loadouts/drew/pack" and method == "GET":
+            return {"loadout": {"owner": "drew", "slug": "pack", "name": "Pack",
+                                "visibility": "private", "description": None,
+                                "published_at": None,
+                                "current_revision": {"number": 3,
+                                                     "runtime_hash": "sha256:" + "cc" * 32}}}
+        if path == "/api/v1/loadouts/drew/pack/revisions/3" and method == "GET":
+            return json.dumps(calls.state["edit_manifest"])
         return {"revision": {"number": 1, "runtime_hash": "sha256:" + "ee" * 32}}
 
     monkeypatch.setattr(service, "api_request", fake_api_request)
@@ -898,3 +921,76 @@ def test_edit_items_appends_phantoms_prechecked():
     assert [p.entry["name"] for p in phantoms] == ["ghost", "notion"]
     assert all(p.checked for p in phantoms)
     assert all("not on this machine" in p.label for p in phantoms)
+
+
+def items_all_checked(items):
+    # Stands in for a user who accepts every pre-checked item as-is,
+    # keep and add alike.
+    return list(items)
+
+
+def test_edit_removes_an_unchecked_entry(wizard_env, monkeypatch):
+    calls = wizard_env
+    # manifest has alpha + ghost; world has alpha only
+    alpha_entry = edit_entry("skill:alpha")
+    ghost_entry = edit_entry("skill:ghost")
+    calls.state["edit_manifest"]["entries"] = [alpha_entry, ghost_entry]
+    set_world(monkeypatch, make_world(contributor("alpha")))
+    monkeypatch.setattr(
+        loadout_wizard, "_choose_edit",
+        lambda items: [i for i in items if (i.entry or {}).get("name") != "ghost"])
+    result = runner.invoke(app, ["loadout", "edit", "drew/pack"], input="y\n")
+    assert result.exit_code == 0, result.output
+    published = next(c for c in calls if c["path"].endswith("/revisions") and c["method"] == "POST")
+    names = [e["name"] for e in published["json_body"]["manifest"]["entries"]]
+    assert names == ["alpha"]
+    assert "Published revision" in result.output
+
+
+def test_edit_adds_a_new_local_skill(wizard_env, monkeypatch):
+    calls = wizard_env
+    # manifest has alpha; world has alpha + beta; user checks beta too
+    alpha_entry = edit_entry("skill:alpha")
+    calls.state["edit_manifest"]["entries"] = [alpha_entry]
+    set_world(monkeypatch, make_world(contributor("alpha"), contributor("beta")))
+    monkeypatch.setattr(loadout_wizard, "_choose_edit", lambda items: items_all_checked(items))
+    result = runner.invoke(app, ["loadout", "edit", "drew/pack"], input="y\n")
+    assert result.exit_code == 0, result.output
+    published = next(c for c in calls if c["path"].endswith("/revisions") and c["method"] == "POST")
+    names = [e["name"] for e in published["json_body"]["manifest"]["entries"]]
+    assert names == ["alpha", "beta"]
+
+
+def test_edit_kept_entries_pass_through_unchanged(wizard_env, monkeypatch):
+    calls = wizard_env
+    # the kept alpha entry in the published manifest is byte-identical to the fetched one
+    alpha_entry = edit_entry("skill:alpha", extra_field="untouched", metadata={"foo": "bar"})
+    ghost_entry = edit_entry("skill:ghost")
+    calls.state["edit_manifest"]["entries"] = [alpha_entry, ghost_entry]
+    set_world(monkeypatch, make_world(contributor("alpha"), contributor("beta")))
+    monkeypatch.setattr(
+        loadout_wizard, "_choose_edit",
+        lambda items: [i for i in items if (i.entry or {}).get("name") != "ghost"])
+    result = runner.invoke(app, ["loadout", "edit", "drew/pack"], input="y\n")
+    assert result.exit_code == 0, result.output
+    published = next(c for c in calls if c["path"].endswith("/revisions") and c["method"] == "POST")
+    kept = next(e for e in published["json_body"]["manifest"]["entries"] if e["name"] == "alpha")
+    assert kept == alpha_entry
+
+
+def test_edit_no_changes_publishes_nothing(wizard_env, monkeypatch):
+    calls = wizard_env
+    alpha_entry = edit_entry("skill:alpha")
+    calls.state["edit_manifest"]["entries"] = [alpha_entry]
+    set_world(monkeypatch, make_world(contributor("alpha")))
+    monkeypatch.setattr(loadout_wizard, "_choose_edit", lambda items: items_all_checked(items))
+    result = runner.invoke(app, ["loadout", "edit", "drew/pack"])
+    assert "No changes." in result.output
+    assert not any(c["method"] == "POST" and c["path"].endswith("/revisions") for c in calls)
+
+
+def test_edit_refuses_non_owner(wizard_env, monkeypatch):
+    # identity handle != owner in the ref
+    result = runner.invoke(app, ["loadout", "edit", "other/pack"])
+    assert result.exit_code == 1
+    assert "your own" in result.output
