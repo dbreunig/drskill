@@ -266,6 +266,8 @@ A few things to know about the numbers:
 - Copilot records neither reasoning nor the structured arguments of a tool call, so its drill-downs are thinner than the other harnesses.
 - Each harness keeps traces for a different length of time, so a raw count comparison across harnesses can mislead. The cross-harness rollup at the bottom of the report ranks by invocations per week within each harness's own coverage window instead, and says so when the windows differ a lot.
 
+The report includes an Unused section listing skills, MCP servers, and tools from the scan that received zero invocations in the covered trace history. To avoid false positives from sparse history, the Unused section applies two guards: the harness's trace coverage must span the configured threshold to ensure enough history to trust the absence of invocations, and skills or tools from pinned installs younger than the threshold are excluded. The coverage threshold is set with `[usage] unused_days` in `drskill.toml` (default 90 days) and can be overridden per run with `--unused-days`. Audit remains reporting-only and never updates the ledger or affects `--ci`.
+
 Audit only reads trace files. It writes nothing to the ledger, creates no findings, and has no effect on `--ci`.
 
 Parsing every trace on every run would be slow, so audit caches what it extracts from each trace file at `~/.drskill/cache/audit/`. This cache is machine state and is never committed, because it holds the full text of the user messages that preceded each invocation, plus 200-character reasoning excerpts. The same text already exists in the agent trace files it was read from. `drskill cache prune` clears entries for trace files that no longer exist.
