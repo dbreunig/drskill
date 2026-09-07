@@ -176,3 +176,31 @@ def test_append_ack_handles_missing_trailing_newline(tmp_path):
     cfg = load_config(p)
     assert cfg.thresholds.near_duplicate == 0.9
     assert [a.fingerprint for a in cfg.ack] == ["sha256:cd"]
+
+
+def test_queries_table_parses(tmp_path):
+    p = tmp_path / "drskill.toml"
+    p.write_text('[[queries]]\nquery = "summarize this pdf"\nexpect = "pdf-tools"\n'
+                 '[[queries]]\nquery = "deploy the app"\n')
+    cfg = load_config(p)
+    assert [q.query for q in cfg.queries] == ["summarize this pdf", "deploy the app"]
+    assert cfg.queries[0].expect == "pdf-tools"
+    assert cfg.queries[1].expect is None
+
+
+def test_routing_margin_default_and_override(tmp_path):
+    p = tmp_path / "drskill.toml"
+    assert load_config(p).thresholds.routing_margin == 0.1
+    p.write_text("[thresholds]\nrouting_margin = 0.25\n")
+    assert load_config(p).thresholds.routing_margin == 0.25
+
+
+def test_queries_do_not_merge_across_scopes(tmp_path):
+    from drskill.ledger import load_effective_config
+
+    home = tmp_path / "home"
+    proj = tmp_path / "proj"
+    home.mkdir(); proj.mkdir()
+    (home / ".drskill.toml").write_text('[[queries]]\nquery = "global only"\n')
+    cfg = load_effective_config(proj, home, global_mode=False)
+    assert cfg.queries == []

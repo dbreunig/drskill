@@ -26,6 +26,7 @@ class Thresholds(BaseModel):
     near_duplicate: float = 0.85
     description_overlap: float = 0.6
     generic_min_distinct_tokens: int = 2
+    routing_margin: float = 0.1
 
 
 class Deep(BaseModel):
@@ -40,11 +41,19 @@ class Ack(BaseModel):
     date: dt.date | None = None
 
 
+class Query(BaseModel):
+    """A routing expectation: this query should route cleanly, optionally
+    to a specific skill. Non-merging, like budgets and thresholds."""
+    query: str
+    expect: str | None = None
+
+
 class Config(BaseModel):
     budget: Budget = Budget()
     thresholds: Thresholds = Thresholds()
     deep: Deep = Deep()
     ack: list[Ack] = Field(default_factory=list)
+    queries: list[Query] = Field(default_factory=list)
 
 
 def ledger_path(project_root: Path, home: Path, global_mode: bool) -> Path:
