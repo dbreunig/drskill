@@ -186,7 +186,7 @@ def _context_bill(world: World):
         for c in world.effective(hid):
             if c.kind == "mcp_tool":
                 tool_tok += c.token_cost.catalog_tokens
-            else:
+            elif c.kind == "skill":
                 skill_tok += c.token_cost.catalog_tokens
         if tool_tok == 0:
             continue

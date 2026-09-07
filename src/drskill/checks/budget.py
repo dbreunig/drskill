@@ -10,10 +10,12 @@ from drskill.resolution import World
 def budget_catalog_tokens(world: World, config: Config) -> list[Finding]:
     out = []
     for hid, hdef in world.harnesses.items():
-        contributors = world.effective(hid)
-        total = sum(
-            c.token_cost.catalog_tokens for c in contributors if c.kind == "skill"
-        )
+        # Only skills count toward the startup catalog budget; commands are
+        # explicitly invoked and never join it (see docstring in
+        # harnesses.py), so they must not be in the fingerprint either —
+        # otherwise editing a command file would churn this finding.
+        contributors = [c for c in world.effective(hid) if c.kind == "skill"]
+        total = sum(c.token_cost.catalog_tokens for c in contributors)
         if total > config.budget.catalog_tokens_max:
             out.append(
                 make_finding(

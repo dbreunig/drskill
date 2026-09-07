@@ -17,6 +17,12 @@ def write(proj, name, description, body):
     (d / "SKILL.md").write_text(f"---\nname: {name}\ndescription: {description}\n---\n{body}\n")
 
 
+def write_command(proj, name, body):
+    f = proj / ".claude" / "commands" / f"{name}.md"
+    f.parent.mkdir(parents=True, exist_ok=True)
+    f.write_text(body)
+
+
 def test_budgets(tmp_path):
     proj, home = tmp_path / "p", tmp_path / "h"
     write(proj, "wordy", "long description " * 30, "long body " * 200)
@@ -37,3 +43,25 @@ def test_quiet_under_budget(tmp_path):
     write(proj, "terse", "short", "short")
     findings = run_all(world_from(proj, home), Config())
     assert [f for f in findings if f.check_id.startswith("budget-")] == []
+
+
+def test_budget_catalog_fingerprint_ignores_command_edits(tmp_path):
+    # Commands never join the catalog budget's token total, so they must
+    # not be in the finding's fingerprint either; otherwise editing a
+    # command file would churn a finding it has nothing to do with.
+    proj, home = tmp_path / "p", tmp_path / "h"
+    write(proj, "wordy", "long description " * 30, "long body " * 200)
+    write_command(proj, "deploy", "Deploy with make.\n")
+    cfg = Config()
+    cfg.budget.catalog_tokens_max = 20
+    (f1,) = [
+        f for f in run_all(world_from(proj, home), cfg)
+        if f.check_id == "budget-catalog-tokens"
+    ]
+    assert "deploy" not in f1.contributor_names
+    write_command(proj, "deploy", "A completely different command body now.\n")
+    (f2,) = [
+        f for f in run_all(world_from(proj, home), cfg)
+        if f.check_id == "budget-catalog-tokens"
+    ]
+    assert f1.fingerprint == f2.fingerprint

@@ -520,3 +520,39 @@ def test_command_contributor_renders_with_command_label():
     text = tables_to_text(world)
     assert "deploy" in text
     assert "command" in text
+
+
+def test_context_bill_excludes_command_tokens_from_skill_bucket():
+    # Commands are explicitly invoked and join neither the skill catalog
+    # bucket nor the MCP tool bucket; a large command file must not inflate
+    # the "largest context bill" skill-catalog figure.
+    from drskill.models import Deployment
+    from drskill.report import _context_bill
+
+    hid = "claude-code"
+    skill = make_contributor(
+        id="/a/SKILL.md", name="skill1", kind="skill",
+        token_cost=TokenCost(catalog_tokens=100, body_tokens=0),
+    )
+    skill.deployments.append(Deployment(
+        harness=hid, path="/a/SKILL.md", scope="project", via_symlink=False, order=1,
+    ))
+    command = make_contributor(
+        id="/b/cmd.md", name="cmd1", kind="command",
+        token_cost=TokenCost(catalog_tokens=5000, body_tokens=0),
+    )
+    command.deployments.append(Deployment(
+        harness=hid, path="/b/cmd.md", scope="project", via_symlink=False, order=2,
+    ))
+    tool = make_contributor(
+        id="cfg:tool1", name="tool1", kind="mcp_tool",
+        token_cost=TokenCost(catalog_tokens=50, body_tokens=0),
+    )
+    tool.deployments.append(Deployment(
+        harness=hid, path="/c", scope="project", via_symlink=False, order=3,
+    ))
+    world = World(
+        contributors={c.id: c for c in (skill, command, tool)},
+        harnesses={hid: HarnessDef(id=hid, display_name="Claude Code")},
+    )
+    assert _context_bill(world) == (hid, 100, 50)
