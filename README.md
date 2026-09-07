@@ -517,6 +517,16 @@ After installing a server, fill in its env values and run
 `drskill loadout status` compares each MCP entry against your configured
 servers and reports matches, changed, or missing.
 
+`drskill loadout update` republishes a loadout's entries from their local
+copies, refreshing changed content. A skill or server present in the loadout
+but missing or unreadable locally stays published as before.
+
+`drskill loadout edit owner/slug [--harness id]` edits a loadout's membership
+interactively in a terminal. Published entries with no local counterpart appear
+pre-checked as "(published; not on this machine)". Kept entries republish
+exactly as fetched. New entries are added to the membership. Use `loadout update`
+to refresh changed content instead.
+
 ## The ledger
 
 `drskill.toml` sits at the root of your repo and should be committed. It holds your budgets, your thresholds, and your decisions. When you run `drskill ack`, it appends an entry to the end of the file and touches nothing else, so your comments and formatting are preserved. An entry looks like this:
