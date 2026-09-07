@@ -42,13 +42,16 @@ def classify_entries(entries: list[dict], contributors: list[Contributor],
                 out.append(EntryStatus(entry, None, "unchecked"))
             continue
         if pins and ref:
-            bound = next(
-                (c for c in skills
-                 if (p := pins.get(c.id)) is not None
-                 and p.loadout == ref and p.selector == entry.get("selector")),
-                None,
-            )
-            if bound is not None:
+            bound_matches = [
+                c for c in skills
+                if (p := pins.get(c.id)) is not None
+                and p.loadout == ref and p.selector == entry.get("selector")
+            ]
+            # Two scopes can pin the same selector; guessing which install
+            # is the right one would hide the conflict, so fall through to
+            # the name heuristic below instead of picking one arbitrarily.
+            if len(bound_matches) == 1:
+                bound = bound_matches[0]
                 out.append(EntryStatus(entry, bound, _compare(entry, bound)))
                 continue
         candidates = by_name.get(entry.get("name"), [])

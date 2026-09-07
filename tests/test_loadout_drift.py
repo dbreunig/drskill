@@ -229,6 +229,25 @@ def test_pin_for_another_loadout_is_ignored():
     assert statuses[0].state == "matches"  # via the name fallback
 
 
+def test_multiple_bound_contributors_fall_back_to_the_name_heuristic():
+    # two scopes pinned the same loadout+selector to different installs;
+    # guessing which one is right would hide the conflict, so this falls
+    # through to the same name heuristic used for unpinned installs.
+    stale = skill_contributor(id="/tmp/a/SKILL.md", name="vector",
+                              content_hash="sha256:" + "aa" * 32)
+    fresh = skill_contributor(id="/tmp/b/SKILL.md", name="vector",
+                              content_hash="sha256:" + "bb" * 32)
+    entry = skill_entry(selector="skill:vector", content_hash="sha256:" + "bb" * 32)
+    pin = pins.Pin(loadout="drew/pack", selector="skill:vector",
+                   source_type="local", content_hash="sha256:" + "bb" * 32)
+    statuses = loadout_drift.classify_entries(
+        [entry], [stale, fresh],
+        pins={stale.id: pin, fresh.id: pin}, ref="drew/pack")
+    assert statuses[0].contributor is fresh
+    assert statuses[0].state == "matches"
+    assert statuses[0].note is None
+
+
 def test_no_pins_behaves_as_before():
     c = skill_contributor(id="/x/SKILL.md", name="vector",
                           content_hash="sha256:" + "aa" * 32)
