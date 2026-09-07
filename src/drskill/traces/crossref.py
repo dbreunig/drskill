@@ -11,6 +11,7 @@ from dataclasses import dataclass
 from drskill.traces.model import Invocation
 
 _KIND_LABEL = {"skill": "skill", "command": "command", "mcp_tool": "mcp tool"}
+_KIND_RANK = {"skill": 0, "command": 1, "mcp tool": 2}
 
 
 @dataclass
@@ -18,6 +19,14 @@ class Unused:
     kind: str
     name: str
     where: str
+    server: str | None = None
+    harnesses: tuple[str, ...] = ()
+
+
+@dataclass
+class CrossrefResult:
+    unused: list[Unused]
+    checked: int  # contributors that passed the guards and were judged
 
 
 def _covered_harnesses(invocations: list[Invocation], unused_days: int,
@@ -31,7 +40,7 @@ def _covered_harnesses(invocations: list[Invocation], unused_days: int,
 
 
 def unused_contributors(world, invocations: list[Invocation], pins: dict,
-                        unused_days: int, today: dt.date) -> list[Unused] | None:
+                        unused_days: int, today: dt.date) -> CrossrefResult | None:
     covered = _covered_harnesses(invocations, unused_days, today)
     if not covered:
         return None
@@ -46,6 +55,7 @@ def unused_contributors(world, invocations: list[Invocation], pins: dict,
 
     server_by_cfg = {s.config_hash: s.name for s in world.mcp_servers}
     out: list[Unused] = []
+    checked = 0
     for c in world.contributors.values():
         if c.system:
             continue
@@ -64,15 +74,18 @@ def unused_contributors(world, invocations: list[Invocation], pins: dict,
             server = server_by_cfg.get(c.id.split(":", 1)[0])
             if server is None:
                 continue  # unresolvable server: unknown, not unused
+            checked += 1
             if (server, c.name) in used_tools:
                 continue
-            out.append(Unused(_KIND_LABEL[c.kind], c.name, server))
+            out.append(Unused(_KIND_LABEL[c.kind], c.name, server, server=server))
         else:
+            checked += 1
             names = {c.name}
             if c.suite:
                 names.add(f"{c.suite}:{c.name}")
             if names & used_names:
                 continue
-            out.append(Unused(_KIND_LABEL[c.kind], c.name, ", ".join(harnesses)))
-    out.sort(key=lambda u: (u.kind, u.name))
-    return out
+            out.append(Unused(_KIND_LABEL[c.kind], c.name, ", ".join(harnesses),
+                              harnesses=tuple(harnesses)))
+    out.sort(key=lambda u: (_KIND_RANK[u.kind], u.name))
+    return CrossrefResult(unused=out, checked=checked)

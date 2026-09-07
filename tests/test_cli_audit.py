@@ -206,7 +206,60 @@ def test_audit_json_gains_unused_key(tmp_path, monkeypatch):
         app, ["audit", "--root", str(repo), "--unused-days", "30", "--json"]
     )
     data = json.loads(result.output)
-    assert any(u["name"] == "dusty" for u in data["unused"])
+    dusty = next(u for u in data["unused"] if u["name"] == "dusty")
+    assert dusty == {"kind": "skill", "name": "dusty", "harnesses": ["claude-code"]}
+
+
+def _write_codex_skill(root, name):
+    d = root / ".codex" / "skills" / name
+    d.mkdir(parents=True, exist_ok=True)
+    (d / "SKILL.md").write_text(f"---\nname: {name}\ndescription: d\n---\nbody\n")
+
+
+def test_audit_harness_filter_skips_crossref(tmp_path, monkeypatch):
+    monkeypatch.setenv("DRSKILL_HOME", str(tmp_path))
+    repo = tmp_path / "repo"
+    repo.mkdir()
+    _write_skill(repo, "used")
+    _write_skill(repo, "dusty")
+    _claude_trace(tmp_path, str(repo), skill="used", ts=_days_ago(60))
+    result = runner.invoke(
+        app, ["audit", "--root", str(repo), "--harness", "claude-code",
+              "--unused-days", "30"]
+    )
+    assert result.exit_code == 0, result.output
+    assert "Unused" not in result.output
+
+
+def test_audit_last_skips_crossref(tmp_path, monkeypatch):
+    monkeypatch.setenv("DRSKILL_HOME", str(tmp_path))
+    repo = tmp_path / "repo"
+    repo.mkdir()
+    _write_skill(repo, "used")
+    _write_skill(repo, "dusty")
+    _claude_trace(tmp_path, str(repo), skill="used", ts=_days_ago(60))
+    result = runner.invoke(
+        app, ["audit", "--root", str(repo), "--last", "--unused-days", "30"]
+    )
+    assert result.exit_code == 0, result.output
+    assert "Unused" not in result.output
+
+
+def test_audit_reports_not_enough_coverage_when_contributor_harness_uncovered(
+    tmp_path, monkeypatch
+):
+    # "dusty" is only deployed to codex, which never appears in trace
+    # history; claude-code has old, covered trace history but no
+    # claude-code contributors at all. Nothing was actually checked, so
+    # the report must say so rather than claim everything is used.
+    monkeypatch.setenv("DRSKILL_HOME", str(tmp_path))
+    repo = tmp_path / "repo"
+    repo.mkdir()
+    _write_codex_skill(repo, "dusty")
+    _claude_trace(tmp_path, str(repo), skill="used", ts=_days_ago(60))
+    result = runner.invoke(app, ["audit", "--root", str(repo), "--unused-days", "30"])
+    assert result.exit_code == 0, result.output
+    assert "not enough trace coverage" in result.output
 
 
 def test_audit_drilldown_skips_crossref(tmp_path, monkeypatch):

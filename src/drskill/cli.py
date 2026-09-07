@@ -802,11 +802,18 @@ def audit(
             home, root, global_mode, harness, cutoff, last=last
         )
 
-    # The scan join (installed-but-never-invoked) only makes sense for the
-    # full report: a single-entity drilldown or a --file view has no whole
-    # "installed set" to cross-reference against.
-    include_crossref = file is None and name is None
-    unused = None
+    # The scan join (installed-but-never-invoked) only makes sense against the
+    # plain, unfiltered report: a single-entity drilldown or a --file view has
+    # no whole "installed set" to cross-reference against; --harness narrows
+    # the trace history to one harness, which would misread a contributor
+    # only invoked on other harnesses as unused (a false positive for
+    # multi-harness contributors); --last keeps only the most recent session,
+    # too stale a slice of history to judge coverage against. Only the plain
+    # full report joins against the scan.
+    include_crossref = (
+        file is None and name is None and harness is None and not last
+    )
+    result = None
     threshold = None
     if include_crossref:
         from drskill import pins as pins_mod
@@ -816,8 +823,11 @@ def audit(
         threshold = unused_days if unused_days is not None else config.usage.unused_days
         world, _findings = run_scan(root, home, global_mode)
         resolved = pins_mod.resolve_pins(root, home)
-        unused = crossref.unused_contributors(
-            world, data.invocations, resolved, threshold, dt.date.today()
+        # Trace timestamps are UTC; using the local date to judge the
+        # coverage window's boundary day can misjudge it.
+        today = dt.datetime.now(dt.timezone.utc).date()
+        result = crossref.unused_contributors(
+            world, data.invocations, resolved, threshold, today
         )
 
     if name is not None and not json_out:
@@ -837,27 +847,37 @@ def audit(
             "drifted": data.drifted,
         }
         if include_crossref:
-            payload["unused"] = (
-                None if unused is None
-                else [{"kind": u.kind, "name": u.name, "where": u.where} for u in unused]
-            )
+            # "unused" stays null both when there's no coverage to judge by
+            # (result is None) and when every candidate was screened out by
+            # the guards (checked == 0); an empty list only appears once
+            # contributors were actually checked and none came up unused.
+            if result is None or result.checked == 0:
+                payload["unused"] = None
+            else:
+                payload["unused"] = [
+                    {"kind": u.kind, "name": u.name, "server": u.server}
+                    if u.kind == "mcp tool"
+                    else {"kind": u.kind, "name": u.name, "harnesses": list(u.harnesses)}
+                    for u in result.unused
+                ]
         print(json_mod.dumps(payload, indent=2))
         return
     treport.render_audit(console, data)
     if include_crossref:
-        if unused is None:
+        if result is None or result.checked == 0:
             typer.echo(
                 f"\nUnused: not enough trace coverage to judge (needs {threshold} days)."
             )
-        elif not unused:
+        elif not result.unused:
             typer.echo("\nUnused: none — everything installed has been invoked.")
         else:
             typer.echo(
                 f"\nUnused (no invocations in the covered history; "
                 f"threshold {threshold} days):"
             )
-            for u in unused:
-                typer.echo(f"  {u.kind:<9} {u.name:<20} {u.where}")
+            name_width = max(20, max(len(u.name) for u in result.unused))
+            for u in result.unused:
+                typer.echo(f"  {u.kind:<9} {u.name:<{name_width}} {u.where}")
 
 
 @app.command()
