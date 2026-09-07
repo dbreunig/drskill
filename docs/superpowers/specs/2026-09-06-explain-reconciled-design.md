@@ -8,7 +8,7 @@ Supersedes the open decision in 2026-07-21-explain-command-design.md
 The 2026-07-21 spec deferred explain "to the deep cycle" with this decision recorded: the routing judgment should come from a model reading the descriptions, with the lexical scorer available as a free fallback tier. The deep layer has existed since 0.3.0. This design implements both tiers.
 
 - Tier 1, always available and offline: the lexical scorer exactly as the 2026-07-21 spec mechanics describe it. A query is scored against every effective skill and MCP tool description per harness by blending a unigram cosine (weight 0.7) and a 2-word shingle cosine (weight 0.3) over content tokens. Command-kind contributors are excluded: they never route.
-- Tier 2, behind `--deep`: one QueryJudge model call per distinct ranking group. The judge reads the query plus the tier-1 top five names and descriptions and returns which one would route (or none), whether the call is contested, and a rationale. The judged verdict overrides the lexical verdict line in display; lexical scores remain visible. Query judgments are not cached in v1: queries are ad hoc and the cost is one call.
+- Tier 2, behind `--deep`: one QueryJudge model call per distinct ranking group. The judge reads the query plus the tier-1 top five names and descriptions and returns which one would route (or none), whether the call is contested, and a rationale. The judged verdict prints above the lexical verdict line in display; both remain visible. `--json` emits raw text for machine consumers — JSON escaping covers invisible characters on the wire. Query judgments are not cached in v1: queries are ad hoc and the cost is one call per distinct ranking group.
 
 ## Command
 
@@ -32,7 +32,7 @@ query = "summarize this pdf"
 expect = "pdf-tools"   # optional
 ```
 
-Queries stay with the mode's own ledger, like budgets and thresholds; they do not merge across scopes. A new `query-routing` check runs tier 1 (never the model — checks stay offline) over each configured query per harness effective set and emits a warning when the query is contested or when `expect` is set and does not win. Findings fingerprint over the query plus the ranked names and descriptions, so acks survive unrelated edits and re-fire when routing-relevant text changes. The check gates `scan --ci` like any warning.
+Queries stay with the mode's own ledger, like budgets and thresholds; they do not merge across scopes. A new `query-routing` check runs tier 1 (never the model — checks stay offline) over each configured query per harness effective set and emits a warning when the query is contested or when `expect` is set and does not win. Findings fingerprint over the query plus the ranked names and descriptions, so acks survive unrelated edits and re-fire when routing-relevant text changes. Fingerprints also cover the expectation, so editing a query's `expect` re-fires an ack even when the routing text is unchanged. The check gates `scan --ci` like any warning.
 
 ## Out of scope
 

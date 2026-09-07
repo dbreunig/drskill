@@ -852,12 +852,21 @@ def explain(
         world, query, margin=config.thresholds.routing_margin, harness=harness
     )
 
+    # One judge call per distinct ranking group: harnesses whose whole
+    # ranked result is identical (the same key group_rankings uses to
+    # collapse their display) must share one verdict, not one call each
+    # with possibly contradictory verdicts.
+    _judge_cache: dict[tuple, explain_mod.QueryJudgeResult | None] = {}
+
     def _judge(r) -> explain_mod.QueryJudgeResult | None:
         if not deep_mode or not r.rows:
             return None
-        return judge(query, [
-            (row.contributor.name, row.contributor.routing_text) for row in r.rows
-        ])
+        key = explain_mod.ranking_key(r)
+        if key not in _judge_cache:
+            _judge_cache[key] = judge(query, [
+                (row.contributor.name, row.contributor.routing_text) for row in r.rows
+            ])
+        return _judge_cache[key]
 
     def _report_last_error():
         if not deep_mode:
@@ -899,9 +908,14 @@ def explain(
             "margin": config.thresholds.routing_margin,
             "harnesses": harnesses,
         }
+        if deep_mode:
+            # A judge error must stay inside the JSON document, never a
+            # rich console line printed after it, so --json output stays
+            # machine-parseable even when the judge is failing.
+            doc["deep_error"] = getattr(judge, "last_error", None)
         typer.echo(json.dumps(doc, indent=2))
-        _report_last_error()
         return
+    _warn_if_undetected(harness, root, home, global_mode)
     for harness_ids, r in explain_mod.group_rankings(rankings):
         names = [world.harnesses[h].display_name for h in harness_ids]
         label = (
@@ -911,9 +925,11 @@ def explain(
         typer.echo(f"\n{label}")
         v = _judge(r)
         if v is not None:
-            target = sanitize(v.routed) if v.routed else "nothing"
+            routed_flat = " ".join(v.routed.split()) if v.routed else None
+            rationale_flat = " ".join(v.rationale.split())
+            target = sanitize(routed_flat) if routed_flat else "nothing"
             flavor = "contested; " if v.contested else ""
-            typer.echo(f"  model verdict: routes to {target} ({flavor}{sanitize(v.rationale)})")
+            typer.echo(f"  model verdict: routes to {target} ({flavor}{sanitize(rationale_flat)})")
         if r.verdict == "none":
             typer.echo("  no skill matches")
         elif r.verdict == "contested":

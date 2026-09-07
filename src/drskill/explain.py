@@ -58,12 +58,19 @@ def rank(world, query: str, margin: float, harness: str | None = None) -> list[H
     return out
 
 
+def ranking_key(r: HarnessRanking) -> tuple:
+    """Identity of a ranking's whole ranked result: same key means the same
+    display table (group_rankings) and the same judge verdict (cli's
+    per-group judge memoization) apply."""
+    return (r.verdict, tuple((row.contributor.name, round(row.score, 6)) for row in r.rows))
+
+
 def group_rankings(rankings: list[HarnessRanking]) -> list[tuple[list[str], HarnessRanking]]:
     """Harnesses whose whole ranked result is identical share one table."""
     grouped: list[tuple[list[str], HarnessRanking]] = []
     keys: dict[tuple, int] = {}
     for r in rankings:
-        key = (r.verdict, tuple((row.contributor.name, round(row.score, 6)) for row in r.rows))
+        key = ranking_key(r)
         if key in keys:
             grouped[keys[key]][0].append(r.harness)
         else:

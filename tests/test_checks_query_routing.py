@@ -58,3 +58,15 @@ def test_clean_query_is_silent():
 def test_no_queries_is_silent():
     w = world_with(("pdf", "summarize pdf documents"))
     assert run_check("query-routing", w, Config()) == []
+
+
+def test_fingerprint_changes_when_expect_changes():
+    # Editing `expect` alone (routing text untouched) must re-fire an ack.
+    w = world_with(("pdf", "summarize pdf documents"),
+                   ("notes", "take meeting notes"))
+    cfg1 = Config(queries=[Query(query="summarize pdf documents", expect="notes")])
+    cfg2 = Config(queries=[Query(query="summarize pdf documents", expect="something-else")])
+    findings1 = run_check("query-routing", w, cfg1)
+    findings2 = run_check("query-routing", w, cfg2)
+    assert len(findings1) == 1 and len(findings2) == 1
+    assert findings1[0].fingerprint != findings2[0].fingerprint

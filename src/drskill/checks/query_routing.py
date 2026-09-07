@@ -28,9 +28,12 @@ def query_routing(world: World, config: Config) -> list[Finding]:
             if problem is None:
                 continue
             contributors = [row.contributor for row in r.rows]
+            # The ack must die when the expectation changes, not only when
+            # routing text does: editing `expect` on an otherwise-unchanged
+            # query would otherwise stay silently acked forever.
             out.append(make_finding(
                 "query-routing", "warning", contributors, problem,
-                harnesses=harness_ids, extra_key=q.query,
+                harnesses=harness_ids, extra_key=f"{q.query}|{q.expect or ''}",
                 fingerprint_texts=[q.query, *[
                     f"{row.contributor.name}: {row.contributor.routing_text}"
                     for row in r.rows]],

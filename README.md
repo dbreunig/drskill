@@ -292,7 +292,7 @@ Add `--deep` to ask the configured model to judge the routing instead:
 drskill explain "summarize this pdf document" --deep
 ```
 
-The model reads the query and the top candidates, and returns a verdict. A model verdict overrides the similarity model. This makes one API call and costs one point from the `--max-calls` budget, the same as `scan --deep`. The output notes which is which: "drskill's own similarity model" versus "model's judgment."
+The model reads the query and the top candidates, and returns a verdict. The model verdict prints above drskill's own similarity verdict; both stay visible. This makes one API call per distinct ranking group — harnesses that share an identical ranking share one call. Unlike `scan --deep`, `explain --deep` has no `--max-calls` budget: it always judges every distinct group. The output notes which is which: "drskill's own similarity model" versus "model's judgment."
 
 You can define routing expectations in `drskill.toml` under `[[queries]]`. Each entry holds a query and an optional skill name it should route to. Every `drskill scan` checks every query against every harness, using the same ranking logic as `explain`, and warns if a query routes to the wrong skill or is contested:
 
