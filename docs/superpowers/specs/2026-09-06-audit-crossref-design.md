@@ -21,7 +21,7 @@ A pure function in `traces/crossref.py` takes the scanned world, the invocation 
 
 Two guards keep false positives out:
 
-- Coverage guard: a contributor only counts as unused when at least one harness it is deployed to has trace coverage spanning at least `unused_days` (the harness's earliest invocation timestamp is at least that old). No traces, or a young trace window, means "unknown", not "unused".
+- Coverage guard: a contributor only counts as unused when at least one harness it is deployed to has trace coverage spanning at least `unused_days` (the harness's earliest invocation timestamp is at least that old). No traces, or a young trace window, means "unknown", not "unused". A contributor used only through a short-retention harness can still be flagged once a long-retention harness covers the window; the guard bounds staleness per covered harness, not per usage habit.
 - Freshness guard: a contributor whose pin records an `installed_at` younger than `unused_days` is skipped — a fresh install has not had time to be used. Unpinned contributors rely on the coverage guard alone.
 
 ## Configuration and output
@@ -41,7 +41,7 @@ Unused (no invocations in the covered history; threshold 90 days):
   mcp tool  create-page   pencil
 ```
 
-with one line per contributor (kind, name, harness list or server). When the guards leave nothing checkable, the section says so instead of staying silent ("Unused: not enough trace coverage to judge (needs 90 days)."). `--json` gains an `"unused"` array with kind/name/server/harnesses. Drill-down and the rest of the report are unchanged.
+with one line per contributor (kind, name, harness list or server). When the guards leave nothing checkable, the section says so instead of staying silent ("Unused: not enough trace coverage to judge (needs 90 days)."). `--json` gains an `"unused"` array; each entry is `{"kind", "name", "server"}` for an MCP tool or `{"kind", "name", "harnesses"}` (a list) for a skill or command. Drill-down and the rest of the report are unchanged.
 
 ## Out of scope
 
