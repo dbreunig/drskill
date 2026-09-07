@@ -503,3 +503,20 @@ def test_dual_route_with_shadowed_deployment_keeps_rows():
     assert text.count("foo") == 2
     assert "shadowed" in text
     assert "200" not in text and "2000" not in text
+
+
+def test_command_contributor_renders_with_command_label():
+    from drskill.models import Deployment
+
+    c = make_contributor(id="/real/cmds/deploy.md", name="deploy", kind="command")
+    c.deployments.append(Deployment(
+        harness="pi", path="/real/cmds/deploy.md",
+        scope="project", via_symlink=False, order=1000,
+    ))
+    world = World(
+        contributors={c.id: c},
+        harnesses={"pi": HarnessDef(id="pi", display_name="Pi")},
+    )
+    text = tables_to_text(world)
+    assert "deploy" in text
+    assert "command" in text

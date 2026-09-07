@@ -120,9 +120,11 @@ def render_harness_tables(
             cat = body = None
             if tokens:
                 cat, body = c.token_cost.catalog_tokens, c.token_cost.body_tokens
-            key = (0 if not is_tool else 1, c.suite or "￿", c.name)
+            kind_rank = {"skill": 0, "command": 1, "mcp_tool": 2}[c.kind]
+            kind_label = {"skill": "skill", "command": "command", "mcp_tool": "mcp tool"}[c.kind]
+            key = (kind_rank, c.suite or "￿", c.name)
             rows.append((key, _cells(
-                c.name, "mcp tool" if is_tool else "skill", d.scope,
+                c.name, kind_label, d.scope,
                 "" if is_tool else c.source.kind, c.suite or "",
                 ", ".join(notes), cat, body,
             )))
