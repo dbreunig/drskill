@@ -60,6 +60,7 @@ def run_scan(
     rewriter: deep.RewriteFn | None = None,
     mcp_connect: bool = False,
     progress=None,
+    checks: bool = True,
 ) -> tuple[World, list[Finding]]:
     if config is None:
         # Same merge the CLI uses: machine-level acks are honored everywhere.
@@ -122,6 +123,10 @@ def run_scan(
         if b is not None:
             world.shell_approved[c.id] = b
     world.shell_execution_disabled = skill_shell.shell_disabled(project_root, home)
+    if not checks:
+        # World-only consumers (list, explain, audit) render the world and
+        # never show findings; skip the check suite and deep verdicts.
+        return world, []
     findings = run_all(world, config, progress=progress)
     cdir = deep.cache_dir(project_root, home, global_only)
     cache = deep.load_cache(cdir)

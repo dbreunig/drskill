@@ -1,5 +1,8 @@
-"""Exact and near duplicate detection. MinHash is hand rolled and uses
-zlib.crc32 because builtin str hash() is salted per process."""
+"""Exact and near duplicate detection. Similarity uses a bottom-k sketch:
+each shingle is hashed once with zlib.crc32 (builtin str hash() is salted
+per process) and the k smallest values stand in for the set. The Jaccard
+estimate is the fraction of the union's k smallest hashes present in both
+sketches, which is exact whenever a set has k or fewer shingles."""
 
 from __future__ import annotations
 
@@ -24,16 +27,17 @@ def shingles(text: str, k: int = SHINGLE_WORDS) -> set[str]:
 
 
 def signature(sh: set[str]) -> list[int]:
-    if not sh:
-        return [0] * NUM_HASHES
-    return [
-        min(zlib.crc32(f"{seed}:{s}".encode()) for s in sh)
-        for seed in range(NUM_HASHES)
-    ]
+    return sorted({zlib.crc32(s.encode()) for s in sh})[:NUM_HASHES]
 
 
 def estimate(a: list[int], b: list[int]) -> float:
-    return sum(x == y for x, y in zip(a, b)) / len(a)
+    if not a and not b:
+        return 1.0
+    if not a or not b:
+        return 0.0
+    union_smallest = sorted(set(a) | set(b))[:NUM_HASHES]
+    both = set(a) & set(b)
+    return sum(1 for h in union_smallest if h in both) / len(union_smallest)
 
 
 def _text(c: Contributor) -> str:

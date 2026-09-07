@@ -141,3 +141,20 @@ def test_near_duplicate_fix_command_quotes_adversarial_name(tmp_path):
         assert shlex.quote(PAYLOAD) in cmd or PAYLOAD not in cmd
     remove_cmd = next(c for c in near[0].fix_commands if c.startswith("npx skills remove"))
     assert shlex.split(remove_cmd)[-1] == PAYLOAD
+
+
+def test_estimate_tracks_true_jaccard_similarity():
+    from drskill.checks.duplicates import estimate, signature
+
+    a = {f"shingle-{i}" for i in range(400)}
+    b = {f"shingle-{i}" for i in range(200, 600)}  # true Jaccard = 200/600
+    assert abs(estimate(signature(a), signature(b)) - 1 / 3) < 0.12
+
+    assert estimate(signature(a), signature(a)) == 1.0
+
+    disjoint = {f"other-{i}" for i in range(400)}
+    assert estimate(signature(a), signature(disjoint)) < 0.1
+
+    small_a = {"alpha beta", "beta gamma"}
+    small_b = {"alpha beta", "delta epsilon"}  # true Jaccard = 1/3
+    assert abs(estimate(signature(small_a), signature(small_b)) - 1 / 3) < 0.2
