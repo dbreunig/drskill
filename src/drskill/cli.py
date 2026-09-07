@@ -36,6 +36,7 @@ generic_min_distinct_tokens = 2  # fewer distinctive words than this is too vagu
 app = typer.Typer(add_completion=False, no_args_is_help=True, help="brew doctor for your agent's skill loadout")
 loadout_app = typer.Typer(add_completion=False, no_args_is_help=True, help="Manage loadouts on the drskill service")
 app.add_typer(loadout_app, name="loadout")
+app.add_typer(loadout_app, name="loadouts", hidden=True)
 skill_app = typer.Typer(add_completion=False, no_args_is_help=True, help="Publish and read skills on the drskill registry")
 app.add_typer(skill_app, name="skill")
 console = Console()
@@ -696,7 +697,7 @@ def list_cmd(
     home = _home()
     config = _load_effective_config_or_exit(root, home, global_mode)
     world, _findings = _scan_with_status(
-        lambda p: run_scan(root, home, global_mode, config, harness=harness, progress=p)
+        lambda p: run_scan(root, home, global_mode, config, harness=harness, progress=p, checks=False)
     )
     _warn_if_undetected(harness, root, home, global_mode)
     from drskill import suites
@@ -821,7 +822,7 @@ def audit(
 
         config = _load_effective_config_or_exit(root, home, global_mode)
         threshold = unused_days if unused_days is not None else config.usage.unused_days
-        world, _findings = run_scan(root, home, global_mode)
+        world, _findings = run_scan(root, home, global_mode, checks=False)
         resolved = pins_mod.resolve_pins(root, home)
         # Trace timestamps are UTC; using the local date to judge the
         # coverage window's boundary day can misjudge it.
@@ -909,7 +910,7 @@ def explain(
             console.print(f"[red]{escape(str(e))}[/red]")
             raise typer.Exit(1)
     world, _findings = _scan_with_status(
-        lambda p: run_scan(root, home, global_mode, config, harness=harness, progress=p)
+        lambda p: run_scan(root, home, global_mode, config, harness=harness, progress=p, checks=False)
     )
     rankings = explain_mod.rank(
         world, query, margin=config.thresholds.routing_margin, harness=harness

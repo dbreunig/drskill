@@ -463,3 +463,43 @@ def test_list_runs_scan_under_live_progress(tmp_path, monkeypatch):
     r = invoke(tmp_path, "list")
     assert r.exit_code == 0
     assert captured["progress"] is not None
+
+
+def test_loadouts_is_an_alias_for_loadout():
+    canonical = runner.invoke(app, ["loadout", "--help"])
+    alias = runner.invoke(app, ["loadouts", "--help"])
+    assert alias.exit_code == 0
+    for sub in ("create", "install", "publish", "status", "update"):
+        assert sub in alias.output
+    assert canonical.exit_code == 0
+
+
+def test_loadouts_alias_is_hidden_from_the_main_help():
+    result = runner.invoke(app, ["--help"])
+    assert "│ loadout " in result.output
+    assert "│ loadouts " not in result.output
+
+
+def test_world_only_commands_do_not_run_checks(tmp_path, monkeypatch):
+    from drskill import pipeline
+
+    calls = []
+
+    def counting_run_all(world, config, progress=None):
+        calls.append(True)
+        return []
+
+    monkeypatch.setattr(pipeline, "run_all", counting_run_all)
+    proj = tmp_path / "proj"
+    write(proj, "a-writer", "Use when the user asks for a written report.", NEAR_DUP_BODY)
+
+    for args in (("list",), ("audit",)):
+        result = invoke(tmp_path, *args)
+        assert result.exit_code == 0, f"{args}: {result.output}"
+    monkeypatch.chdir(proj)
+    result = runner.invoke(app, ["explain", "write a report"], env=env_for(tmp_path))
+    assert result.exit_code == 0, result.output
+    assert not calls, "check suite ran for a world-only command"
+
+    assert invoke(tmp_path, "scan").exit_code == 0
+    assert calls, "scan should still run the check suite"
