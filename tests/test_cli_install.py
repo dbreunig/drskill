@@ -584,3 +584,22 @@ def test_mcp_entries_do_not_pin(env):
     runner.invoke(app, ["loadout", "install", "drew/pack", "--project"], input="y\n")
     from drskill import pins as pins_mod
     assert pins_mod.load_pins(project) == {}
+
+
+def test_bridge_retarget_pins_under_the_discovered_root(env, monkeypatch, tmp_path):
+    # cwd can sit inside a harness's own store, in which case the real
+    # project root is whatever bridge.retarget_cwd discovers, not cwd.
+    home, project, state = env
+    from drskill import bridge
+
+    discovered = tmp_path / "discovered"
+    discovered.mkdir()
+    monkeypatch.setattr(bridge, "retarget_cwd",
+                        lambda cwd: (discovered, discovered / ".agents" / "skills"))
+    result = runner.invoke(app, ["loadout", "install", "drew/pack"], input="y\n")
+    assert result.exit_code == 0, result.output
+    from drskill import pins as pins_mod
+    pinned = pins_mod.load_pins(discovered)
+    assert ".agents/skills/vector" in pinned
+    assert pins_mod.load_pins(project) == {}
+    assert pins_mod.load_pins(home) == {}

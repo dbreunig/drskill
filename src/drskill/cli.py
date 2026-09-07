@@ -1342,7 +1342,7 @@ def _github_skill_install(target, *, harness, project, user, yes, force,
         name, description = skill_pub.frontmatter_meta(files, fallback=fallback)
         described.append((path, files, name, description))
 
-    target_dir, scope = _install_target(harness, project, user, root, home)
+    target_dir, scope, _ = _install_target(harness, project, user, root, home)
     typer.echo(f"Found {len(described)} skill{'s' if len(described) != 1 else ''} "
                f"in {repo}@{ref_name}; installing into {_display_path(target_dir)} "
                f"({scope} store).")
@@ -1696,7 +1696,7 @@ def skill_install(
 
     root = Path.cwd()
     home = _home()
-    target, scope = _install_target(harness, project, user, root, home)
+    target, scope, _ = _install_target(harness, project, user, root, home)
     dest = target / slug
     typer.echo(f"Install {owner}/{slug}@{number} into {_display_path(target)} ({scope} store)")
     if not yes and not typer.confirm("Proceed?", default=False):
@@ -2219,8 +2219,7 @@ def install(
 
     root = Path.cwd()
     home = _home()
-    target, scope = _install_target(harness, project, user, root, home)
-    pin_base = root if scope == "project" else home
+    target, scope, pin_base = _install_target(harness, project, user, root, home)
     pin_revision = int(revision) if str(revision).isdigit() else None
 
     n_skills = len(hosted) + len(github)
@@ -2672,7 +2671,11 @@ def _offer_bridges(installed, harness_flag, scope_root: Path, *, scope: str = "p
 
 
 def _install_target(harness_id: str | None, project: bool, user: bool,
-                    root: Path, home: Path) -> tuple[Path, str]:
+                    root: Path, home: Path) -> tuple[Path, str, Path]:
+    """Returns (target directory, scope, scope base). The base is the root
+    a pin key should be stored relative to: normally root or home, but
+    the retarget branch below discovers a different project root than
+    cwd, and pins must bind under that discovered root, not cwd's."""
     from drskill import bridge
     from drskill.harnesses import load_harnesses
 
@@ -2682,12 +2685,13 @@ def _install_target(harness_id: str | None, project: bool, user: bool,
         # you are in becomes a discovered bridge target.
         hit = bridge.retarget_cwd(root)
         if hit:
-            return hit[0] / ".agents" / "skills", "project"
+            return hit[0] / ".agents" / "skills", "project", hit[0]
     in_project = project or (not user and ((root / ".git").exists() or (root / ".agents").exists()))
     scope = "project" if in_project else "user"
+    scope_base = root if in_project else home
     if harness_id is None:
-        base = (root if in_project else home) / ".agents" / "skills"
-        return base, scope
+        target = scope_base / ".agents" / "skills"
+        return target, scope, scope_base
     hd = next((h for h in load_harnesses() if h.id == harness_id), None)
     if hd is None:
         typer.echo(f"Unknown harness {harness_id!r}. Known: "
@@ -2698,8 +2702,8 @@ def _install_target(harness_id: str | None, project: bool, user: bool,
         typer.echo(f"{hd.display_name} has no {scope} skills directory.")
         raise typer.Exit(1)
     spec = specs[0]
-    base = root / spec if in_project else home / spec.removeprefix("~/")
-    return base, scope
+    target = root / spec if in_project else home / spec.removeprefix("~/")
+    return target, scope, scope_base
 
 @loadout_app.command()
 def fetch(
