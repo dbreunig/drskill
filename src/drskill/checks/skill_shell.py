@@ -33,9 +33,10 @@ _DISABLED_NOTE = (" Shell execution is disabled by Claude Code settings on this 
 
 def shell_disabled(project_root: Path, home: Path) -> bool:
     """True when Claude Code settings disable skill shell execution.
-    Precedence mirrors Claude Code's: project settings.local.json, then
-    project settings.json, then the user file — the first file that
-    states the key wins. Unreadable files are skipped."""
+    Reads project settings.local.json, then project settings.json, then
+    the user file — the first file that states the key wins. drskill does
+    not read managed or enterprise settings, which outrank all of these in
+    Claude Code itself. Unreadable files are skipped."""
     paths = [project_root / ".claude" / "settings.local.json",
              project_root / ".claude" / "settings.json",
              home / ".claude" / "settings.json"]
@@ -153,7 +154,15 @@ def shell_unreviewed(world: World, config: Config) -> list[Finding]:
             a for a in config.ack
             if a.check == "injection-shell-unreviewed" and c.name in a.skills
         ]
-        changed = bool(prior) and fp not in {a.fingerprint for a in prior}
+        # A prior ack is matched by bare name, so a command sharing a
+        # skill's name can name-match an ack that was never about it. Only
+        # treat that as a rug-pull when THIS contributor actually has a
+        # recorded baseline; otherwise it is first sight, not a change.
+        changed = (
+            bool(prior)
+            and fp not in {a.fingerprint for a in prior}
+            and world.shell_approved.get(c.id) is not None
+        )
         n = len(cmds)
         # The approval surface: every command, no cap. You cannot approve
         # what the report does not show.

