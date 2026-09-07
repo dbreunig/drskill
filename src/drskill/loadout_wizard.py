@@ -127,16 +127,21 @@ def run_edit(ref: str, harness: str | None, creds: dict, base_url: str, home: Pa
         raise typer.Exit(1)
     old = json.loads(document)
     entries = old.get("entries", [])
+    visibility = data["loadout"].get("visibility")
 
     with console.status("[bold]starting[/bold]", spinner="dots") as status:
         world, _findings = pipeline.run_scan(
             Path.cwd(), home, progress=lambda m: status.update(f"[bold]{escape(m)}[/bold]")
         )
     rows = _build_rows(world)
-    if harness is not None:
-        rows = [row for row in rows if harness in row.harnesses]
-
     items = _edit_items(rows, entries, harness)
+    if harness is not None:
+        # Pairing already happened against every row; only unmatched
+        # candidates get filtered by harness. A row that paired with a
+        # published entry, or a phantom entry with no local row at all,
+        # shows regardless of which harness was asked for.
+        items = [item for item in items
+                if not (item.entry is None and harness not in item.row.harnesses)]
     if not items:
         typer.echo("Nothing to edit.")
         raise typer.Exit(1)
@@ -161,8 +166,21 @@ def run_edit(ref: str, harness: str | None, creds: dict, base_url: str, home: Pa
         used.add(e["selector"])
         additions.append(e)
 
+    if visibility in ("public", "unlisted"):
+        local_only_additions = [e for e in additions if e.get("local_only")]
+        if local_only_additions:
+            n = len(local_only_additions)
+            typer.echo(
+                f"{n} addition(s) exist only on this machine and cannot join a "
+                f"{visibility} loadout; publish them to your registry first "
+                "(rerun and accept the hosting offer)."
+            )
+            raise typer.Exit(1)
+
     removed = len(entries) - len(kept)
     if not additions and removed == 0:
+        for note in notes:
+            console.print(f"[dim]  note: {escape(note)}[/dim]")
         typer.echo("No changes.")
         return
 
@@ -177,7 +195,10 @@ def run_edit(ref: str, harness: str | None, creds: dict, base_url: str, home: Pa
     if not typer.confirm(f"Publish these {len(manifest['entries'])} entries "
                          f"as a new revision of {ref}?", default=False):
         raise typer.Exit(0)
-    _publish(ref, manifest, None, creds, base_url)
+    _publish(ref, manifest, None, creds, base_url,
+             failure_intro="The publish failed:",
+             failure_note="The loadout's previous revision is untouched. "
+                          "Fix the manifest and run:")
 
 
 def run(
@@ -508,7 +529,10 @@ def _create_loadout(slug, name, description, creds, base_url) -> str:
     return ref
 
 
-def _publish(ref, manifest, manifest_out, creds, base_url) -> None:
+def _publish(ref, manifest, manifest_out, creds, base_url,
+            failure_intro: str = "Created {ref}, but the publish failed:",
+            failure_note: str = "The loadout exists and is empty. Fix the manifest and run:"
+            ) -> None:
     _, runtime_hash = service.canonical_manifest(manifest)
     try:
         data = service.api_request(
@@ -524,12 +548,12 @@ def _publish(ref, manifest, manifest_out, creds, base_url) -> None:
             saved = Path(temp_name)
             with open(fd, "w", encoding="utf-8") as handle:
                 json.dump(manifest, handle, indent=2)
-        typer.echo(f"Created {ref}, but the publish failed:")
+        typer.echo(failure_intro.format(ref=ref))
         typer.echo(f"  {err.message}")
         for field, messages in (err.details or {}).items():
             for message in messages if isinstance(messages, list) else [messages]:
                 typer.echo(f"  {field}: {message}")
-        typer.echo("The loadout exists and is empty. Fix the manifest and run:")
+        typer.echo(failure_note)
         typer.echo(f"  drskill loadout publish {ref} {saved}")
         raise typer.Exit(1)
     revision = data["revision"]

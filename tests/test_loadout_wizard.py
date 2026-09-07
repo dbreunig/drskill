@@ -112,6 +112,9 @@ def wizard_env(tmp_path, monkeypatch):
                                                      "runtime_hash": "sha256:" + "cc" * 32}}}
         if path == "/api/v1/loadouts/drew/pack/revisions/3" and method == "GET":
             return json.dumps(calls.state["edit_manifest"])
+        if method == "POST" and path.endswith("/revisions") and calls.state.get("publish_fails"):
+            raise service.ServiceError("revision_invalid", "The revision manifest is invalid.",
+                                       details={"manifest": ["boom"]})
         return {"revision": {"number": 1, "runtime_hash": "sha256:" + "ee" * 32}}
 
     monkeypatch.setattr(service, "api_request", fake_api_request)
@@ -994,3 +997,90 @@ def test_edit_refuses_non_owner(wizard_env, monkeypatch):
     result = runner.invoke(app, ["loadout", "edit", "other/pack"])
     assert result.exit_code == 1
     assert "your own" in result.output
+
+
+def test_edit_publish_failure_says_previous_revision_untouched(wizard_env, monkeypatch):
+    calls = wizard_env
+    alpha_entry = edit_entry("skill:alpha")
+    calls.state["edit_manifest"]["entries"] = [alpha_entry]
+    calls.state["publish_fails"] = True
+    set_world(monkeypatch, make_world(contributor("alpha"), contributor("beta")))
+    monkeypatch.setattr(loadout_wizard, "_choose_edit", lambda items: items_all_checked(items))
+    result = runner.invoke(app, ["loadout", "edit", "drew/pack"], input="y\n")
+    assert result.exit_code == 1
+    assert "previous revision is untouched" in result.output
+    assert "empty" not in result.output
+
+
+def test_edit_public_loadout_refuses_local_only_addition(wizard_env, monkeypatch):
+    calls = []
+
+    def fake_api_request(method, path, token=None, json_body=None, base_url=None, raw=False):
+        calls.append({"method": method, "path": path})
+        if path == "/api/v1/identity":
+            return {"user": {"handle": "drew"}}
+        if path == "/api/v1/loadouts/drew/pack" and method == "GET":
+            return {"loadout": {"owner": "drew", "slug": "pack", "name": "Pack",
+                                "visibility": "public", "description": None,
+                                "published_at": None,
+                                "current_revision": {"number": 3,
+                                                     "runtime_hash": "sha256:" + "cc" * 32}}}
+        if path == "/api/v1/loadouts/drew/pack/revisions/3" and method == "GET":
+            return json.dumps({"schema_version": 1, "reproducible": False,
+                               "entries": [], "harness_mappings": []})
+        raise AssertionError(f"unexpected request {method} {path}")
+
+    monkeypatch.setattr(service, "api_request", fake_api_request)
+    monkeypatch.setattr(loadout_wizard, "_offer_registry", lambda *a, **kw: {})
+    set_world(monkeypatch, make_world(contributor("local-add", source=None)))
+    monkeypatch.setattr(loadout_wizard, "_choose_edit", lambda items: items_all_checked(items))
+
+    result = runner.invoke(app, ["loadout", "edit", "drew/pack"])
+    assert result.exit_code == 1
+    assert "cannot join a public loadout" in result.output
+    assert not any(c["method"] == "POST" for c in calls)
+
+
+def test_edit_harness_filter_keeps_matched_entries_off_other_harnesses(wizard_env, monkeypatch):
+    calls = wizard_env
+    alpha_entry = edit_entry("skill:alpha")
+    calls.state["edit_manifest"]["entries"] = [alpha_entry]
+    set_world(monkeypatch, make_world(
+        contributor("alpha", harnesses=("claude-code",)),
+        contributor("beta", harnesses=("claude-code",)),
+    ))
+    captured = {}
+
+    def fake_choose_edit(items):
+        captured["items"] = items
+        return [i for i in items if i.checked]
+
+    monkeypatch.setattr(loadout_wizard, "_choose_edit", fake_choose_edit)
+    result = runner.invoke(app, ["loadout", "edit", "drew/pack", "--harness", "codex"])
+    assert result.exit_code == 0, result.output
+    items = captured["items"]
+    by_name = {(i.row.contributor.name if i.row else i.entry["name"]): i for i in items}
+    assert "alpha" in by_name
+    assert by_name["alpha"].checked is True
+    assert by_name["alpha"].entry == alpha_entry
+    assert "not on this machine" not in by_name["alpha"].label
+    assert "beta" not in by_name
+
+
+def test_edit_no_changes_shows_skipped_duplicate_note(wizard_env, monkeypatch):
+    calls = wizard_env
+    notion_entry = edit_entry("mcp:notion", name="notion")
+    calls.state["edit_manifest"]["entries"] = [notion_entry]
+    set_world(monkeypatch, make_mcp_world())
+
+    def fake_choose_edit(items):
+        phantom = next(i for i in items if i.row is None)
+        search_item = next(
+            i for i in items if i.row is not None and i.row.contributor.name == "search")
+        return [phantom, search_item]
+
+    monkeypatch.setattr(loadout_wizard, "_choose_edit", fake_choose_edit)
+    result = runner.invoke(app, ["loadout", "edit", "drew/pack"])
+    assert result.exit_code == 0, result.output
+    assert "No changes." in result.output
+    assert "already has" in result.output

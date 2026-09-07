@@ -523,9 +523,10 @@ but missing or unreadable locally stays published as before.
 
 `drskill loadout edit owner/slug [--harness id]` edits a loadout's membership
 interactively in a terminal. Published entries with no local counterpart appear
-pre-checked as "(published; not on this machine)". Kept entries republish
-exactly as fetched. New entries are added to the membership. Use `loadout update`
-to refresh changed content instead.
+pre-checked as "(published; not on this machine)". MCP entries with no locally
+configured server show as phantoms too and can be kept or removed like any
+entry. Kept entries republish exactly as fetched. New entries are added to
+the membership. Use `loadout update` to refresh changed content instead.
 
 ## The ledger
 
