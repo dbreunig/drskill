@@ -540,3 +540,47 @@ def test_codex_http_entry_prints_a_manual_block(env):
     assert result.exit_code == 0, result.output
     assert "1 manual" in result.output
     assert not (home / ".codex" / "config.toml").exists()
+
+
+# -- pins ----------------------------------------------------------------
+
+
+def test_install_writes_pins_for_skills(env):
+    home, project, state = env
+    result = runner.invoke(app, ["loadout", "install", "drew/pack", "--project"], input="y\n")
+    assert result.exit_code == 0, result.output
+    from drskill import pins as pins_mod
+    pinned = pins_mod.load_pins(project)
+    assert ".agents/skills/vector" in pinned
+    vec = pinned[".agents/skills/vector"]
+    assert vec.loadout == "drew/pack"
+    assert vec.revision == 2
+    assert vec.selector == "skill:vector"
+    assert ".agents/skills/citation" in pinned
+
+
+def test_reinstall_rebinds_unchanged_entries(env):
+    home, project, state = env
+    runner.invoke(app, ["loadout", "install", "drew/pack", "--project"], input="y\n")
+    from drskill import pins as pins_mod
+    pins_mod.pins_path(project).unlink()
+    result = runner.invoke(app, ["loadout", "install", "drew/pack", "--project"], input="y\n")
+    assert result.exit_code == 0, result.output
+    assert ".agents/skills/vector" in pins_mod.load_pins(project)
+
+
+def test_user_scope_install_pins_under_home(env):
+    home, project, state = env
+    result = runner.invoke(app, ["loadout", "install", "drew/pack", "--user"], input="y\n")
+    assert result.exit_code == 0, result.output
+    from drskill import pins as pins_mod
+    assert ".agents/skills/vector" in pins_mod.load_pins(home)
+    assert pins_mod.load_pins(project) == {}
+
+
+def test_mcp_entries_do_not_pin(env):
+    home, project, state = env
+    state["manifest"] = manifest([mcp_entry()])
+    runner.invoke(app, ["loadout", "install", "drew/pack", "--project"], input="y\n")
+    from drskill import pins as pins_mod
+    assert pins_mod.load_pins(project) == {}

@@ -2214,6 +2214,8 @@ def install(
     root = Path.cwd()
     home = _home()
     target, scope = _install_target(harness, project, user, root, home)
+    pin_base = root if scope == "project" else home
+    pin_revision = int(revision) if str(revision).isdigit() else None
 
     n_skills = len(hosted) + len(github)
     if n_skills:
@@ -2263,6 +2265,7 @@ def install(
             status = "installed"
         if status in ("installed", "unchanged"):
             bridged.append((entry["name"], dest))
+            _record_install_pin(pin_base, dest, owner, slug, pin_revision, entry)
         counts[status] += 1
     ctx = {"owner": owner, "slug": slug, "manifest": json.loads(document),
            "creds": creds, "base": base, "home": home}
@@ -2270,6 +2273,7 @@ def install(
         status = _install_one_github(entry, target, force=force, yes=yes, ctx=ctx)
         if status in ("installed", "unchanged"):
             bridged.append((entry["name"], target / entry["name"]))
+            _record_install_pin(pin_base, target / entry["name"], owner, slug, pin_revision, entry)
         counts[status] += 1
     if mcp:
         from drskill import mcp_write
@@ -2294,6 +2298,8 @@ def install(
             counts[status] += 1
         if "installed" in mcp_statuses:
             typer.echo("Run drskill scan --mcp-connect to review the new server's tools.")
+    from drskill import pins as pins_mod
+    pins_mod.prune_pins(pin_base)
     _offer_bridges(bridged, harness, target.parent.parent, scope=scope, yes=yes)
     parts = [f"{counts['installed']} installed"]
     if counts["unchanged"]:
@@ -2323,6 +2329,19 @@ def _existing_dir_status(expected_hash: str, dest: Path, name: str, force: bool)
         typer.echo(f"  {name}: local copy differs; rerun with --force to replace it")
         return "held"
     return None
+
+
+def _record_install_pin(pin_base: Path, dest: Path, owner: str, slug: str,
+                        revision: int | None, entry: dict) -> None:
+    from drskill import pins
+
+    pins.record_pin(pin_base, dest, pins.Pin(
+        loadout=f"{owner}/{slug}", revision=revision,
+        selector=entry.get("selector") or f"skill:{entry['name']}",
+        source_type=entry.get("source_type") or "",
+        content_hash=entry.get("content_hash") or "",
+        installed_at=dt.date.today().isoformat(),
+    ))
 
 
 def _install_one_github(entry: dict, target: Path, *, force: bool, yes: bool,
