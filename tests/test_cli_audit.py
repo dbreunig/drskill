@@ -1,3 +1,4 @@
+import datetime as dt
 import json
 
 from typer.testing import CliRunner
@@ -7,18 +8,29 @@ from drskill.cli import app
 runner = CliRunner()
 
 
-def _claude_trace(home, cwd, skill="release"):
+def _claude_trace(home, cwd, skill="release", ts="2026-07-01T10:00:05.000Z"):
     d = home / ".claude" / "projects" / "-a"
     d.mkdir(parents=True, exist_ok=True)
     event = {
         "type": "assistant", "sessionId": "s1",
-        "timestamp": "2026-07-01T10:00:05.000Z", "cwd": cwd,
+        "timestamp": ts, "cwd": cwd,
         "isSidechain": False,
         "message": {"role": "assistant", "content": [
             {"type": "tool_use", "id": "t1", "name": "Skill",
              "input": {"skill": skill}}]},
     }
     (d / "s1.jsonl").write_text(json.dumps(event) + "\n")
+
+
+def _write_skill(root, name):
+    d = root / ".claude" / "skills" / name
+    d.mkdir(parents=True, exist_ok=True)
+    (d / "SKILL.md").write_text(f"---\nname: {name}\ndescription: d\n---\nbody\n")
+
+
+def _days_ago(days):
+    ts = dt.datetime.now(dt.timezone.utc) - dt.timedelta(days=days)
+    return ts.strftime("%Y-%m-%dT%H:%M:%S.000Z")
 
 
 def test_audit_report_runs(tmp_path, monkeypatch):
@@ -152,3 +164,60 @@ def test_audit_last_narrows_to_newest_session(tmp_path, monkeypatch):
     assert result.exit_code == 0
     assert "newerskill" in result.output
     assert "olderskill" not in result.output
+
+
+def test_audit_reports_unused_skill(tmp_path, monkeypatch):
+    monkeypatch.setenv("DRSKILL_HOME", str(tmp_path))
+    repo = tmp_path / "repo"
+    repo.mkdir()
+    _write_skill(repo, "used")
+    _write_skill(repo, "dusty")
+    # trace with skill "used" invoked long ago (old coverage)
+    _claude_trace(tmp_path, str(repo), skill="used", ts=_days_ago(60))
+    result = runner.invoke(app, ["audit", "--root", str(repo), "--unused-days", "30"])
+    assert result.exit_code == 0, result.output
+    assert "Unused" in result.output
+    assert "dusty" in result.output
+    assert "threshold 30 days" in result.output
+
+
+def test_audit_unused_respects_config_default(tmp_path, monkeypatch):
+    monkeypatch.setenv("DRSKILL_HOME", str(tmp_path))
+    repo = tmp_path / "repo"
+    repo.mkdir()
+    _write_skill(repo, "used")
+    _write_skill(repo, "dusty")
+    # young coverage -> the not-enough-coverage line with the 90-day default
+    _claude_trace(tmp_path, str(repo), skill="used", ts=_days_ago(5))
+    result = runner.invoke(app, ["audit", "--root", str(repo)])
+    assert result.exit_code == 0, result.output
+    assert "not enough trace coverage" in result.output
+    assert "90 days" in result.output
+
+
+def test_audit_json_gains_unused_key(tmp_path, monkeypatch):
+    monkeypatch.setenv("DRSKILL_HOME", str(tmp_path))
+    repo = tmp_path / "repo"
+    repo.mkdir()
+    _write_skill(repo, "used")
+    _write_skill(repo, "dusty")
+    _claude_trace(tmp_path, str(repo), skill="used", ts=_days_ago(60))
+    result = runner.invoke(
+        app, ["audit", "--root", str(repo), "--unused-days", "30", "--json"]
+    )
+    data = json.loads(result.output)
+    assert any(u["name"] == "dusty" for u in data["unused"])
+
+
+def test_audit_drilldown_skips_crossref(tmp_path, monkeypatch):
+    monkeypatch.setenv("DRSKILL_HOME", str(tmp_path))
+    repo = tmp_path / "repo"
+    repo.mkdir()
+    _write_skill(repo, "used")
+    _write_skill(repo, "dusty")
+    _claude_trace(tmp_path, str(repo), skill="used", ts=_days_ago(60))
+    result = runner.invoke(
+        app, ["audit", "used", "--root", str(repo), "--unused-days", "30"]
+    )
+    assert result.exit_code == 0, result.output
+    assert "Unused" not in result.output

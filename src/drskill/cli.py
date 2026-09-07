@@ -744,6 +744,11 @@ def audit(
         False, "--last", help="only the most recent session in scope"
     ),
     json_out: bool = typer.Option(False, "--json", help="machine-readable output"),
+    unused_days: int | None = typer.Option(
+        None, "--unused-days",
+        help="flag installed-but-never-invoked entries older than this "
+             "(default from drskill.toml [usage])",
+    ),
 ) -> None:
     """Report how skills and MCP tools actually get used, from local agent traces."""
     import json as json_mod
@@ -796,6 +801,25 @@ def audit(
         data = tpipeline.run_audit(
             home, root, global_mode, harness, cutoff, last=last
         )
+
+    # The scan join (installed-but-never-invoked) only makes sense for the
+    # full report: a single-entity drilldown or a --file view has no whole
+    # "installed set" to cross-reference against.
+    include_crossref = file is None and name is None
+    unused = None
+    threshold = None
+    if include_crossref:
+        from drskill import pins as pins_mod
+        from drskill.traces import crossref
+
+        config = _load_effective_config_or_exit(root, home, global_mode)
+        threshold = unused_days if unused_days is not None else config.usage.unused_days
+        world, _findings = run_scan(root, home, global_mode)
+        resolved = pins_mod.resolve_pins(root, home)
+        unused = crossref.unused_contributors(
+            world, data.invocations, resolved, threshold, dt.date.today()
+        )
+
     if name is not None and not json_out:
         treport.render_drilldown(console, name, data)
         return
@@ -812,9 +836,28 @@ def audit(
             "unreadable": data.unreadable,
             "drifted": data.drifted,
         }
+        if include_crossref:
+            payload["unused"] = (
+                None if unused is None
+                else [{"kind": u.kind, "name": u.name, "where": u.where} for u in unused]
+            )
         print(json_mod.dumps(payload, indent=2))
         return
     treport.render_audit(console, data)
+    if include_crossref:
+        if unused is None:
+            typer.echo(
+                f"\nUnused: not enough trace coverage to judge (needs {threshold} days)."
+            )
+        elif not unused:
+            typer.echo("\nUnused: none — everything installed has been invoked.")
+        else:
+            typer.echo(
+                f"\nUnused (no invocations in the covered history; "
+                f"threshold {threshold} days):"
+            )
+            for u in unused:
+                typer.echo(f"  {u.kind:<9} {u.name:<20} {u.where}")
 
 
 @app.command()
