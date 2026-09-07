@@ -56,3 +56,45 @@ def test_explain_unknown_harness_errors(project):
 def test_explain_is_read_only(project):
     runner.invoke(app, ["explain", "summarize a pdf document"])
     assert not (project / ".drskill").exists()
+
+
+def test_explain_deep_prints_model_verdict(project, monkeypatch):
+    from drskill import deep_llm, explain as explain_mod
+
+    def fake_builder(model_id):
+        def judge(query, candidates):
+            return explain_mod.QueryJudgeResult(
+                routed="pdf", contested=False,
+                rationale="the pdf skill names the format")
+        return judge
+
+    monkeypatch.setattr(deep_llm, "build_query_judge", fake_builder)
+    result = runner.invoke(app, ["explain", "summarize a pdf document", "--deep"])
+    assert result.exit_code == 0, result.output
+    assert "model verdict: routes to pdf" in result.output
+    assert "the pdf skill names the format" in result.output
+    assert "drskill's own similarity model" not in result.output
+    assert "model's judgment" in result.output
+
+
+def test_explain_deep_unavailable_exits_one(project, monkeypatch):
+    from drskill import deep_llm
+
+    def boom(model_id):
+        raise deep_llm.DeepUnavailableError("no key configured")
+
+    monkeypatch.setattr(deep_llm, "build_query_judge", boom)
+    result = runner.invoke(app, ["explain", "x", "--deep"])
+    assert result.exit_code == 1
+    assert "no key configured" in result.output
+
+
+def test_explain_plain_never_touches_deep_llm(project, monkeypatch):
+    from drskill import deep_llm
+
+    def boom(model_id):
+        raise AssertionError("build_query_judge must not be called without --deep")
+
+    monkeypatch.setattr(deep_llm, "build_query_judge", boom)
+    result = runner.invoke(app, ["explain", "summarize a pdf document"])
+    assert result.exit_code == 0, result.output

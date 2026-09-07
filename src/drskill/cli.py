@@ -825,6 +825,7 @@ def explain(
     ),
     harness: str | None = typer.Option(None, "--harness", help="limit to one harness"),
     json_out: bool = typer.Option(False, "--json", help="machine-readable output"),
+    deep_mode: bool = typer.Option(False, "--deep", help="ask the configured model to judge the routing"),
 ) -> None:
     """Simulate where a request would route across your harnesses."""
     from drskill import explain as explain_mod
@@ -834,35 +835,72 @@ def explain(
     _validate_harness(harness)
     root, home = Path.cwd(), _home()
     config = _load_effective_config_or_exit(root, home, global_mode)
+    judge = None
+    if deep_mode:
+        from drskill import deep_llm
+
+        deep.load_user_env(home)
+        try:
+            judge = deep_llm.build_query_judge(config.deep.model)
+        except deep_llm.DeepUnavailableError as e:
+            console.print(f"[red]{escape(str(e))}[/red]")
+            raise typer.Exit(1)
     world, _findings = _scan_with_status(
         lambda p: run_scan(root, home, global_mode, config, harness=harness, progress=p)
     )
     rankings = explain_mod.rank(
         world, query, margin=config.thresholds.routing_margin, harness=harness
     )
+
+    def _judge(r) -> explain_mod.QueryJudgeResult | None:
+        if not deep_mode or not r.rows:
+            return None
+        return judge(query, [
+            (row.contributor.name, row.contributor.routing_text) for row in r.rows
+        ])
+
+    def _report_last_error():
+        if not deep_mode:
+            return
+        last_error = getattr(judge, "last_error", None)
+        if last_error:
+            flat = " ".join(str(last_error).split())
+            console.print(
+                f"[yellow]deep: model calls are failing; last error: "
+                f"{escape(flat)}[/yellow]"
+            )
+
     if json_out:
+        harnesses = []
+        for r in rankings:
+            entry = {
+                "harness": r.harness,
+                "verdict": r.verdict,
+                "top": r.top_name,
+                "rows": [
+                    {
+                        "score": round(row.score, 4),
+                        "name": row.contributor.name,
+                        "description": row.contributor.routing_text,
+                    }
+                    for row in r.rows
+                ],
+            }
+            if deep_mode:
+                v = _judge(r)
+                entry["model"] = (
+                    {"routed": v.routed, "contested": v.contested, "rationale": v.rationale}
+                    if v is not None else None
+                )
+            harnesses.append(entry)
         doc = {
             "query": query,
             "floor": explain_mod.SCORE_FLOOR,
             "margin": config.thresholds.routing_margin,
-            "harnesses": [
-                {
-                    "harness": r.harness,
-                    "verdict": r.verdict,
-                    "top": r.top_name,
-                    "rows": [
-                        {
-                            "score": round(row.score, 4),
-                            "name": row.contributor.name,
-                            "description": row.contributor.routing_text,
-                        }
-                        for row in r.rows
-                    ],
-                }
-                for r in rankings
-            ],
+            "harnesses": harnesses,
         }
         typer.echo(json.dumps(doc, indent=2))
+        _report_last_error()
         return
     for harness_ids, r in explain_mod.group_rankings(rankings):
         names = [world.harnesses[h].display_name for h in harness_ids]
@@ -871,6 +909,11 @@ def explain(
             else f"all {len(names)} harnesses ({', '.join(names)})"
         )
         typer.echo(f"\n{label}")
+        v = _judge(r)
+        if v is not None:
+            target = sanitize(v.routed) if v.routed else "nothing"
+            flavor = "contested; " if v.contested else ""
+            typer.echo(f"  model verdict: routes to {target} ({flavor}{sanitize(v.rationale)})")
         if r.verdict == "none":
             typer.echo("  no skill matches")
         elif r.verdict == "contested":
@@ -883,7 +926,14 @@ def explain(
             typer.echo(
                 f"  {i}. {row.score:.2f}  {sanitize(row.contributor.name)}  {sanitize(desc)}"
             )
-    typer.echo("\nScores are drskill's own similarity model, not the harness router.")
+    if deep_mode:
+        typer.echo(
+            "\nVerdicts above are the configured model's judgment of drskill's "
+            "candidate list, not the harness router."
+        )
+    else:
+        typer.echo("\nScores are drskill's own similarity model, not the harness router.")
+    _report_last_error()
 
 
 @app.command()

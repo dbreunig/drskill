@@ -20,6 +20,13 @@ class Row:
 
 
 @dataclass
+class QueryJudgeResult:
+    routed: str | None
+    contested: bool
+    rationale: str
+
+
+@dataclass
 class HarnessRanking:
     harness: str
     rows: list[Row]

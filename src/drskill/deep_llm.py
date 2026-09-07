@@ -90,6 +90,46 @@ def build_judge(model_id: str) -> JudgeFn:
     return judge
 
 
+def build_query_judge(model_id: str):
+    """One call per ranking: which candidate would a router pick for this
+    query, if any, and is the choice contested."""
+    from drskill.explain import QueryJudgeResult
+
+    dspy, lm = _setup(model_id)
+
+    class QueryJudge(dspy.Signature):
+        """Decide which candidate skill a request router would invoke for
+        the user query, if any. Contested means two candidates are close
+        enough that routing is unpredictable."""
+
+        query: str = dspy.InputField()
+        candidates: str = dspy.InputField(desc="numbered 'name: description' lines")
+        routed: str = dspy.OutputField(desc="the winning candidate's name, or 'none'")
+        contested: bool = dspy.OutputField()
+        rationale: str = dspy.OutputField(desc="one sentence")
+
+    predict = dspy.Predict(QueryJudge)
+
+    def judge(query: str, candidates: list[tuple[str, str]]) -> QueryJudgeResult | None:
+        lines = "\n".join(f"{i}. {n}: {d}" for i, (n, d) in enumerate(candidates, 1))
+        try:
+            with dspy.context(lm=lm):
+                out = predict(query=query, candidates=lines)
+            judge.last_error = None  # reflects the most recent call only
+            routed = (out.routed or "").strip()
+            return QueryJudgeResult(
+                routed=None if routed.lower() in ("", "none") else routed,
+                contested=bool(out.contested),
+                rationale=str(out.rationale or "").strip(),
+            )
+        except Exception as e:  # errored or unparseable: caller keeps the warning
+            judge.last_error = f"{type(e).__name__}: {e}"
+            return None
+
+    judge.last_error = None
+    return judge
+
+
 def build_rewriter(model_id: str) -> RewriteFn:
     dspy, lm = _setup(model_id)
 
