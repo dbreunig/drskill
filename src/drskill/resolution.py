@@ -133,6 +133,9 @@ class World(BaseModel):
     mcp_approved: dict[str, ServerSnapshot] = Field(default_factory=dict)
     # contributor id -> approved invocation-time command baseline
     shell_approved: dict[str, ShellBaseline] = Field(default_factory=dict)
+    # True when Claude Code settings turn skill shell execution off on this
+    # machine; the shell checks annotate but never suppress.
+    shell_execution_disabled: bool = False
     plugin: PluginManifest | None = None
     plugin_mcp: PluginMcpFile | None = None
     cc_plugin: PluginManifest | None = None

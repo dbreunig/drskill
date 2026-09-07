@@ -10,6 +10,7 @@ from __future__ import annotations
 
 import datetime as dt
 import hashlib
+import json
 import re
 import shlex
 from collections import Counter
@@ -24,6 +25,28 @@ from drskill.resolution import World
 # The harness only recognizes `!` at line start or immediately after
 # whitespace; KEY=!`cmd` stays literal text and never runs.
 _INLINE = re.compile(r"(?:^|(?<=\s))!`([^`\n]+)`")
+
+_SETTINGS_KEY = "disableSkillShellExecution"
+_DISABLED_NOTE = (" Shell execution is disabled by Claude Code settings on this "
+                  "machine, so these commands do not run here.")
+
+
+def shell_disabled(project_root: Path, home: Path) -> bool:
+    """True when Claude Code settings disable skill shell execution.
+    Precedence mirrors Claude Code's: project settings.local.json, then
+    project settings.json, then the user file — the first file that
+    states the key wins. Unreadable files are skipped."""
+    paths = [project_root / ".claude" / "settings.local.json",
+             project_root / ".claude" / "settings.json",
+             home / ".claude" / "settings.json"]
+    for p in paths:
+        try:
+            data = json.loads(p.read_text(encoding="utf-8"))
+        except (OSError, json.JSONDecodeError):
+            continue
+        if isinstance(data, dict) and _SETTINGS_KEY in data:
+            return bool(data[_SETTINGS_KEY])
+    return False
 
 
 def extract_commands(text: str) -> list[tuple[int, str]]:
@@ -117,6 +140,7 @@ def _diff_lines(approved: list[str], current: list[str]) -> str:
 @check("injection-shell-unreviewed")
 def shell_unreviewed(world: World, config: Config) -> list[Finding]:
     out = []
+    suffix = _DISABLED_NOTE if world.shell_execution_disabled else ""
     for c in world.contributors.values():
         src = _skillmd(c)
         if src is None:
@@ -160,7 +184,7 @@ def shell_unreviewed(world: World, config: Config) -> list[Finding]:
             )
             severity = "note"
         out.append(make_finding(
-            "injection-shell-unreviewed", severity, [c], head + listing,
+            "injection-shell-unreviewed", severity, [c], head + listing + suffix,
             fix_commands=[
                 f"drskill ack injection-shell-unreviewed {shlex.quote(c.name)}"
             ],
@@ -234,6 +258,7 @@ def _reads_env_secret(cmd: str) -> bool:
 @check("injection-shell-dangerous")
 def shell_dangerous(world: World, config: Config) -> list[Finding]:
     out = []
+    suffix = _DISABLED_NOTE if world.shell_execution_disabled else ""
     for c in world.contributors.values():
         src = _skillmd(c)
         if src is None:
@@ -275,7 +300,7 @@ def shell_dangerous(world: World, config: Config) -> list[Finding]:
                  fixes: list[str]) -> None:
             out.append(make_finding(
                 "injection-shell-dangerous", severity, [c],
-                injection.evidence_message(c, _SUMMARIES[category], hits),
+                injection.evidence_message(c, _SUMMARIES[category], hits) + suffix,
                 fix_commands=fixes,
                 extra_key=f"{c.name}|{category}",
                 fingerprint_texts=sorted({cmd for _s, _ln, cmd in hits}),

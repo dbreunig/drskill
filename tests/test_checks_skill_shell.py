@@ -459,3 +459,40 @@ def test_command_without_shell_is_silent(tmp_path):
     world = make_command_world(tmp_path)
     assert run_check("injection-shell-unreviewed", world, Config()) == []
     assert run_check("injection-shell-dangerous", world, Config()) == []
+
+
+# ---- disableSkillShellExecution awareness ----
+
+def test_disabled_setting_annotates_findings(tmp_path):
+    write_skill(tmp_path, "s", "!`make deploy`\n")
+    world = make_world(tmp_path)
+    world.shell_execution_disabled = True
+    findings = run_check("injection-shell-unreviewed", world, Config())
+    assert len(findings) == 1
+    assert "disabled by Claude Code settings" in findings[0].message
+    write_skill(tmp_path, "d", "!`cat ~/.aws/credentials`\n")
+    world = make_world(tmp_path)
+    world.shell_execution_disabled = True
+    dangerous = run_check("injection-shell-dangerous", world, Config())
+    assert all("disabled by Claude Code settings" in f.message for f in dangerous)
+
+
+def test_enabled_setting_leaves_messages_alone(tmp_path):
+    write_skill(tmp_path, "s", "!`make deploy`\n")
+    findings = run_check("injection-shell-unreviewed", make_world(tmp_path), Config())
+    assert "disabled by Claude Code settings" not in findings[0].message
+
+
+def test_shell_disabled_reads_settings_with_precedence(tmp_path):
+    root, home = tmp_path / "proj", tmp_path / "home"
+    (root / ".claude").mkdir(parents=True)
+    (home / ".claude").mkdir(parents=True)
+    assert skill_shell.shell_disabled(root, home) is False
+    (home / ".claude" / "settings.json").write_text('{"disableSkillShellExecution": true}')
+    assert skill_shell.shell_disabled(root, home) is True
+    (root / ".claude" / "settings.json").write_text('{"disableSkillShellExecution": false}')
+    assert skill_shell.shell_disabled(root, home) is False
+    (root / ".claude" / "settings.local.json").write_text('{"disableSkillShellExecution": true}')
+    assert skill_shell.shell_disabled(root, home) is True
+    (root / ".claude" / "settings.local.json").write_text("not json")
+    assert skill_shell.shell_disabled(root, home) is False

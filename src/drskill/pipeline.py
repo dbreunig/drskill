@@ -117,6 +117,7 @@ def run_scan(
         b = baselines.get(skill_shell.baseline_key(c, project_root, home))
         if b is not None:
             world.shell_approved[c.id] = b
+    world.shell_execution_disabled = skill_shell.shell_disabled(project_root, home)
     findings = run_all(world, config, progress=progress)
     cdir = deep.cache_dir(project_root, home, global_only)
     cache = deep.load_cache(cdir)
