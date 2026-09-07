@@ -418,7 +418,7 @@ The potential for rug-pulls here, swapping in malicious commands, is the same pa
 
 Commands that look suspicious will be flagged immediately.
 
-Command files under `.claude/commands` (project) and `~/.claude/commands` (personal) use the same shell syntax and go through the same two checks. When `disableSkillShellExecution` is set in Claude Code settings, findings indicate the commands do not run on this machine.
+Command files under `.claude/commands` (project) and `~/.claude/commands` (personal) use the same shell syntax. They go through the full markdown-side injection scan (unicode, encoded blobs, instruction overrides, remote fetches) plus the two shell-command checks above. When `disableSkillShellExecution` is set in Claude Code settings, findings indicate the commands do not run on this machine.
 
 ## MCP servers
 
