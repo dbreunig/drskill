@@ -586,6 +586,22 @@ def test_mcp_entries_do_not_pin(env):
     assert pins_mod.load_pins(project) == {}
 
 
+def command_entry():
+    return {"kind": "command", "selector": "command:hello", "name": "hello",
+            "source_type": "drskill", "source_reference": "drskill",
+            "content_hash": HASH, "local_only": False, "metadata": {}}
+
+
+def test_non_skill_kind_entries_are_not_pinned(env):
+    home, project, state = env
+    state["manifest"] = manifest([command_entry()])
+    result = runner.invoke(app, ["loadout", "install", "drew/pack", "--project"], input="y\n")
+    assert result.exit_code == 0, result.output
+    assert (project / ".agents" / "skills" / "hello").exists()
+    from drskill import pins as pins_mod
+    assert pins_mod.load_pins(project) == {}
+
+
 def test_bridge_retarget_pins_under_the_discovered_root(env, monkeypatch, tmp_path):
     # cwd can sit inside a harness's own store, in which case the real
     # project root is whatever bridge.retarget_cwd discovers, not cwd.

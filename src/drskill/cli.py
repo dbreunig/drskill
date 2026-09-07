@@ -2340,6 +2340,10 @@ def _record_install_pin(pin_base: Path, dest: Path, owner: str, slug: str,
                         revision: int | None, entry: dict) -> None:
     from drskill import pins
 
+    # Pins bind skill directories only; an entry of another kind (e.g. a
+    # command) installed to a different kind of target shouldn't get one.
+    if entry.get("kind") and entry.get("kind") != "skill":
+        return
     pins.record_pin(pin_base, dest, pins.Pin(
         loadout=f"{owner}/{slug}", revision=revision,
         selector=entry.get("selector") or f"skill:{entry['name']}",
