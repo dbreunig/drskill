@@ -418,6 +418,8 @@ The potential for rug-pulls here, swapping in malicious commands, is the same pa
 
 Commands that look suspicious will be flagged immediately.
 
+Command files under `.claude/commands` (project) and `~/.claude/commands` (personal) use the same shell syntax and go through the same two checks. When `disableSkillShellExecution` is set in Claude Code settings, findings indicate the commands do not run on this machine.
+
 ## MCP servers
 
 Skills are half of an agent's loadout. MCP servers are the other half, and each harness configures them in its own file: `.mcp.json` and `~/.claude.json` for Claude Code, `.cursor/mcp.json` for Cursor, `.vscode/mcp.json` for VS Code, `~/.codex/config.toml` for Codex, `.gemini/settings.json` for Gemini CLI, and `claude_desktop_config.json` for Claude Desktop. drskill reads all of them on every scan. It only reads. Nothing is launched, and no server is connected to.
@@ -501,8 +503,6 @@ The `source` column in `list` shows where a skill came from: `skills-lock` for s
 The `suite` column names where a row came from. For a skill it is the plugin or repo. `drskill` recovers a plugin suite by matching the skill's content against the plugin caches on disk, so a plugin skill copied into a shared store is still recognized. For a skill that a lockfile tracks, the suite is the lockfile source, the same origin the `source` column records. For an MCP tool the suite is the server that exposes it. A skill with neither a plugin match nor a lockfile source shows a blank suite, because `drskill` does not guess a suite from a path or a bare name.
 
 ## Known limitations
-
-`.claude/commands/` directories use the same `` !`command` `` and ```` ```! ```` invocation-time shell syntax as skills, but drskill does not discover them yet, so a command file's embedded shell commands are invisible to `injection-shell-unreviewed` and `injection-shell-dangerous`.
 
 `skills-lock.json` hash verification is self-calibrating. Upstream `npx skills` computes its own content hashes, and `drskill` cannot always reproduce them exactly. If none of the hashes in a lockfile match what `drskill` computes, it will not accuse every skill of drift; instead it prints one warning saying the hashes could not be verified against that lockfile. Per-skill drift warnings only appear once `drskill` has confirmed, by matching at least one hash, that its hashing algorithm agrees with that lockfile's producer.
 
