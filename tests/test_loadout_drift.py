@@ -1,6 +1,6 @@
 import pytest
 
-from drskill import content, loadout_drift
+from drskill import content, loadout_drift, pins
 from drskill.models import Contributor, Provenance, TokenCost
 
 FILES = [{"path": "SKILL.md", "data": b"body\n", "executable": False}]
@@ -32,6 +32,18 @@ def collected(monkeypatch):
 
 def classify_one(e, contributors):
     return loadout_drift.classify_entries([e], contributors)[0]
+
+
+def skill_contributor(id, name, content_hash):
+    return contributor(name, content_hash=content_hash, id=id)
+
+
+def skill_entry(selector, content_hash):
+    _, name = selector.split(":", 1)
+    return {"kind": "skill", "selector": selector, "name": name,
+            "source_type": "local", "source_reference": "local",
+            "content_hash": content_hash, "local_only": True,
+            "metadata": {}}
 
 
 def test_hosted_entry_matches_and_changes(collected):
@@ -187,3 +199,38 @@ def test_mcp_entry_with_non_dict_metadata_and_no_server_is_missing():
     entry["metadata"] = "surprise"
     statuses = loadout_drift.classify_entries([entry], [], servers=[])
     assert statuses[0].state == "missing"
+
+
+def test_pinned_entry_matches_the_pinned_contributor_not_the_name_twin():
+    # two local skills share the name; only one is the pinned install
+    pinned = skill_contributor(id="/store/.agents/skills/vector/SKILL.md",
+                               name="vector", content_hash="sha256:" + "aa" * 32)
+    twin = skill_contributor(id="/elsewhere/vector/SKILL.md",
+                             name="vector", content_hash="sha256:" + "bb" * 32)
+    entry = skill_entry(selector="skill:vector", content_hash="sha256:" + "aa" * 32)
+    pin = pins.Pin(loadout="drew/pack", revision=2, selector="skill:vector",
+                   source_type="local", content_hash="sha256:" + "aa" * 32)
+    statuses = loadout_drift.classify_entries(
+        [entry], [twin, pinned],
+        pins={pinned.id: pin}, ref="drew/pack")
+    assert statuses[0].contributor is pinned
+    assert statuses[0].state == "matches"
+    assert statuses[0].note is None
+
+
+def test_pin_for_another_loadout_is_ignored():
+    c = skill_contributor(id="/store/x/SKILL.md", name="vector",
+                          content_hash="sha256:" + "aa" * 32)
+    entry = skill_entry(selector="skill:vector", content_hash="sha256:" + "aa" * 32)
+    pin = pins.Pin(loadout="other/pack", selector="skill:vector",
+                   source_type="local", content_hash="sha256:" + "aa" * 32)
+    statuses = loadout_drift.classify_entries(
+        [entry], [c], pins={c.id: pin}, ref="drew/pack")
+    assert statuses[0].state == "matches"  # via the name fallback
+
+
+def test_no_pins_behaves_as_before():
+    c = skill_contributor(id="/x/SKILL.md", name="vector",
+                          content_hash="sha256:" + "aa" * 32)
+    entry = skill_entry(selector="skill:vector", content_hash="sha256:" + "aa" * 32)
+    assert loadout_drift.classify_entries([entry], [c])[0].state == "matches"

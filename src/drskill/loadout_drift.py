@@ -1,8 +1,8 @@
 """Classify a revision's entries against locally scanned skills.
 
-Matching is by normalized name until the resolution phase brings a real
-lockfile binding. A hash tiebreak settles duplicate names; an unresolved
-duplicate carries an ambiguity note.
+Matching is by pin binding when the install recorded one, then by
+normalized name for unpinned installs. A hash tiebreak settles duplicate
+names; an unresolved duplicate carries an ambiguity note.
 """
 
 from __future__ import annotations
@@ -24,7 +24,9 @@ class EntryStatus:
 
 
 def classify_entries(entries: list[dict], contributors: list[Contributor],
-                     servers: list | None = None) -> list[EntryStatus]:
+                     servers: list | None = None,
+                     pins: dict | None = None,
+                     ref: str | None = None) -> list[EntryStatus]:
     skills = [c for c in contributors if c.kind == "skill"]
     by_name: dict[str, list[Contributor]] = {}
     for c in skills:
@@ -39,6 +41,16 @@ def classify_entries(entries: list[dict], contributors: list[Contributor],
             else:
                 out.append(EntryStatus(entry, None, "unchecked"))
             continue
+        if pins and ref:
+            bound = next(
+                (c for c in skills
+                 if (p := pins.get(c.id)) is not None
+                 and p.loadout == ref and p.selector == entry.get("selector")),
+                None,
+            )
+            if bound is not None:
+                out.append(EntryStatus(entry, bound, _compare(entry, bound)))
+                continue
         candidates = by_name.get(entry.get("name"), [])
         if not candidates:
             out.append(EntryStatus(entry, None, "missing"))
