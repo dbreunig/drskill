@@ -22,6 +22,9 @@ def _sanitize(text: str) -> str:
     return _INVISIBLE.sub(lambda m: f"\\u{ord(m.group()):04x}", text)
 
 
+sanitize = _sanitize  # public: other commands render skill-controlled text too
+
+
 def to_json(findings: list[Finding]) -> str:
     rows = [
         dict(sorted(f.model_dump(mode="json").items())) for f in findings

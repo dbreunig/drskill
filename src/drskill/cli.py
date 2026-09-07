@@ -818,6 +818,75 @@ def audit(
 
 
 @app.command()
+def explain(
+    query: str = typer.Argument(..., help="a user request, quoted"),
+    global_mode: bool = typer.Option(
+        False, "--global", help="scan the machine-wide setup instead of a project"
+    ),
+    harness: str | None = typer.Option(None, "--harness", help="limit to one harness"),
+    json_out: bool = typer.Option(False, "--json", help="machine-readable output"),
+) -> None:
+    """Simulate where a request would route across your harnesses."""
+    from drskill import explain as explain_mod
+    from drskill.report import sanitize
+    from drskill.text import one_line
+
+    _validate_harness(harness)
+    root, home = Path.cwd(), _home()
+    config = _load_effective_config_or_exit(root, home, global_mode)
+    world, _findings = _scan_with_status(
+        lambda p: run_scan(root, home, global_mode, config, harness=harness, progress=p)
+    )
+    rankings = explain_mod.rank(
+        world, query, margin=config.thresholds.routing_margin, harness=harness
+    )
+    if json_out:
+        doc = {
+            "query": query,
+            "floor": explain_mod.SCORE_FLOOR,
+            "margin": config.thresholds.routing_margin,
+            "harnesses": [
+                {
+                    "harness": r.harness,
+                    "verdict": r.verdict,
+                    "top": r.top_name,
+                    "rows": [
+                        {
+                            "score": round(row.score, 4),
+                            "name": row.contributor.name,
+                            "description": row.contributor.routing_text,
+                        }
+                        for row in r.rows
+                    ],
+                }
+                for r in rankings
+            ],
+        }
+        typer.echo(json.dumps(doc, indent=2))
+        return
+    for harness_ids, r in explain_mod.group_rankings(rankings):
+        names = [world.harnesses[h].display_name for h in harness_ids]
+        label = (
+            names[0] if len(names) == 1
+            else f"all {len(names)} harnesses ({', '.join(names)})"
+        )
+        typer.echo(f"\n{label}")
+        if r.verdict == "none":
+            typer.echo("  no skill matches")
+        elif r.verdict == "contested":
+            a, b = r.rows[0].contributor.name, r.rows[1].contributor.name
+            typer.echo(f"  contested between {sanitize(a)} and {sanitize(b)}")
+        else:
+            typer.echo(f"  routes to {sanitize(r.top_name)}")
+        for i, row in enumerate(r.rows, start=1):
+            desc = one_line(row.contributor.routing_text, 70)
+            typer.echo(
+                f"  {i}. {row.score:.2f}  {sanitize(row.contributor.name)}  {sanitize(desc)}"
+            )
+    typer.echo("\nScores are drskill's own similarity model, not the harness router.")
+
+
+@app.command()
 def cache(
     action: str = typer.Argument(..., help="stats or prune"),
     root: Path = typer.Option(Path("."), "--root", hidden=True),
