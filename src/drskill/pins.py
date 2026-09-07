@@ -38,7 +38,7 @@ def load_pins(base: Path) -> dict[str, Pin]:
         try:
             out[str(key)] = Pin.model_validate(value)
         except ValidationError:
-            return {}  # a corrupt document is ignored whole; installs rewrite it
+            continue  # a bad record is skipped so a hand-edit cannot erase unrelated bindings
     return out
 
 

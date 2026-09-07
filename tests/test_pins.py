@@ -50,6 +50,18 @@ def test_load_tolerates_missing_and_garbage(tmp_path):
     assert pins.load_pins(tmp_path) == {}
 
 
+def test_load_skips_a_bad_record_and_keeps_the_good_one(tmp_path):
+    p = pins.pins_path(tmp_path)
+    p.parent.mkdir(parents=True)
+    p.write_text(json.dumps({
+        "x": {"loadout": 5},
+        ".agents/skills/vector": make_pin().model_dump(),
+    }))
+    loaded = pins.load_pins(tmp_path)
+    assert list(loaded) == [".agents/skills/vector"]
+    assert loaded[".agents/skills/vector"].loadout == "drew/pack"
+
+
 def test_prune_drops_dead_paths(tmp_path):
     live = tmp_path / ".agents" / "skills" / "vector"
     live.mkdir(parents=True)
