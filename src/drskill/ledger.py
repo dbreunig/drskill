@@ -33,6 +33,10 @@ class Deep(BaseModel):
     model: str = "anthropic/claude-haiku-4-5"
 
 
+class Usage(BaseModel):
+    unused_days: int = 90
+
+
 class Ack(BaseModel):
     check: str
     skills: list[str]
@@ -52,6 +56,7 @@ class Config(BaseModel):
     budget: Budget = Budget()
     thresholds: Thresholds = Thresholds()
     deep: Deep = Deep()
+    usage: Usage = Usage()
     ack: list[Ack] = Field(default_factory=list)
     queries: list[Query] = Field(default_factory=list)
 

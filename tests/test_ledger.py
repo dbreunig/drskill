@@ -204,3 +204,10 @@ def test_queries_do_not_merge_across_scopes(tmp_path):
     (home / ".drskill.toml").write_text('[[queries]]\nquery = "global only"\n')
     cfg = load_effective_config(proj, home, global_mode=False)
     assert cfg.queries == []
+
+
+def test_usage_block_default_and_override(tmp_path):
+    p = tmp_path / "drskill.toml"
+    assert load_config(p).usage.unused_days == 90
+    p.write_text("[usage]\nunused_days = 30\n")
+    assert load_config(p).usage.unused_days == 30
