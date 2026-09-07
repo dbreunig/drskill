@@ -82,7 +82,11 @@ def run_scan(
     world.lockfile = load_lockfile(project_root)
     if world.lockfile:
         for c in world.contributors.values():
-            if c.source.kind in ("unmanaged", "linked") and c.name in world.lockfile:
+            if (
+                c.kind == "skill"
+                and c.source.kind in ("unmanaged", "linked")
+                and c.name in world.lockfile
+            ):
                 entry = world.lockfile[c.name]
                 world.contributors[c.id] = c.model_copy(
                     update={

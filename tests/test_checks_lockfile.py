@@ -141,6 +141,24 @@ def test_lockfile_skill_path_lands_in_provenance(tmp_path):
     assert c.source.path == "skills/pinned"
 
 
+def test_lockfile_provenance_loop_skips_commands(tmp_path):
+    # A command file whose stem happens to match a locked skill's name must
+    # not pick up skill provenance (and skill-flavored `npx skills` fix
+    # commands); the lockfile only ever pins skills.
+    proj, home = tmp_path / "p", tmp_path / "h"
+    home.mkdir()
+    cmd = proj / ".claude" / "commands" / "pinned.md"
+    cmd.parent.mkdir(parents=True)
+    cmd.write_text("Deploy the app.\n")
+    (proj / "skills-lock.json").write_text(
+        json.dumps({"skills": {"pinned": {"hash": "sha256-does-not-matter"}}})
+    )
+    world, _findings = run_scan(proj, home, harness="claude-code")
+    c = next(c for c in world.contributors.values() if c.name == "pinned")
+    assert c.kind == "command"
+    assert c.source.kind == "unmanaged"
+
+
 def test_lockfile_root_skill_path_is_empty_string(tmp_path):
     import json as _json
     proj, home = tmp_path / "p", tmp_path / "h"
