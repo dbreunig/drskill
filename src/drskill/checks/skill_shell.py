@@ -75,6 +75,28 @@ def _skillmd(c: Contributor) -> injection.Source | None:
     return next((s for s in injection.scan_view(c) if s.kind == "skillmd"), None)
 
 
+def _explained_by_other_contributor(
+    world: World, c: Contributor, prior_fps: set[str]
+) -> bool:
+    """True when some OTHER contributor sharing c's name has a current
+    command set whose fingerprint matches one of the prior acks. A
+    name-matching ack is only demonstrably about that other contributor,
+    not c, when its current commands account for the exact fingerprint —
+    so c itself has simply never been reviewed, not changed."""
+    for other in world.contributors.values():
+        if other.id == c.id or other.name != c.name:
+            continue
+        other_src = _skillmd(other)
+        if other_src is None:
+            continue
+        other_cmds = extract_commands(other_src.text)
+        if not other_cmds:
+            continue
+        if unreviewed_fingerprint(other, other_cmds) in prior_fps:
+            return True
+    return False
+
+
 def shell_dir(project_root: Path, home: Path, global_mode: bool) -> Path:
     base = home if global_mode else project_root
     return base / ".drskill" / "cache" / "skill-shell"
@@ -154,14 +176,18 @@ def shell_unreviewed(world: World, config: Config) -> list[Finding]:
             a for a in config.ack
             if a.check == "injection-shell-unreviewed" and c.name in a.skills
         ]
+        prior_fps = {a.fingerprint for a in prior}
         # A prior ack is matched by bare name, so a command sharing a
         # skill's name can name-match an ack that was never about it. Only
-        # treat that as a rug-pull when THIS contributor actually has a
-        # recorded baseline; otherwise it is first sight, not a change.
+        # suppress the rug-pull when that ack is demonstrably explained by
+        # another same-named contributor's current commands; a mismatch
+        # with no such explanation is a real rug-pull, including the
+        # cross-machine case (ack recorded on one machine, no local
+        # baseline file on this one).
         changed = (
             bool(prior)
-            and fp not in {a.fingerprint for a in prior}
-            and world.shell_approved.get(c.id) is not None
+            and fp not in prior_fps
+            and not _explained_by_other_contributor(world, c, prior_fps)
         )
         n = len(cmds)
         # The approval surface: every command, no cap. You cannot approve
