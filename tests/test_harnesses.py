@@ -95,12 +95,16 @@ def test_core_six_present():
 
 def test_vendored_entries_are_unverified_by_default():
     hs = load_harnesses()
+    # The verified-core allowlist: entries proven against the harness's own source or by
+    # probing it. Everything else stays best-effort (seeded from vercel-labs/skills).
     core = {
         "claude-code",
         "cline",
         "cursor",
         "codex",
         "copilot",
+        "dsh",
+        "dsh-desktop-app",
         "gemini-cli",
         "opencode",
         "pi",
@@ -137,3 +141,46 @@ def test_command_paths_default_empty():
     h = next(h for h in load_harnesses() if h.id == "codex")
     assert h.command_project_paths == []
     assert h.command_global_paths == []
+
+
+def test_dsh_rules_match_probes():
+    """Pins the 2026-10-14 empirical results (DeepSeek Harness 0.2.0).
+
+    The CLI has no skill-enumeration verb, so the engine itself was the probe: a
+    fixture tree with one uniquely-marked skill per candidate root, booted with
+    `dsh --profile headless --json` under a fixture DSH_HOME and DSH_AGENTS_HOME,
+    and the model's answer names what the catalog holds. Five runs, identical.
+
+    All four roots are read; discovery is ONE level only (a *.md file directly in
+    a root is a skill, anything two or three levels down is not); collisions are
+    deterministic and rank-ordered (100 project .dsh/skills < 200 project
+    .agents/skills < 400 user .dsh/skills < 500 user .agents/skills).
+    """
+    dsh = get(load_harnesses(), "dsh")
+    assert dsh.paths_verified and dsh.precedence_verified
+    assert dsh.search_order == "project-first"
+    assert not dsh.recursive
+    assert dsh.project_paths == [".dsh/skills", ".agents/skills"]
+    assert dsh.global_paths == ["~/.dsh/skills", "~/.agents/skills"]
+    assert set(dsh.root_md_paths) == set(dsh.project_paths + dsh.global_paths)
+
+    app = get(load_harnesses(), "dsh-desktop-app")
+    assert app.paths_verified and app.precedence_verified
+    assert app.search_order == "project-first"
+    assert not app.recursive
+    assert app.project_paths == [".dsh/skills", ".agents/skills"]
+    # The app keeps its own DSH_HOME but shares the machine's ~/.agents/skills.
+    assert app.global_paths == ["AppData/Roaming/dsh-desktop/harness/skills", "~/.agents/skills"]
+
+
+def test_dsh_detect_markers(tmp_path):
+    proj, home = tmp_path / "proj", tmp_path / "home"
+    home.mkdir()
+    ids = {h.id for h in detect_harnesses(proj, home)}
+    assert "dsh" not in ids  # nothing installed yet
+    (proj / ".dsh").mkdir(parents=True)
+    ids = {h.id for h in detect_harnesses(proj, home)}
+    assert "dsh" in ids
+    (home / "AppData" / "Roaming" / "dsh-desktop" / "harness").mkdir(parents=True)
+    ids = {h.id for h in detect_harnesses(proj, home)}
+    assert {"dsh", "dsh-desktop-app"} <= ids
