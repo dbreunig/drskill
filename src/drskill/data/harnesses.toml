@@ -1058,3 +1058,63 @@ display_name = "Claude Desktop"
 detect = ["~/Library/Application Support/Claude/claude_desktop_config.json"]
 mcp_global_configs = ["~/Library/Application Support/Claude/claude_desktop_config.json"]
 mcp_verified = true
+
+# DeepSeek Harness. Paths are taken from the provider source
+# @deepseek-ai/dsh-skill-filesystem/lib/index.js (0.2.0, build of 2026-10-08):
+#   join(projectRoot, ".dsh/skills")      line 155
+#   join(projectRoot, ".agents/skills")   line 160
+#   join(this.dshHome, "skills")          line 172   (DSH_HOME = ~/.dsh)
+#   join(this.agentsHome, "skills")       line 177   (DSH_AGENTS_HOME, else ~/.agents)
+#
+# Verified 2026-10-14 by probing the booted engine, because the CLI has no skill-enumeration
+# verb: a fixture tree carrying one uniquely-marked skill per candidate root was booted with
+# `dsh --profile headless --json <question>` under DSH_HOME/DSH_AGENTS_HOME pointed at the
+# fixture, and the answer names the skills the catalog holds. Five runs, identical:
+#   roots       all four came back (project .dsh/skills, project .agents/skills,
+#               $DSH_HOME/skills, $DSH_AGENTS_HOME/skills).
+#   recursion   NOT recursive - marked skills two and three levels below a root never
+#               appeared. discoverRoot() (line 581) lists a root's immediate entries only:
+#               a directory becomes a skill through <dir>/SKILL.md, a *.md file directly in
+#               the root is a skill by itself (line 589). The watcher agrees - its
+#               isPotentialSkillPath (line 552) accepts relative depth <= 2.
+#   precedence  deterministic and rank-ordered in every run: project .dsh/skills beat
+#               global .dsh/skills (100 < 400), project .dsh/skills beat project
+#               .agents/skills (100 < 200), global .dsh/skills beat global .agents/skills
+#               (400 < 500). No flapping - unlike opencode, where the same fixture method
+#               produced a race.
+# The user-dsh root alone declares skipSystem (line 175), so a `.system` subdirectory there
+# is not a skill; the schema has no field for that and no live root carries one.
+# Not covered: the custom root - `customSkillDirs` in the live config, an absolute path
+# built from require.resolve('@deepseek-ai/dsh-agent-preset/package.json') - and the bundled
+# root. drskill's schema has no field for a configured absolute root.
+[[harness]]
+id = "dsh"
+display_name = "DeepSeek Harness"
+paths_verified = true
+precedence_verified = true
+detect = [".dsh", "~/.dsh"]
+project_paths = [".dsh/skills", ".agents/skills"]
+global_paths = ["~/.dsh/skills", "~/.agents/skills"]
+search_order = "project-first"
+recursive = false
+root_md_paths = [".dsh/skills", ".agents/skills", "~/.dsh/skills", "~/.agents/skills"]
+
+# The DSH Desktop app is a SEPARATE harness, not a second path of the first: it keeps its
+# own DSH_HOME (%APPDATA%\dsh-desktop\harness), its own profile and its own sessions, and
+# the two homes never load into one context. Declared as one harness they reported a false
+# double-load for each of the 18 skills - measured 2026-10-14.
+#
+# Same engine, same discovery rules as above (the app runs the same dsh-skill-filesystem
+# build). It also reads the shared ~/.agents/skills: a session inside the app lists those
+# four skills, so that tree is named here too.
+[[harness]]
+id = "dsh-desktop-app"
+display_name = "DSH Desktop (second home)"
+paths_verified = true
+precedence_verified = true
+detect = ["~/AppData/Roaming/dsh-desktop/harness"]
+project_paths = [".dsh/skills", ".agents/skills"]
+global_paths = ["AppData/Roaming/dsh-desktop/harness/skills", "~/.agents/skills"]
+search_order = "project-first"
+recursive = false
+root_md_paths = [".dsh/skills", ".agents/skills", "AppData/Roaming/dsh-desktop/harness/skills", "~/.agents/skills"]
